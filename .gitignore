@@ -1,0 +1,23 @@
+/docs
+
+# --- Xcode / xcodegen ---
+# NovelReader.xcodeproj is generated from project.yml via `make generate` — not committed.
+NovelReader.xcodeproj/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
+# --- Build output ---
+build/
+
+# --- macOS ---
+.DS_Store
+
+# --- Editors ---
+.vscode/
+.idea/
+.env
+*.log
+
+# --- App Store screenshots (regenerate with `make screenshots`) ---
+screenshots/
