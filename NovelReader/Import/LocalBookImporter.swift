@@ -210,8 +210,13 @@ struct LocalBookImporter {
     /// twice must land on the same book, so that re-importing after a storage
     /// cleanup restores the text under the reading position the user already
     /// has instead of adding a duplicate beside it.
+    ///
+    /// The whole digest, not a prefix. It is the primary key for every imported
+    /// book on the device and it goes in a file path — both places where a
+    /// collision means one book quietly serving another book's text — and the
+    /// only thing a truncation buys is a shorter string nobody reads.
     private static func identifier(for data: Data) -> String {
-        SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
+        SHA512.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func partTitle(_ number: Int) -> String {

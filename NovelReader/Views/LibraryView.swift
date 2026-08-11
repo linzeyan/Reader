@@ -14,6 +14,9 @@ struct LibraryView: View {
     @State private var importProgress: Double?
     @State private var renaming: Book?
     @State private var draftName = ""
+    /// The imported book a swipe is about to destroy. Only imported books get
+    /// asked about, because only they have nowhere to come back from.
+    @State private var confirmingLocalDelete: Book?
 
     var body: some View {
         NavigationStack {
@@ -120,7 +123,14 @@ struct LibraryView: View {
                         .accessibilityIdentifier("library.book")
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
-                                env.removeBookmark(book)
+                                // A bookmark can be recreated and its chapters
+                                // downloaded again; an imported file cannot. The
+                                // ask is only for the case that is unrecoverable.
+                                if book.isLocal {
+                                    confirmingLocalDelete = book
+                                } else {
+                                    env.removeBookmark(book)
+                                }
                             } label: {
                                 Label("common.delete", systemImage: "trash")
                             }
@@ -138,6 +148,20 @@ struct LibraryView: View {
         }
         .listStyle(.insetGrouped)
         .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
+        .confirmationDialog(
+            "local.delete.confirm",
+            isPresented: Binding(
+                get: { confirmingLocalDelete != nil },
+                set: { if !$0 { confirmingLocalDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("common.delete", role: .destructive) {
+                if let book = confirmingLocalDelete { env.removeBookmark(book) }
+                confirmingLocalDelete = nil
+            }
+            Button("common.cancel", role: .cancel) { confirmingLocalDelete = nil }
+        }
     }
 
     private var emptyState: some View {

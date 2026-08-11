@@ -4032,6 +4032,30 @@
           }
         }
       }
+    },
+    "local.delete.confirm": {
+      "comment": "Confirmation before destroying the only copy of an imported book.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An imported book is gone for good — the app has nowhere to fetch it from again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入的书删掉就没有了，App 无法重新下载本机文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "匯入的書刪掉就沒有了，App 無法重新下載本機檔案。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

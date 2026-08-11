@@ -207,6 +207,9 @@ struct StorageView: View {
     @State private var total: Int64 = 0
     @State private var cacheBytes: Int64 = 0
     @State private var confirmingEverything = false
+    /// Set when the delete about to happen cannot be undone by downloading again —
+    /// an imported book, or the whole imported shelf.
+    @State private var confirmingLocalScope: DownloadStore.Scope?
 
     var body: some View {
         List {
@@ -235,16 +238,20 @@ struct StorageView: View {
                         LabeledContent(book.shownName, value: Self.format(bookSizes[book.id] ?? 0))
                             .swipeActions {
                                 Button(role: .destructive) {
-                                    try? env.downloads.delete(.book(book))
-                                    measure()
+                                    // For a site book this reclaims space and the
+                                    // chapters can be fetched again. For an
+                                    // imported one it is the only copy.
+                                    delete(.book(book), reversible: !book.isLocal)
                                 } label: {
                                     Label("common.delete", systemImage: "trash")
                                 }
                             }
                     }
                     Button("storage.deleteSite", role: .destructive) {
-                        try? env.downloads.delete(.site(siteId: group.siteId))
-                        measure()
+                        delete(
+                            .site(siteId: group.siteId),
+                            reversible: group.siteId != Book.localSiteId
+                        )
                     }
                     .disabled((siteSizes[group.siteId] ?? 0) == 0)
                 } header: {
@@ -269,7 +276,37 @@ struct StorageView: View {
             }
             Button("common.cancel", role: .cancel) {}
         }
+        .confirmationDialog(
+            "local.delete.confirm",
+            isPresented: Binding(
+                get: { confirmingLocalScope != nil },
+                set: { if !$0 { confirmingLocalScope = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("common.delete", role: .destructive) {
+                if let scope = confirmingLocalScope { apply(scope) }
+                confirmingLocalScope = nil
+            }
+            Button("common.cancel", role: .cancel) { confirmingLocalScope = nil }
+        }
         .task { measure() }
+    }
+
+    /// Deletes at once when the bytes can be fetched again, and asks first when
+    /// they cannot. Reclaiming space is routine; destroying the only copy of a
+    /// file the user imported is not, and a swipe is too cheap a gesture for it.
+    private func delete(_ scope: DownloadStore.Scope, reversible: Bool) {
+        if reversible {
+            apply(scope)
+        } else {
+            confirmingLocalScope = scope
+        }
+    }
+
+    private func apply(_ scope: DownloadStore.Scope) {
+        try? env.downloads.delete(scope)
+        measure()
     }
 
     /// Sizes come from walking the files rather than from a stored total: the

@@ -82,21 +82,30 @@ final class TextBookParserTests: XCTestCase {
     }
 
     /// An ordinary paragraph that happens to open like a heading must not cut the
-    /// book in half. A long line is caught by the length cap; a short one that
-    /// ends mid-sentence is caught by its punctuation, which is the case the cap
-    /// alone would let through.
-    func testLinesThatOnlyLookLikeHeadingsStayProse() {
+    /// book in half. The length cap is the whole guard: prose that references a
+    /// chapter runs on, headings stop.
+    func testALongLineThatOnlyLooksLikeAHeadingStaysProse() {
         let long = "第三章的內容其實是後來才補寫的，作者在後記裡提過這件事，說是為了補上一段回憶。"
-        let short = "第二回他就懂了。"
         let chapters = TextBookParser.chapters(from: """
         第一章 下山
         雪停了。
         \(long)
-        \(short)
         """)
 
         XCTAssertEqual(chapters.count, 1)
-        XCTAssertEqual(chapters[0].paragraphs, ["雪停了。", long, short])
+        XCTAssertEqual(chapters[0].paragraphs, ["雪停了。", long])
+    }
+
+    /// Punctuation must not disqualify a heading — including at the end of the
+    /// line. Titles routinely carry it, and refusing them to protect against a
+    /// short prose line that opens with a chapter reference would drop headings
+    /// people actually write to guard against ones they rarely do. That trade is
+    /// deliberate: under the cap, a line like "第二回他就懂了。" does become a break.
+    func testAHeadingKeepsItsPunctuation() {
+        let chapters = TextBookParser.chapters(from: "第一章 上京：雪夜。\n雪停了。")
+
+        XCTAssertEqual(chapters.map(\.title), ["第一章 上京：雪夜。"])
+        XCTAssertEqual(chapters.first?.paragraphs, ["雪停了。"])
     }
 
     /// A file whose headings we cannot find must not become one enormous chapter:

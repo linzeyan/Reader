@@ -128,24 +128,23 @@ enum TextBookParser {
         )
         """
 
-    /// A heading is a short line, ending in no sentence punctuation, that starts
-    /// like one.
+    /// A heading is a single short line that starts like one.
     ///
-    /// Both extra conditions exist to keep a paragraph *opening* with
-    /// "第三章的內容其實是……" from being promoted into a chapter break, which would
-    /// cut a chapter in half at an arbitrary line. Neither is sufficient alone: a
-    /// heading can legitimately run long, and prose can legitimately be short.
-    /// A heading never ends mid-sentence, though, which is the sharper of the two
-    /// signals — the length cap is the backstop for a line with no punctuation at
-    /// all.
+    /// Punctuation is allowed to appear anywhere, including at the end: real
+    /// headings carry it ("第一章 上京：雪夜"), and rejecting a trailing 。／！ to
+    /// protect against a paragraph *opening* with "第三章的內容其實是……" bought that
+    /// protection by silently dropping headings people actually write. The length
+    /// cap alone draws the line: a 30-character ceiling is roomy for a title and
+    /// short for prose. The cost is accepted and stated — a body line that begins
+    /// with a chapter reference and stays under the cap becomes a chapter break.
+    ///
+    /// Lines are what the splitter iterates over, so "single line" is structural
+    /// rather than checked: a heading cannot span a newline because a newline is
+    /// what ended it.
     private static func isHeading(_ line: String, _ regex: NSRegularExpression?) -> Bool {
-        guard let regex, line.count <= 30, let last = line.last, !sentenceEndings.contains(last) else {
-            return false
-        }
+        guard let regex, line.count <= 30 else { return false }
         return regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
     }
-
-    private static let sentenceEndings: Set<Character> = ["。", "，", "、", "；", "：", "！", "？", "…"]
 
     /// Cuts at paragraph boundaries, never mid-sentence: a part that starts
     /// half-way through a line is worse than one that runs slightly long.
