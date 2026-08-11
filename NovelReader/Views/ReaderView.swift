@@ -1,11 +1,12 @@
 import SwiftUI
 
-/// The reader: one continuous scroll across chapter boundaries.
+/// The reader. Two renderers over one position model.
 ///
-/// v1 is deliberately scroll-based rather than paginated. Pagination needs
-/// TextKit 2 layout to be correct across type sizes and is planned for v2; a
-/// scroll view gets the reading experience right today, and the progress model
-/// (chapter + paragraph) converts cleanly to page positions later.
+/// Scrolling is one continuous column across chapter boundaries; paginated reading
+/// (`PaginatedChapterView`) lays a chapter out with TextKit 2 and turns pages. The
+/// choice is `ReaderSettings.mode`, and both write the same `ReadingPosition`, so a
+/// reader can switch mid-chapter — or bookmark in one mode and jump to it in the
+/// other — and land in the same place.
 ///
 /// All controls sit at the bottom of the screen: the app is meant to be usable
 /// with one hand, and the top third of a modern iPhone is out of thumb reach.
@@ -22,6 +23,10 @@ struct ReaderView: View {
     @State private var showCatalog = false
     @State private var showSettings = false
     @State private var settings = ReaderSettings.shared
+    /// The chapter a backwards page turn walked into, which has to open on its last
+    /// page. Held as a chapter id rather than a flag so that a later jump to the same
+    /// chapter from the catalog still opens at its start.
+    @State private var openAtLastPage: String?
 
     var body: some View {
         ZStack {
@@ -33,7 +38,10 @@ struct ReaderView: View {
             }
         }
         .navigationBarBackButtonHidden()
-        .toolbar(showControls ? .visible : .hidden, for: .navigationBar)
+        // Never in paginated mode, even with the controls up: showing the navigation
+        // bar changes the safe area, and a changed text area means re-measuring the
+        // page breaks. The bottom control bar already carries everything the bar did.
+        .toolbar(showControls && settings.mode == .scroll ? .visible : .hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(!showControls)
         .preferredColorScheme(settings.theme.colorScheme)
@@ -53,6 +61,13 @@ struct ReaderView: View {
             model = created
             await created.start(at: position)
         }
+        // Switching to the scrolling renderer builds a fresh scroll view, which starts
+        // at the top of whatever is loaded. Re-aiming it happens on the next runloop
+        // turn, once that scroll view exists to receive the target.
+        .onChange(of: settings.mode) { _, mode in
+            guard mode == .scroll else { return }
+            Task { model?.retarget() }
+        }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -62,7 +77,15 @@ struct ReaderView: View {
 
     // MARK: - Text
 
+    @ViewBuilder
     private func content(_ model: ReaderModel) -> some View {
+        switch settings.mode {
+        case .scroll: scrollingText(model)
+        case .paginated: pagedText(model)
+        }
+    }
+
+    private func scrollingText(_ model: ReaderModel) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -86,6 +109,50 @@ struct ReaderView: View {
                 model.scrollTarget = nil
             }
         }
+    }
+
+    /// The paginated renderer, and the plumbing that keeps it inside the existing
+    /// chapter machinery: turning off either end is a `ReaderModel.jump`, which is the
+    /// same call the catalog and the chapter buttons make, so read-ahead and progress
+    /// need no second implementation.
+    @ViewBuilder
+    private func pagedText(_ model: ReaderModel) -> some View {
+        if let current = model.currentLoadedChapter {
+            PaginatedChapterView(
+                title: current.chapter.title,
+                paragraphs: current.paragraphs,
+                chapterKey: current.chapter.id,
+                settings: settings,
+                landing: openAtLastPage == current.chapter.id
+                    ? .lastPage : .anchor(model.currentAnchor),
+                onAnchorChange: { anchor in
+                    openAtLastPage = nil
+                    model.notePage(chapterIndex: current.chapter.index, anchor: anchor)
+                },
+                onTapCenter: { showControls.toggle() },
+                onTurnPast: { edge in turnChapter(past: edge, model: model) }
+            )
+        } else if model.isLoading {
+            ProgressView()
+        } else if let error = model.error {
+            VStack(spacing: 10) {
+                Text(error).font(.footnote).foregroundStyle(.secondary)
+                Button("reader.retry") { Task { await model.jump(to: model.currentPosition) } }
+                    .buttonStyle(.bordered)
+            }
+        } else {
+            Text("reader.end").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    /// A page turn that ran off the end of a chapter continues into the next one, and
+    /// off the start into the end of the previous one — the paginated equivalent of the
+    /// scrolling reader's text simply carrying on.
+    private func turnChapter(past edge: PageEdge, model: ReaderModel) {
+        let target = model.currentChapterIndex + (edge == .end ? 1 : -1)
+        guard model.chapters.indices.contains(target) else { return }
+        openAtLastPage = edge == .start ? model.chapters[target].id : nil
+        Task { await model.jump(to: .chapterStart(target)) }
     }
 
     private func chapterBlock(_ item: ReaderModel.LoadedChapter, model: ReaderModel) -> some View {
@@ -244,6 +311,13 @@ final class ReaderModel {
     var hasMore: Bool {
         guard let last = loaded.last else { return false }
         return last.chapter.index < chapters.count - 1
+    }
+
+    /// The chapter the reader is in, which the paginated renderer draws one page of.
+    /// Looked up by index rather than taken as `loaded.first`, because switching over
+    /// from the scrolling reader can leave several chapters loaded.
+    var currentLoadedChapter: LoadedChapter? {
+        loaded.first { $0.chapter.index == currentChapterIndex }
     }
 
     var currentPosition: ReadingPosition {
@@ -422,11 +496,37 @@ final class ReaderModel {
         currentAnchor = TextAnchor(paragraph: paragraph, characterOffset: 0)
     }
 
+    /// Records the page the paginated reader settled on.
+    ///
+    /// Separate from `note` because a page is authoritative: the renderer says where it
+    /// landed, once, so there is no cascade of appearing paragraphs to filter and the
+    /// `restoring` guard would only get in the way. This is also the one path that can
+    /// record a real `characterOffset` — a page knows which character it opens on.
+    func notePage(chapterIndex: Int, anchor: TextAnchor) {
+        restoring = nil
+        currentChapterIndex = chapterIndex
+        currentAnchor = anchor
+    }
+
+    /// Re-aims the scrolling reader at the current position without re-fetching.
+    ///
+    /// Used when the renderer changes under a chapter that is already in memory: a
+    /// chapter read online is held nowhere else, so going through `jump` would spend a
+    /// network round trip to show text the app is already holding.
+    func retarget() {
+        guard let current = currentLoadedChapter else { return }
+        restoring = currentAnchor.paragraph > 0 ? currentAnchor : nil
+        scrollTarget = currentAnchor.scrollID(chapterId: current.chapter.id)
+    }
+
     /// Written on chapter change and on leaving the reader rather than on every
     /// paragraph: the position only matters when reading stops.
     func persistProgress() {
         guard !loaded.isEmpty else { return }
-        guard persistedIndex != currentChapterIndex || currentAnchor.paragraph > 0 else { return }
+        // Compared against the start of the chapter rather than against paragraph 0:
+        // the paginated reader can move within the first paragraph, and that is still
+        // a position worth keeping.
+        guard persistedIndex != currentChapterIndex || currentAnchor != .start else { return }
         persistedIndex = currentChapterIndex
         env.recordProgress(book: book, position: currentPosition)
     }
@@ -458,8 +558,7 @@ final class ReaderModel {
     /// of a chapter read online is held in memory only, so by the time the list
     /// appears there may be nothing left to quote.
     private func currentExcerpt() -> String? {
-        guard let chapter = loaded.first(where: { $0.chapter.index == currentChapterIndex })
-        else { return nil }
+        guard let chapter = currentLoadedChapter else { return nil }
         return currentAnchor.excerpt(in: chapter.paragraphs)
     }
 }
