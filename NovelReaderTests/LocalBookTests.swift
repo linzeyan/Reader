@@ -139,6 +139,81 @@ final class LocalBookImportTests: XCTestCase {
         )
     }
 
+    /// The point of cancelling: nothing is left behind.
+    ///
+    /// A book that stayed on the shelf holding its first few chapters is worse than
+    /// an import that failed outright — the row looks finished, so the reader finds
+    /// out by running off the end of the text. Both halves are asserted, the row and
+    /// the files, because they are stored in two places that can disagree.
+    func testCancellingAnImportLeavesNoBookAndNoFiles() async throws {
+        let file = try write("cancel.txt", text: (1...200).map { "第\($0)章\n內容\($0)。" }
+            .joined(separator: "\n"))
+        let importer = LocalBookImporter(repo: repo, downloads: downloads, fetcher: WebFetcher())
+        let canceller = Canceller()
+
+        // Cancelled from the progress callback, which is the only way to land the
+        // cancel *while chapters are being written* rather than racing the whole
+        // import. The first callback arrives once chapter one is already on disk, so
+        // the rollback always has something real to undo.
+        canceller.task = Task {
+            try await importer.importBook(from: file) { _ in
+                canceller.reports += 1
+                canceller.cancel()
+            }
+        }
+
+        do {
+            _ = try await canceller.task?.value
+            XCTFail("a cancelled import must not return a book")
+        } catch is CancellationError {
+            // Expected, and it must be this error and not a generic failure: the
+            // library banner tells the two apart.
+        }
+
+        XCTAssertGreaterThan(
+            canceller.reports, 0, "the cancel has to land mid-write to prove anything"
+        )
+        XCTAssertTrue(try repo.allBooks().isEmpty, "no half-imported book may stay on the shelf")
+        // Scoped to the imported-books subtree rather than `.everything`, because
+        // this test's chapter store and the file it imported share a directory.
+        XCTAssertEqual(
+            downloads.size(of: .site(siteId: Book.localSiteId)), 0,
+            "the chapters written before the cancel have to go with it"
+        )
+    }
+
+    /// Cancelling a re-import is the one case where the book must survive.
+    ///
+    /// The row, the custom name and the reading position predate this import and
+    /// belong to the user; deleting them would punish someone for changing their
+    /// mind about restoring text they had already read. What must not survive is the
+    /// claim that the text is on disk.
+    func testCancellingAReimportKeepsTheBookAndItsReadingPosition() async throws {
+        let file = try write("reimport.txt", text: (1...200).map { "第\($0)章\n內容\($0)。" }
+            .joined(separator: "\n"))
+        let importer = LocalBookImporter(repo: repo, downloads: downloads, fetcher: WebFetcher())
+        let first = try await importer.importBook(from: file) { _ in }
+        try repo.updateProgress(bookId: first.id, chapterIndex: 7, offset: 42)
+
+        let canceller = Canceller()
+        canceller.task = Task {
+            try await importer.importBook(from: file) { _ in canceller.cancel() }
+        }
+        do {
+            _ = try await canceller.task?.value
+            XCTFail("a cancelled import must not return a book")
+        } catch is CancellationError {}
+
+        let books = try repo.allBooks()
+        XCTAssertEqual(books.map(\.id), [first.id], "the book was already the user's")
+        XCTAssertEqual(books.first?.lastReadChapterIndex, 7, "the reading position must survive")
+        XCTAssertEqual(
+            try downloads.downloadedCount(bookId: first.id), 0,
+            "no chapter may still claim to be on disk after the rollback"
+        )
+        XCTAssertEqual(downloads.size(of: .book(first)), 0)
+    }
+
     func testUnreadableFileIsReported() async {
         let missing = tempRoot.appendingPathComponent("nope.txt")
         let importer = LocalBookImporter(repo: repo, downloads: downloads, fetcher: WebFetcher())
@@ -218,6 +293,20 @@ final class LocalBookImportTests: XCTestCase {
     /// Collects the progress callbacks, which arrive on the main actor.
     private final class Reported {
         var values: [Double] = []
+    }
+
+    /// Holds the import's own task so the progress callback can cancel the very
+    /// import that is reporting to it. Without that circle, "cancel after the third
+    /// chapter" can only be approximated with a sleep, and a timing-dependent test
+    /// of a cancellation path is worse than none.
+    @MainActor
+    private final class Canceller {
+        var task: Task<Book, any Error>?
+        /// How many progress callbacks arrived, which is how the test knows the
+        /// cancel landed after real work rather than before any.
+        var reports = 0
+
+        func cancel() { task?.cancel() }
     }
 }
 

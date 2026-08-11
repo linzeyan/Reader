@@ -24,6 +24,7 @@ final class AppEnvironment {
     let cloud: CloudSync
     let monitor: NetworkMonitor
     let downloadSettings: DownloadSettings
+    let librarySettings: LibrarySettings
     let localImporter: LocalBookImporter
 
     /// The library, kept here so every screen sees the same list without each one
@@ -49,6 +50,10 @@ final class AppEnvironment {
     private var resumeWhenActive = false
     /// The background time bought to finish the chapter in flight. At most one.
     private var backgroundAssertion: UIBackgroundTaskIdentifier = .invalid
+    /// The import in flight, held so the progress banner's cancel button has
+    /// something to pull. At most one: both toolbar buttons are disabled while an
+    /// import runs, and the file picker cannot be reopened.
+    private var importTask: Task<Book, any Error>?
 
     init(
         database: AppDatabase,
@@ -76,6 +81,7 @@ final class AppEnvironment {
         let monitor = NetworkMonitor()
         self.monitor = monitor
         self.downloadSettings = DownloadSettings()
+        self.librarySettings = LibrarySettings()
         self.cloud.onRemoteChange = { [weak self] in self?.reloadLibrary() }
         monitor.onChange = { [weak self] _ in self?.enforceNetworkPolicy() }
         reloadLibrary()
@@ -129,14 +135,33 @@ final class AppEnvironment {
     /// Imported books land in that same trailing group, because no rule will ever
     /// match `Book.localSiteId` — but they are not orphans, so the name comes from
     /// `SiteStore.name(ofSite:)`, which knows the one source that has no file.
-    var booksBySite: [(siteId: String, name: String, books: [Book])] {
+    var booksBySite: [LibrarySource] {
         let grouped = Dictionary(grouping: books, by: \.siteId)
-        let known = sites.rules.compactMap { rule -> (String, String, [Book])? in
+        let known = sites.rules.compactMap { rule -> LibrarySource? in
             guard let group = grouped[rule.id], !group.isEmpty else { return nil }
-            return (rule.id, rule.name, group)
+            return LibrarySource(siteId: rule.id, name: rule.name, books: group)
         }
         let orphanIds = grouped.keys.filter { id in !sites.rules.contains { $0.id == id } }.sorted()
-        return known + orphanIds.map { ($0, sites.name(ofSite: $0), grouped[$0] ?? []) }
+        return known + orphanIds.map {
+            LibrarySource(siteId: $0, name: sites.name(ofSite: $0), books: grouped[$0] ?? [])
+        }
+    }
+
+    /// The shelf exactly as the library draws it: `booksBySite` put through the
+    /// reader's sort, grouping and filter choices.
+    ///
+    /// Computed rather than stored so it cannot go stale against either input —
+    /// the books reload on every mutation and the settings change from a menu, and
+    /// a cached arrangement would need to observe both. Grouping a few dozen books
+    /// is nothing next to drawing them.
+    var shelf: [LibrarySection] {
+        LibraryShelf.sections(
+            from: booksBySite,
+            sort: librarySettings.sort,
+            groupBySource: librarySettings.groupBySource,
+            onlyWithNewChapters: librarySettings.onlyWithNewChapters,
+            newChapterCounts: newChapterCounts
+        )
     }
 
     // MARK: - Mutations that must also reach iCloud
@@ -178,13 +203,41 @@ final class AppEnvironment {
     /// Not pushed to iCloud, unlike every other way a book enters the library —
     /// see `CloudSync.write`. Nothing else here needs to know: the book is
     /// already complete on disk when this returns.
+    ///
+    /// The work is wrapped in a task rather than awaited straight through so that
+    /// `cancelImport` has a handle to pull. The caller's own task is not something
+    /// the progress banner can reach, and the banner is where the cancel button
+    /// has to live — it is the only thing on screen that says an import is running.
     @discardableResult
     func importLocalBook(
         from url: URL, progress: @escaping LocalBookImporter.ProgressHandler
     ) async throws -> Book {
-        let book = try await localImporter.importBook(from: url, progress: progress)
-        reloadLibrary()
-        return book
+        let task = Task { try await localImporter.importBook(from: url, progress: progress) }
+        importTask = task
+        defer {
+            importTask = nil
+            // Reloaded however this ends. A cancelled or failed import rolls its
+            // own partial book back (see `LocalBookImporter`), and the shelf has to
+            // show the result of that rollback, not the state before it.
+            reloadLibrary()
+        }
+        // Cancelling the caller cancels the import too, which is what an
+        // unstructured task otherwise breaks: nothing here should keep writing
+        // chapters for a screen that has gone away.
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    /// Stops the import in flight, if there is one.
+    ///
+    /// Cooperative: the importer notices at its next checkpoint and undoes what it
+    /// has written, so `importLocalBook` throws `CancellationError` rather than
+    /// returning half a book. Callers must not report that as a failure.
+    func cancelImport() {
+        importTask?.cancel()
     }
 
     func rename(_ book: Book, to name: String?) {

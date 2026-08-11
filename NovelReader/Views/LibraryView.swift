@@ -3,9 +3,14 @@ import UniformTypeIdentifiers
 
 /// Requirement 3: bookmarks, grouped per source.
 ///
-/// Grouping is by site rather than one flat list because the same novel is often
-/// bookmarked on two sites (different translations, different update speeds) and
-/// a flat list makes those look like duplicates.
+/// Grouping is by site *by default* rather than one flat list because the same
+/// novel is often bookmarked on two sites (different translations, different
+/// update speeds) and a flat list makes those look like duplicates. Someone who
+/// reads from a single source has no such problem, so the grouping is a toggle.
+///
+/// The arrangement itself is not decided here — `LibraryShelf` sorts, groups and
+/// filters, this view draws the result. That split is what makes the ordering
+/// rules testable without a simulator.
 struct LibraryView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var adding = false
@@ -21,14 +26,29 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             Group {
+                let sections = env.shelf
                 if env.books.isEmpty {
                     emptyState
+                } else if sections.isEmpty {
+                    // Reachable only through the filter, and it has to offer the
+                    // way out: a shelf that looks empty with books on it is the one
+                    // state a persisted filter can leave someone stranded in.
+                    filteredEmptyState
                 } else {
-                    list
+                    list(sections)
                 }
             }
             .navigationTitle("tab.library")
             .toolbar {
+                // Leading, away from the two buttons that add books: those are
+                // actions and this is a view control, and putting it on the same
+                // side would push them around every time an icon changed.
+                //
+                // Hidden on an empty shelf, where there is nothing to arrange and
+                // the two ways to add a book are the only thing worth looking at.
+                if !env.books.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) { arrangeMenu }
+                }
                 // Two buttons rather than one menu: the ways in are not
                 // interchangeable — adding by URL needs an installed rule while
                 // importing a file needs nothing at all — so a fresh install with
@@ -82,19 +102,58 @@ struct LibraryView: View {
         Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
     }
 
+    /// Sort, grouping and filter in one menu.
+    ///
+    /// A menu rather than controls on the shelf itself: all three are set once and
+    /// then left alone for weeks, and a permanent bar above the books would spend
+    /// the top of every screen on decisions nobody revisits.
+    private var arrangeMenu: some View {
+        // `@Environment` hands over the object but no bindings, so the settings are
+        // re-wrapped here — the standard way to bind to an `@Observable` that came
+        // from the environment.
+        @Bindable var settings = env.librarySettings
+        return Menu {
+            Picker("library.sort", selection: $settings.sort) {
+                ForEach(LibrarySort.allCases) { sort in
+                    Text(sort.nameKey).tag(sort)
+                }
+            }
+            .pickerStyle(.inline)
+            Toggle("library.groupBySource", isOn: $settings.groupBySource)
+            Toggle("library.filter.newChapters", isOn: $settings.onlyWithNewChapters)
+        } label: {
+            // The filled icon is the only thing on screen that says the filter is
+            // on, and the filter outlives the launch it was set in.
+            Label(
+                "library.arrange",
+                systemImage: settings.onlyWithNewChapters
+                    ? "line.3.horizontal.decrease.circle.fill"
+                    : "line.3.horizontal.decrease.circle"
+            )
+        }
+        .accessibilityIdentifier("library.arrange")
+    }
+
     /// Determinate, because an import is long enough that a spinner alone would
     /// look stuck: a full-length novel is hundreds of chapter files being written
     /// one at a time.
     @ViewBuilder
     private var importBanner: some View {
         if let importProgress {
-            ProgressView(value: importProgress) { Text("library.import.working") }
-                .font(.footnote)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.bar, in: .rect(cornerRadius: 12))
-                .padding(.horizontal)
-                .transition(.move(edge: .top).combined(with: .opacity))
+            HStack(spacing: 14) {
+                ProgressView(value: importProgress) { Text("library.import.working") }
+                // A cancel button rather than a modal or nothing at all: importing
+                // a large EPUB is a minute of the app doing one thing, and the user
+                // who picked the wrong file should not have to wait it out.
+                Button("common.cancel") { env.cancelImport() }
+                    .accessibilityIdentifier("library.import.cancel")
+            }
+            .font(.footnote)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.bar, in: .rect(cornerRadius: 12))
+            .padding(.horizontal)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -107,42 +166,25 @@ struct LibraryView: View {
         defer { importProgress = nil }
         do {
             try await env.importLocalBook(from: url) { importProgress = $0 }
+        } catch is CancellationError {
+            // Not reported. The user asked for this and the banner going away is
+            // the answer; a red error banner would read as "the import broke".
         } catch {
             env.report(error)
         }
     }
 
-    private var list: some View {
+    private func list(_ sections: [LibrarySection]) -> some View {
         List {
-            ForEach(env.booksBySite, id: \.siteId) { group in
-                Section(group.name) {
-                    ForEach(group.books) { book in
-                        NavigationLink(value: book) {
-                            BookRow(book: book, newChapterCount: env.newChapterCounts[book.id] ?? 0)
-                        }
-                        .accessibilityIdentifier("library.book")
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                // A bookmark can be recreated and its chapters
-                                // downloaded again; an imported file cannot. The
-                                // ask is only for the case that is unrecoverable.
-                                if book.isLocal {
-                                    confirmingLocalDelete = book
-                                } else {
-                                    env.removeBookmark(book)
-                                }
-                            } label: {
-                                Label("common.delete", systemImage: "trash")
-                            }
-                            Button {
-                                draftName = book.displayName ?? ""
-                                renaming = book
-                            } label: {
-                                Label("library.rename", systemImage: "pencil")
-                            }
-                            .tint(.indigo)
-                        }
-                    }
+            ForEach(sections) { section in
+                // Two branches rather than a header that conditionally draws
+                // nothing: an empty header still takes vertical space in an
+                // inset-grouped list, which would leave the flat shelf with a gap
+                // above its first book.
+                if let name = section.name {
+                    Section(name) { rows(section.books) }
+                } else {
+                    Section { rows(section.books) }
                 }
             }
         }
@@ -164,6 +206,37 @@ struct LibraryView: View {
         }
     }
 
+    @ViewBuilder
+    private func rows(_ books: [Book]) -> some View {
+        ForEach(books) { book in
+            NavigationLink(value: book) {
+                BookRow(book: book, newChapterCount: env.newChapterCounts[book.id] ?? 0)
+            }
+            .accessibilityIdentifier("library.book")
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    // A bookmark can be recreated and its chapters downloaded
+                    // again; an imported file cannot. The ask is only for the
+                    // case that is unrecoverable.
+                    if book.isLocal {
+                        confirmingLocalDelete = book
+                    } else {
+                        env.removeBookmark(book)
+                    }
+                } label: {
+                    Label("common.delete", systemImage: "trash")
+                }
+                Button {
+                    draftName = book.displayName ?? ""
+                    renaming = book
+                } label: {
+                    Label("library.rename", systemImage: "pencil")
+                }
+                .tint(.indigo)
+            }
+        }
+    }
+
     private var emptyState: some View {
         ContentUnavailableView {
             Label(
@@ -182,6 +255,20 @@ struct LibraryView: View {
             // book this app can read today, and it is the only such book a fresh
             // install has.
             Button("library.import") { picking = true }.buttonStyle(.bordered)
+        }
+    }
+
+    /// Books exist, the filter is hiding all of them. The button is the point: it
+    /// undoes the one setting that can produce this screen, so nobody has to work
+    /// out that their shelf is filtered rather than lost.
+    private var filteredEmptyState: some View {
+        ContentUnavailableView {
+            Label("library.filter.empty", systemImage: "bell.badge.slash")
+        } actions: {
+            Button("library.filter.clear") {
+                env.librarySettings.onlyWithNewChapters = false
+            }
+            .buttonStyle(.borderedProminent)
         }
     }
 }
