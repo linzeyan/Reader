@@ -62,6 +62,30 @@ extension TextAnchor {
     }
 }
 
+/// A span of one chapter the reader picked out, before it becomes a stored mark.
+///
+/// Carries the quoted text alongside the two anchors because the text is only
+/// available at the moment of selection: a chapter read online is held in memory
+/// only, and the list that has to say *what* was marked cannot go back for it.
+struct TextSelection: Equatable {
+    var start: TextAnchor
+    var end: TextAnchor
+    /// Exactly the characters between the two anchors, separators included.
+    var text: String
+
+    /// Long enough to recognise a passage in a list, short enough that marking half
+    /// a chapter does not put half a chapter in the database. The list is an index
+    /// into the book, not a second copy of it.
+    private static let excerptLimit = 120
+
+    var excerpt: String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count <= Self.excerptLimit
+            ? trimmed
+            : String(trimmed.prefix(Self.excerptLimit)) + "…"
+    }
+}
+
 /// A place in a book: which chapter, and where inside it.
 struct ReadingPosition: Codable, Hashable {
     var chapterIndex: Int
@@ -121,5 +145,93 @@ struct ReadingBookmark: Codable, Identifiable, Hashable, FetchableRecord, Persis
         self.characterOffset = position.anchor.characterOffset
         self.createdAt = createdAt
         self.excerpt = excerpt
+    }
+}
+
+/// A passage the reader drew a line under.
+///
+/// A *pair* of anchors, which is what a bookmark is not: a bookmark says "come back
+/// here", a highlight says "these characters". That is why `TextAnchor` carries a
+/// character offset at all — half of a highlight is meaningless without one.
+///
+/// The anchors are stored flat rather than as two embedded `TextAnchor`s so the two
+/// ends can be ordered in SQL; the list is read back in reading order, and a JSON
+/// blob cannot be sorted by.
+///
+/// Deliberately not synced to iCloud — the reasoning lives in `CloudSync`.
+struct TextHighlight: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "textHighlight"
+
+    /// Derived from the span, not from insert order — see `makeId`.
+    var id: String
+    var bookId: String
+    var chapterIndex: Int
+    var startParagraph: Int
+    var startCharacterOffset: Int
+    var endParagraph: Int
+    var endCharacterOffset: Int
+    var createdAt: Date
+    /// The marked text, captured when the mark was made, so the list can say what was
+    /// marked without opening the chapter. Never optional, unlike a bookmark's
+    /// excerpt: a highlight can only be made out of text that was on screen.
+    var excerpt: String
+
+    var start: TextAnchor {
+        TextAnchor(paragraph: startParagraph, characterOffset: startCharacterOffset)
+    }
+
+    var end: TextAnchor {
+        TextAnchor(paragraph: endParagraph, characterOffset: endCharacterOffset)
+    }
+
+    /// Where a jump from the marks list lands: the start of the passage, which is the
+    /// only end of it the reader is looking for.
+    var position: ReadingPosition {
+        ReadingPosition(chapterIndex: chapterIndex, anchor: start)
+    }
+
+    /// Identity is the span, the same way `ReadingBookmark`'s is its position: drawing
+    /// a line under the same sentence twice has to collapse onto one row, or the
+    /// second tap would stack an invisible duplicate that takes two deletes to remove.
+    static func makeId(bookId: String, chapterIndex: Int, selection: TextSelection) -> String {
+        [
+            bookId, String(chapterIndex),
+            String(selection.start.paragraph), String(selection.start.characterOffset),
+            String(selection.end.paragraph), String(selection.end.characterOffset),
+        ].joined(separator: "|")
+    }
+
+    init(bookId: String, chapterIndex: Int, selection: TextSelection, createdAt: Date) {
+        self.id = Self.makeId(bookId: bookId, chapterIndex: chapterIndex, selection: selection)
+        self.bookId = bookId
+        self.chapterIndex = chapterIndex
+        self.startParagraph = selection.start.paragraph
+        self.startCharacterOffset = selection.start.characterOffset
+        self.endParagraph = selection.end.paragraph
+        self.endCharacterOffset = selection.end.characterOffset
+        self.createdAt = createdAt
+        self.excerpt = selection.excerpt
+    }
+}
+
+extension TextHighlight {
+    /// Which characters of one paragraph this highlight covers, or nil when it does
+    /// not reach that paragraph.
+    ///
+    /// The single place both renderers ask, which is what makes them agree. The
+    /// paginated reader paints bands behind laid-out glyphs and the scrolling reader
+    /// tints a run of an `AttributedString`; they share no drawing code at all, so the
+    /// only way one highlight can look like one passage in both is for both to be
+    /// told the same character ranges.
+    ///
+    /// Clamped against the paragraph it is given rather than trusted: a chapter
+    /// re-fetched from the site can come back with shorter paragraphs, and a range
+    /// past the end of the text would crash the renderer that is handed it.
+    func range(inParagraph index: Int, length: Int) -> NSRange? {
+        guard index >= startParagraph, index <= endParagraph, length > 0 else { return nil }
+        let from = index == startParagraph ? min(max(startCharacterOffset, 0), length) : 0
+        let to = index == endParagraph ? min(max(endCharacterOffset, 0), length) : length
+        guard to > from else { return nil }
+        return NSRange(location: from, length: to - from)
     }
 }

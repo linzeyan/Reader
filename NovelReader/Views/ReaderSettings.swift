@@ -60,6 +60,25 @@ final class ReaderSettings {
             }
         }
 
+        /// The one highlight tint, in the one place both renderers read it from.
+        ///
+        /// One style, not a palette: colours would have to be chosen in the reader,
+        /// stored per highlight and rendered in two engines, and a reader who marks a
+        /// passage wants it marked, not categorised. A warm yellow because that is what
+        /// a marked page looks like everywhere else, over the theme's own background so
+        /// nine surfaces need no nine tints — but a dark surface swallows a translucent
+        /// wash, so it gets less transparency rather than a different hue.
+        var highlight: Color {
+            Color(red: 1.0, green: 0.84, blue: 0.28).opacity(isDark ? 0.34 : 0.44)
+        }
+
+        /// While the finger is still down this is a selection, not a mark, so it reads
+        /// as neutral: the passage turns yellow at the moment the reader commits, which
+        /// is the feedback that says the highlight was actually made.
+        var selection: Color {
+            foreground.opacity(0.24)
+        }
+
         var isDark: Bool {
             switch self {
             case .slate, .night, .black: return true

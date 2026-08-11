@@ -11,14 +11,16 @@ import Foundation
 /// that flag to a device that has no files would make the reader offer chapters
 /// it cannot open. Downloads stay device-local by design.
 ///
-/// **Saved positions (`ReadingBookmark`) are not synced either**, for the same
-/// class of reason. A bookmark names a paragraph inside a chapter as the site rule
-/// on *this* device split it, and rules are installed and derived per device — the
-/// same paragraph index under a different build of a rule is a different sentence.
-/// A reading position that lands a screen off corrects itself as soon as the reader
-/// scrolls; a bookmark that jumps to the wrong sentence is just wrong, with nothing
-/// to correct it. The key budget says the same thing from the other side: this store
-/// is one key per book, and bookmarks per book are unbounded.
+/// **Saved positions (`ReadingBookmark`) and highlights (`TextHighlight`) are not
+/// synced either**, for the same class of reason. Both name a paragraph inside a
+/// chapter as the site rule on *this* device split it, and rules are installed and
+/// derived per device — the same paragraph index under a different build of a rule is a
+/// different sentence. A reading position that lands a screen off corrects itself as
+/// soon as the reader scrolls; a bookmark that jumps to the wrong sentence is just
+/// wrong, with nothing to correct it, and a highlight is worse still — it would come
+/// out of the sync drawn over text nobody chose. The key budget says the same thing
+/// from the other side: this store is one key per book, and marks per book are
+/// unbounded.
 @MainActor
 @Observable
 final class CloudSync {

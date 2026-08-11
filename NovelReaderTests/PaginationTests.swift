@@ -137,7 +137,7 @@ final class PaginationTests: XCTestCase {
         for paragraph in paragraphs.indices {
             let anchor = TextAnchor(paragraph: paragraph, characterOffset: 0)
             let page = paginator.pages[paginator.pageIndex(for: anchor)]
-            let offset = paginator.offset(for: anchor)
+            let offset = paginator.text.offset(for: anchor)
             XCTAssertTrue(
                 page.range.location <= offset && offset < NSMaxRange(page.range),
                 "paragraph \(paragraph) must be visible on the page its anchor opens"
@@ -194,7 +194,7 @@ final class PaginationTests: XCTestCase {
                 paginator(paragraphs: paragraphs, size: landscape),
             ] {
                 let landed = after.pages[after.pageIndex(for: anchor)]
-                let offset = after.offset(for: anchor)
+                let offset = after.text.offset(for: anchor)
                 XCTAssertTrue(
                     landed.range.location <= offset && offset < NSMaxRange(landed.range),
                     "the text the reader was on must still be on the page they land on"

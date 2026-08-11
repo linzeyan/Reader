@@ -152,14 +152,17 @@ struct BookDetailView: View {
 
         // Always present, and with no count on it. A row that appears only once the
         // feature has been used is a feature nobody finds, and a count cached here
-        // would go stale the moment a bookmark is added in the reader pushed on top
+        // would go stale the moment a mark is added in the reader pushed on top
         // of this screen — the list itself is the one place that cannot be wrong.
+        //
+        // One row for both kinds of mark: see `ReadingMarksView` for why they share a
+        // screen rather than growing a row each.
         NavigationLink {
-            BookmarkListView(book: current)
+            ReadingMarksView(book: current)
         } label: {
-            Label("bookmarks.title", systemImage: "bookmark")
+            Label("marks.title", systemImage: "bookmark")
         }
-        .accessibilityIdentifier("book.bookmarks")
+        .accessibilityIdentifier("book.marks")
 
         // One entry point rather than "download all" and "delete all" buttons:
         // both of those live on the management screen now, next to the

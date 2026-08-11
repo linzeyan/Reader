@@ -131,6 +131,49 @@ struct LibraryRepo {
         }
     }
 
+    // MARK: - Highlights
+
+    /// Marks a passage, or hands back the highlight already on it.
+    ///
+    /// Idempotent for the same reason `addReadingBookmark` is: the row id *is* the span
+    /// (`TextHighlight.makeId`). Marking a sentence that is already marked is a gesture
+    /// a reader will make by accident, and it has to be a no-op rather than a second
+    /// invisible row underneath the first.
+    @discardableResult
+    func addHighlight(
+        bookId: String,
+        chapterIndex: Int,
+        selection: TextSelection,
+        now: Date = Date()
+    ) throws -> TextHighlight {
+        try writer.write { db in
+            let id = TextHighlight.makeId(
+                bookId: bookId, chapterIndex: chapterIndex, selection: selection
+            )
+            if let existing = try TextHighlight.fetchOne(db, key: id) { return existing }
+            let highlight = TextHighlight(
+                bookId: bookId, chapterIndex: chapterIndex, selection: selection, createdAt: now
+            )
+            try highlight.insert(db)
+            return highlight
+        }
+    }
+
+    func removeHighlight(id: String) throws {
+        _ = try writer.write { db in try TextHighlight.deleteOne(db, key: id) }
+    }
+
+    /// In reading order, like the saved positions: the list runs the way the book runs,
+    /// which is the only order a reader can find a passage in.
+    func highlights(bookId: String) throws -> [TextHighlight] {
+        try writer.read { db in
+            try TextHighlight
+                .filter(Column("bookId") == bookId)
+                .order(Column("chapterIndex"), Column("startParagraph"), Column("startCharacterOffset"))
+                .fetchAll(db)
+        }
+    }
+
     // MARK: - Chapter index
 
     /// Replaces a book's catalog with a freshly fetched one.

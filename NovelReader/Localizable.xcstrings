@@ -5136,6 +5136,174 @@
             }
           }
         }
+      },
+      "marks.title": {
+        "comment": "The screen holding one book's bookmarks and highlights, and the row that opens it.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Marks"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "标记"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "標記"
+            }
+          }
+        }
+      },
+      "highlights.title": {
+        "comment": "The list of passages highlighted in one book, and the switch that shows it.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Highlights"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "划线"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "劃線"
+            }
+          }
+        }
+      },
+      "highlights.empty": {
+        "comment": "Shown when a book has no highlights yet.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "No highlights yet"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "还没有划线"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "還沒有劃線"
+            }
+          }
+        }
+      },
+      "highlights.empty.hint": {
+        "comment": "Tells the reader how a highlight is made, including that only the paginated renderer can create one.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "In Pages mode, press and hold a sentence and drag to highlight it. Scrolling mode shows highlights too, but cannot create them."
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "在分页模式下长按书中的句子并拖动，就能划线。滚动模式一样看得到划线，但不能新增。"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "在分頁模式下長按書中的句子並拖曳，就能劃線。捲動模式一樣看得到劃線，但不能新增。"
+            }
+          }
+        }
+      },
+      "reader.highlight.add": {
+        "comment": "Button that turns the selected passage into a highlight.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Highlight"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "划线"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "劃線"
+            }
+          }
+        }
+      },
+      "reader.highlight.remove": {
+        "comment": "Button that deletes the highlight the reader tapped.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Remove highlight"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "移除划线"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "移除劃線"
+            }
+          }
+        }
+      },
+      "reader.settings.mode.footer": {
+        "comment": "Explains what choosing the paginated reading mode also buys: the ability to create highlights.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Highlights can only be created in Pages mode, the only layout that knows where each character sits. Both modes show the highlights you already have."
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "划线只能在分页模式下建立——只有分页排版知道每个字在画面上的位置。两种模式都会显示已有的划线。"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "劃線只能在分頁模式下建立——只有分頁排版知道每個字在畫面上的位置。兩種模式都會顯示已有的劃線。"
+            }
+          }
+        }
       }
   },
   "version": "1.0"
