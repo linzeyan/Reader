@@ -27,6 +27,10 @@ struct ReaderView: View {
     /// page. Held as a chapter id rather than a flag so that a later jump to the same
     /// chapter from the catalog still opens at its start.
     @State private var openAtLastPage: String?
+    /// Set when a forward page turn had nowhere left to go. The scrolling reader says
+    /// the same thing at the foot of the last chapter; a page that simply refuses to
+    /// turn, with nothing on screen, reads as a gesture the app missed.
+    @State private var reachedEndOfBook = false
 
     var body: some View {
         ZStack {
@@ -127,11 +131,28 @@ struct ReaderView: View {
                     ? .lastPage : .anchor(model.currentAnchor),
                 onAnchorChange: { anchor in
                     openAtLastPage = nil
+                    // Any page that does turn answers the question the notice asked.
+                    reachedEndOfBook = false
                     model.notePage(chapterIndex: current.chapter.index, anchor: anchor)
                 },
                 onTapCenter: { showControls.toggle() },
                 onTurnPast: { edge in turnChapter(past: edge, model: model) }
             )
+            .overlay(alignment: .bottom) {
+                if reachedEndOfBook {
+                    Text("reader.end")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.bar, in: .capsule)
+                        // Clear of the control bar's own resting place, so the two
+                        // never stack on top of each other.
+                        .padding(.bottom, 72)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.default, value: reachedEndOfBook)
         } else if model.isLoading {
             ProgressView()
         } else if let error = model.error {
@@ -150,7 +171,13 @@ struct ReaderView: View {
     /// scrolling reader's text simply carrying on.
     private func turnChapter(past edge: PageEdge, model: ReaderModel) {
         let target = model.currentChapterIndex + (edge == .end ? 1 : -1)
-        guard model.chapters.indices.contains(target) else { return }
+        guard model.chapters.indices.contains(target) else {
+            // Only the end of the book is worth saying. Turning back from page one of
+            // chapter one is a page that was never there, not a place to arrive at.
+            reachedEndOfBook = edge == .end
+            return
+        }
+        reachedEndOfBook = false
         openAtLastPage = edge == .start ? model.chapters[target].id : nil
         Task { await model.jump(to: .chapterStart(target)) }
     }

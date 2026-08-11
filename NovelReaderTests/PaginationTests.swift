@@ -350,6 +350,12 @@ final class PaginationTests: XCTestCase {
     func testTheReadingModeSurvivesRelaunch() throws {
         let suite = "PaginationTests"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        // A suite domain outlives the process that wrote it, and the cleanup below is
+        // not guaranteed to reach disk before the test host exits. So the clean slate
+        // this test needs is made here rather than assumed — otherwise the run that
+        // leaves `paginated` behind fails the *next* run, which is a test that reports
+        // on the previous run instead of on the code.
+        defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
 
         XCTAssertEqual(ReaderSettings(defaults: defaults).mode, .scroll, "scrolling stays the default")
