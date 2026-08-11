@@ -47,6 +47,17 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     static func makeId(siteId: String, siteBookId: String) -> String {
         "\(siteId)|\(siteBookId)"
     }
+
+    /// The reserved source for books imported from a file on the device.
+    ///
+    /// A book needs a source to be identified at all — `id` is derived from one —
+    /// but an imported book has no site and never will, so it gets one that no
+    /// rule file can ever claim. Everything that asks a `SiteStore` about it gets
+    /// nil back, which is why the few screens that would show a rule's name or
+    /// offer to refetch from it have to ask `isLocal` first.
+    static let localSiteId = "local"
+
+    var isLocal: Bool { siteId == Self.localSiteId }
 }
 
 /// One chapter of a book. Chapter *text* is never stored here — only the index

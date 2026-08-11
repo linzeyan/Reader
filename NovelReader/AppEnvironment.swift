@@ -24,6 +24,7 @@ final class AppEnvironment {
     let cloud: CloudSync
     let monitor: NetworkMonitor
     let downloadSettings: DownloadSettings
+    let localImporter: LocalBookImporter
 
     /// The library, kept here so every screen sees the same list without each one
     /// re-querying on appear.
@@ -68,6 +69,9 @@ final class AppEnvironment {
         let pacer = RequestPacer()
         self.pacer = pacer
         self.downloader = DownloadManager(service: bookService, downloads: self.downloads, pacer: pacer)
+        self.localImporter = LocalBookImporter(
+            repo: repo, downloads: self.downloads, fetcher: fetcher
+        )
         self.cloud = CloudSync(repo: repo)
         let monitor = NetworkMonitor()
         self.monitor = monitor
@@ -121,6 +125,10 @@ final class AppEnvironment {
     /// Books grouped by source, in the rule order the settings screen shows.
     /// Bookmarks for a source whose rule was removed still appear, under their
     /// raw site id, rather than vanishing from the library.
+    ///
+    /// Imported books land in that same trailing group, because no rule will ever
+    /// match `Book.localSiteId` — but they are not orphans, so the name comes from
+    /// `SiteStore.name(ofSite:)`, which knows the one source that has no file.
     var booksBySite: [(siteId: String, name: String, books: [Book])] {
         let grouped = Dictionary(grouping: books, by: \.siteId)
         let known = sites.rules.compactMap { rule -> (String, String, [Book])? in
@@ -128,7 +136,7 @@ final class AppEnvironment {
             return (rule.id, rule.name, group)
         }
         let orphanIds = grouped.keys.filter { id in !sites.rules.contains { $0.id == id } }.sorted()
-        return known + orphanIds.map { ($0, $0, grouped[$0] ?? []) }
+        return known + orphanIds.map { ($0, sites.name(ofSite: $0), grouped[$0] ?? []) }
     }
 
     // MARK: - Mutations that must also reach iCloud
@@ -161,6 +169,20 @@ final class AppEnvironment {
         } catch {
             if case WebFetcher.FetchError.challengePresented = error { report(error) }
         }
+        reloadLibrary()
+        return book
+    }
+
+    /// Imports a `.txt` or `.epub` the user picked as a book.
+    ///
+    /// Not pushed to iCloud, unlike every other way a book enters the library —
+    /// see `CloudSync.write`. Nothing else here needs to know: the book is
+    /// already complete on disk when this returns.
+    @discardableResult
+    func importLocalBook(
+        from url: URL, progress: @escaping LocalBookImporter.ProgressHandler
+    ) async throws -> Book {
+        let book = try await localImporter.importBook(from: url, progress: progress)
         reloadLibrary()
         return book
     }

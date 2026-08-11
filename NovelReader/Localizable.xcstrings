@@ -3792,6 +3792,246 @@
           }
         }
       }
+    },
+    "site.local": {
+      "comment": "Name of the reserved source that imported files belong to.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机文件"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本機檔案"
+          }
+        }
+      }
+    },
+    "library.import": {
+      "comment": "Menu entry that opens the file picker to import a txt or epub as a book.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import a file"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入文件"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "匯入檔案"
+          }
+        }
+      }
+    },
+    "library.import.working": {
+      "comment": "Shown while a picked file is being turned into a book.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Importing…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在导入…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在匯入…"
+          }
+        }
+      }
+    },
+    "library.import.error.unreadable": {
+      "comment": "The picked file could not be read at all.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file could not be read."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "读不到这个文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "讀不到這個檔案。"
+          }
+        }
+      }
+    },
+    "library.import.error.malformed": {
+      "comment": "The archive is not a shape the importer understands; a technical detail follows on the next line.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This EPUB could not be read."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个 EPUB 文件无法解析。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個 EPUB 檔無法解析。"
+          }
+        }
+      }
+    },
+    "library.import.error.encoding": {
+      "comment": "A text file whose character encoding could not be determined.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The encoding of this text file could not be determined. Save it as UTF-8 and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "判断不出这个文本文件的编码，请另存为 UTF-8 后再试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "判斷不出這個文字檔的編碼，請另存成 UTF-8 後再試。"
+          }
+        }
+      }
+    },
+    "library.import.error.empty": {
+      "comment": "The file was parsed but held no readable text.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There is no readable text in this file."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个文件里没有可以阅读的内容。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個檔案裡沒有可以閱讀的內容。"
+          }
+        }
+      }
+    },
+    "library.import.part %lld": {
+      "comment": "Chapter title used when a text file has no chapter headings and is split into fixed-length parts.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Part %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %lld 部分"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %lld 部分"
+          }
+        }
+      }
+    },
+    "library.import.preface": {
+      "comment": "Chapter title for the text that comes before a file's first chapter heading.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preface"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前言"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前言"
+          }
+        }
+      }
+    },
+    "book.local.missingFile": {
+      "comment": "An imported book whose text has been deleted from the device.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This book's text has been removed from the device. Import the file again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这本书的内容已从设备删除，请重新导入文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這本書的內容已從裝置刪除，請重新匯入檔案。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

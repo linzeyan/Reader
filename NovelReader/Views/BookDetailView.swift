@@ -24,7 +24,10 @@ struct BookDetailView: View {
     var body: some View {
         List {
             Section { header }
-            if rule == nil {
+            // An imported book has no rule and needs none: its text is already on
+            // the device. Warning about a missing rule would be telling the user
+            // to install something to fix a book that works.
+            if rule == nil && !current.isLocal {
                 Section {
                     Label("book.missingRule", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
@@ -60,13 +63,18 @@ struct BookDetailView: View {
             ReaderView(book: target.book, startIndex: target.startIndex)
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await refreshCatalog() }
-                } label: {
-                    Label("book.catalog.refresh", systemImage: "arrow.clockwise")
+            // Hidden, not disabled, for an imported book: there is nowhere to
+            // refresh a catalog from, and a permanently greyed-out button reads
+            // as something being broken.
+            if !current.isLocal {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await refreshCatalog() }
+                    } label: {
+                        Label("book.catalog.refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isRefreshing || rule == nil)
                 }
-                .disabled(isRefreshing || rule == nil)
             }
         }
         .task { await loadChapters() }
@@ -108,13 +116,19 @@ struct BookDetailView: View {
         // One entry point rather than "download all" and "delete all" buttons:
         // both of those live on the management screen now, next to the
         // per-chapter selection that makes them make sense.
-        NavigationLink {
-            ChapterDownloadView(book: current)
-        } label: {
-            Label("downloads.title", systemImage: "arrow.down.circle")
+        //
+        // Absent for an imported book: every one of its chapters is already on the
+        // device, so the screen would offer nothing but a way to delete the book's
+        // only copy of its own text.
+        if !current.isLocal {
+            NavigationLink {
+                ChapterDownloadView(book: current)
+            } label: {
+                Label("downloads.title", systemImage: "arrow.down.circle")
+            }
+            .accessibilityIdentifier("book.downloads")
+            .disabled(chapters.isEmpty)
         }
-        .accessibilityIdentifier("book.downloads")
-        .disabled(chapters.isEmpty)
     }
 
     @ViewBuilder

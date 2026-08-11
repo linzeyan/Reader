@@ -111,6 +111,66 @@ final class WebFetcher: NSObject {
         }
     }
 
+    /// Extracts from a document we already hold the bytes of, instead of from a
+    /// URL. This is how an imported EPUB's chapters are read.
+    ///
+    /// The point is to run the *same* extractor over local XHTML as over a
+    /// fetched page: `ExtractorScript.chapter` already normalises `<br>` / `<p>`
+    /// / `<div>` into paragraph breaks and drops a repeated heading, and a
+    /// second HTML reader written in Swift would be a worse copy that drifts
+    /// away from this one.
+    ///
+    /// Queued through `serialised` like every other load, for the reason the
+    /// whole type is serialised: there is one web view, and importing a book must
+    /// not navigate it out from under a download that is part-way through a page.
+    func extract<T: Decodable>(
+        html: Data,
+        extracting script: String,
+        as type: T.Type,
+        timeout: Duration = .seconds(15)
+    ) async throws -> T {
+        try await serialised {
+            let allowedScripts = self.contentJavaScriptEnabled
+            // An imported file is content from outside the app, and this web view
+            // holds the user's cookies for every site they read. The document's
+            // origin is opaque (see `Self.localBaseURL`) so it cannot reach those
+            // cookies, but there is no reason to let a book's markup execute at
+            // all — nothing we extract from it needs scripting. `evaluateJavaScript`
+            // is unaffected: it is not web content.
+            //
+            // Restored in a `defer` because leaving it off would break every later
+            // site fetch: clearing a Cloudflare challenge needs a JS engine.
+            self.contentJavaScriptEnabled = false
+            defer { self.contentJavaScriptEnabled = allowedScripts }
+            try await self.navigate(timeout: timeout) {
+                // text/html, not application/xhtml+xml: WebKit's XML parser
+                // abandons the whole document at the first well-formedness error
+                // and real EPUBs contain them, while the HTML parser is
+                // error-tolerant and builds the same DOM from valid input.
+                self.webView.load(
+                    html,
+                    mimeType: "text/html",
+                    characterEncodingName: "UTF-8",
+                    baseURL: Self.localBaseURL
+                )
+            }
+            return try await self.evaluate(script, as: type)
+        }
+    }
+
+    /// Base URL for locally supplied markup. `about:blank` gives the document an
+    /// opaque origin, so it shares nothing with the sites this web view has
+    /// cookies for.
+    private static let localBaseURL = URL(string: "about:blank")!
+
+    /// WebKit declares `defaultWebpagePreferences` as an implicitly unwrapped
+    /// optional, which a `let` binding turns into a real optional. Funnelling it
+    /// through one accessor keeps that out of the code that cares about the flag.
+    private var contentJavaScriptEnabled: Bool {
+        get { webView.configuration.defaultWebpagePreferences.allowsContentJavaScript }
+        set { webView.configuration.defaultWebpagePreferences.allowsContentJavaScript = newValue }
+    }
+
     private func failIfChallenged() async throws {
         if let challengeURL = try await detectChallenge() {
             throw FetchError.challengePresented(challengeURL)
