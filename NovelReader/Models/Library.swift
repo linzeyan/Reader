@@ -22,9 +22,15 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     var addedAt: Date
     /// Bumped on any user edit; drives last-writer-wins during iCloud merges.
     var updatedAt: Date
-    /// Reading position: which chapter, and how far into it.
+    /// Reading position: which chapter, and where inside it.
+    ///
+    /// Three columns rather than one encoded anchor because SQL has to read the
+    /// chapter index directly — `LibraryRepo.newChapterCounts` compares it against
+    /// every chapter in one grouped query, which a blob would make impossible.
+    /// `readingPosition` is the shape the rest of the app works in.
     var lastReadChapterIndex: Int?
-    var lastReadOffset: Int?
+    var lastReadParagraph: Int?
+    var lastReadCharacterOffset: Int?
     /// When the chapter index was last read from the site. `nil` means the
     /// catalog has never been fetched — which is not the same as "it is stale",
     /// and the two lead to very different screens.
@@ -43,6 +49,24 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
 
     /// What the library actually shows.
     var shownName: String { displayName?.isEmpty == false ? displayName! : title }
+
+    /// Where the reader left off, or nil for a book that has never been opened —
+    /// the distinction the detail screen draws "start" versus "continue" from.
+    ///
+    /// The paragraph and offset fall back to the start of the chapter rather than
+    /// making the whole position nil: a book migrated from before this column
+    /// existed knows its chapter and nothing finer, and the top of the right chapter
+    /// is the honest answer to that.
+    var readingPosition: ReadingPosition? {
+        guard let lastReadChapterIndex else { return nil }
+        return ReadingPosition(
+            chapterIndex: lastReadChapterIndex,
+            anchor: TextAnchor(
+                paragraph: lastReadParagraph ?? 0,
+                characterOffset: lastReadCharacterOffset ?? 0
+            )
+        )
+    }
 
     static func makeId(siteId: String, siteBookId: String) -> String {
         "\(siteId)|\(siteBookId)"

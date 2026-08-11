@@ -35,8 +35,8 @@ struct LibraryRepo {
                 id: id, siteId: siteId, siteBookId: siteBookId, title: title,
                 displayName: nil, author: author, coverURL: coverURL,
                 addedAt: now, updatedAt: now,
-                lastReadChapterIndex: nil, lastReadOffset: nil,
-                catalogUpdatedAt: nil
+                lastReadChapterIndex: nil, lastReadParagraph: nil,
+                lastReadCharacterOffset: nil, catalogUpdatedAt: nil
             )
             try book.insert(db)
             return book
@@ -77,13 +77,57 @@ struct LibraryRepo {
         try writer.read { db in try Book.fetchOne(db, key: id) }
     }
 
-    func updateProgress(bookId: String, chapterIndex: Int, offset: Int, now: Date = Date()) throws {
+    func updateProgress(bookId: String, position: ReadingPosition, now: Date = Date()) throws {
         try writer.write { db in
             guard var book = try Book.fetchOne(db, key: bookId) else { return }
-            book.lastReadChapterIndex = chapterIndex
-            book.lastReadOffset = offset
+            book.lastReadChapterIndex = position.chapterIndex
+            book.lastReadParagraph = position.anchor.paragraph
+            book.lastReadCharacterOffset = position.anchor.characterOffset
             book.updatedAt = now
             try book.update(db)
+        }
+    }
+
+    // MARK: - Saved positions
+
+    /// Saves a position, or hands back the bookmark already sitting on it.
+    ///
+    /// Idempotent because the row id *is* the position (`ReadingBookmark.makeId`):
+    /// the reader's one bookmark button has to be safe to tap on a page that is
+    /// already saved. An existing bookmark keeps its original excerpt and timestamp
+    /// — it recorded the text as the reader saw it, and re-stamping it would move a
+    /// row the reader never asked to touch.
+    @discardableResult
+    func addReadingBookmark(
+        bookId: String,
+        position: ReadingPosition,
+        excerpt: String? = nil,
+        now: Date = Date()
+    ) throws -> ReadingBookmark {
+        try writer.write { db in
+            let id = ReadingBookmark.makeId(bookId: bookId, position: position)
+            if let existing = try ReadingBookmark.fetchOne(db, key: id) { return existing }
+            let bookmark = ReadingBookmark(
+                bookId: bookId, position: position, createdAt: now, excerpt: excerpt
+            )
+            try bookmark.insert(db)
+            return bookmark
+        }
+    }
+
+    func removeReadingBookmark(id: String) throws {
+        _ = try writer.write { db in try ReadingBookmark.deleteOne(db, key: id) }
+    }
+
+    /// In reading order rather than by creation time: this list exists to jump back
+    /// into the book, and one that runs the same way as the book is the one a reader
+    /// can find a place in.
+    func readingBookmarks(bookId: String) throws -> [ReadingBookmark] {
+        try writer.read { db in
+            try ReadingBookmark
+                .filter(Column("bookId") == bookId)
+                .order(Column("chapterIndex"), Column("paragraph"), Column("characterOffset"))
+                .fetchAll(db)
         }
     }
 

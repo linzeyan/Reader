@@ -117,7 +117,8 @@ final class DownloadNetworkPolicyTests: XCTestCase {
         let book = Book(
             id: "book", siteId: "demo", siteBookId: "1", title: "t", displayName: nil,
             author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
-            lastReadChapterIndex: nil, lastReadOffset: nil, catalogUpdatedAt: nil
+            lastReadChapterIndex: nil, lastReadParagraph: nil,
+            lastReadCharacterOffset: nil, catalogUpdatedAt: nil
         )
         let chapters = (1...2).map {
             Chapter(

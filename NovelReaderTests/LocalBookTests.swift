@@ -83,7 +83,7 @@ final class LocalBookImportTests: XCTestCase {
         let importer = LocalBookImporter(repo: repo, downloads: downloads, fetcher: WebFetcher())
 
         let first = try await importer.importBook(from: file) { _ in }
-        try repo.updateProgress(bookId: first.id, chapterIndex: 1, offset: 0)
+        try repo.updateProgress(bookId: first.id, position: .chapterStart(1))
         try downloads.delete(.book(first))
         XCTAssertEqual(try downloads.downloadedCount(bookId: first.id), 0)
 
@@ -193,7 +193,10 @@ final class LocalBookImportTests: XCTestCase {
             .joined(separator: "\n"))
         let importer = LocalBookImporter(repo: repo, downloads: downloads, fetcher: WebFetcher())
         let first = try await importer.importBook(from: file) { _ in }
-        try repo.updateProgress(bookId: first.id, chapterIndex: 7, offset: 42)
+        let position = ReadingPosition(
+            chapterIndex: 7, anchor: TextAnchor(paragraph: 42, characterOffset: 0)
+        )
+        try repo.updateProgress(bookId: first.id, position: position)
 
         let canceller = Canceller()
         canceller.task = Task {
@@ -206,7 +209,9 @@ final class LocalBookImportTests: XCTestCase {
 
         let books = try repo.allBooks()
         XCTAssertEqual(books.map(\.id), [first.id], "the book was already the user's")
-        XCTAssertEqual(books.first?.lastReadChapterIndex, 7, "the reading position must survive")
+        // The whole anchor, not just the chapter: a re-import that kept the chapter
+        // but lost the paragraph would still drop the reader at the top of it.
+        XCTAssertEqual(books.first?.readingPosition, position, "the reading position must survive")
         XCTAssertEqual(
             try downloads.downloadedCount(bookId: first.id), 0,
             "no chapter may still claim to be on disk after the rollback"

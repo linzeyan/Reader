@@ -135,7 +135,7 @@ final class NewChapterTests: XCTestCase {
         let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
         try repo.replaceCatalog(bookId: book.id, entries: entries(2), now: Date())
         try repo.replaceCatalog(bookId: book.id, entries: entries(4), now: Date())
-        try repo.updateProgress(bookId: book.id, chapterIndex: 2, offset: 0)
+        try repo.updateProgress(bookId: book.id, position: .chapterStart(2))
         let reloaded = try XCTUnwrap(repo.book(id: book.id))
 
         let chapters = try repo.chapters(bookId: book.id)
@@ -157,7 +157,7 @@ final class NewChapterTests: XCTestCase {
         }
         try repo.replaceCatalog(bookId: read.id, entries: entries(5), now: Date())
         try repo.replaceCatalog(bookId: untouched.id, entries: entries(4), now: Date())
-        try repo.updateProgress(bookId: read.id, chapterIndex: 3, offset: 0)
+        try repo.updateProgress(bookId: read.id, position: .chapterStart(3))
 
         let counts = try repo.newChapterCounts()
 

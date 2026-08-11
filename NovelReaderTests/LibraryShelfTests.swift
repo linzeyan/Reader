@@ -207,7 +207,8 @@ final class LibraryShelfTests: XCTestCase {
         Book(
             id: id, siteId: "alpha", siteBookId: id, title: title, displayName: nil,
             author: nil, coverURL: nil, addedAt: addedAt, updatedAt: updatedAt,
-            lastReadChapterIndex: nil, lastReadOffset: nil, catalogUpdatedAt: nil
+            lastReadChapterIndex: nil, lastReadParagraph: nil,
+            lastReadCharacterOffset: nil, catalogUpdatedAt: nil
         )
     }
 
@@ -217,7 +218,8 @@ final class LibraryShelfTests: XCTestCase {
     private func read(_ book: Book, atChapter index: Int) -> Book {
         var read = book
         read.lastReadChapterIndex = index
-        read.lastReadOffset = 0
+        read.lastReadParagraph = 0
+        read.lastReadCharacterOffset = 0
         return read
     }
 

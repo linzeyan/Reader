@@ -277,8 +277,8 @@ final class AppEnvironment {
         reloadLibrary()
     }
 
-    func recordProgress(book: Book, chapterIndex: Int, offset: Int) {
-        try? repo.updateProgress(bookId: book.id, chapterIndex: chapterIndex, offset: offset)
+    func recordProgress(book: Book, position: ReadingPosition) {
+        try? repo.updateProgress(bookId: book.id, position: position)
         reloadLibrary()
         if let updated = books.first(where: { $0.id == book.id }) { cloud.push(updated) }
     }
