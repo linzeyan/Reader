@@ -87,6 +87,35 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertFalse(manager.isBusy)
     }
 
+    /// Backgrounding buys about thirty seconds to finish the chapter in flight,
+    /// and it is paid for by a background assertion. A queue that has already
+    /// stopped must release that hold immediately — holding it for the full grace
+    /// period is time taken from the user for a chapter nobody is fetching.
+    func testDrainingAQueueThatIsAlreadyAtRestReleasesTheCallerAtOnce() throws {
+        let manager = try makeManager()
+        var released = false
+        manager.stopAfterCurrentChapter(reason: "background") { released = true }
+        XCTAssertTrue(released)
+        XCTAssertFalse(manager.isDraining, "There is no run to drain")
+    }
+
+    /// A drain request must not outlive the run it was made for. Left set, the
+    /// next run would stop after a single chapter with nothing on screen to say
+    /// why — and the caller waiting on it would never be released.
+    func testAUserPauseClearsAPendingDrainAndReleasesTheCaller() throws {
+        let manager = try makeManager()
+        var released = false
+        manager.start(book: makeBook(), rule: makeRule(), chapters: [makeChapter("1")])
+        manager.stopAfterCurrentChapter(reason: "background") { released = true }
+        XCTAssertTrue(manager.isDraining)
+
+        manager.pause()
+
+        XCTAssertFalse(manager.isDraining)
+        XCTAssertTrue(released)
+        manager.cancel()
+    }
+
     /// The same hazard with the queue non-empty but moved on: whatever is at the
     /// head now belongs to a different run, and must not be consumed by the old
     /// one's progress accounting.

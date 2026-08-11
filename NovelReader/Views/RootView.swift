@@ -6,6 +6,7 @@ import SwiftUI
 struct RootView: View {
     @State private var env = AppEnvironment.makeShared()
     @State private var hostToken = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView {
@@ -36,8 +37,32 @@ struct RootView: View {
         .onChange(of: env.downloader.pendingChallenge) { _, new in
             if let new { env.challenge = ChallengeRequest(url: new) }
         }
+        // Owned here, like the challenge sheet: a download can be queued from the
+        // book screen and the answer must survive that screen going away.
+        .alert(
+            "downloads.cellular.title",
+            isPresented: Binding(
+                get: { env.meteredPrompt != nil },
+                set: { if !$0 { env.cancelMeteredDownload() } }
+            )
+        ) {
+            Button("downloads.cellular.confirm") { env.confirmMeteredDownload() }
+            Button("common.cancel", role: .cancel) { env.cancelMeteredDownload() }
+        } message: {
+            Text("downloads.cellular.message")
+        }
         .overlay(alignment: .top) { banner }
         .animation(.snappy, value: env.banner)
+        // Only the two ends of the transition. `.inactive` also arrives for a
+        // pulled-down notification centre, and stopping a download for that
+        // would be stopping it while the user is still holding the phone.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: env.enterBackground()
+            case .active: env.becomeActive()
+            default: break
+            }
+        }
     }
 
     @ViewBuilder

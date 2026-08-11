@@ -6,6 +6,7 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var cloud = env.cloud
+        @Bindable var downloadSettings = env.downloadSettings
 
         NavigationStack {
             Form {
@@ -26,6 +27,18 @@ struct SettingsView: View {
                     Toggle("settings.icloud", isOn: $cloud.isEnabled)
                 } footer: {
                     Text("settings.icloud.footer")
+                }
+
+                Section {
+                    Picker("settings.downloadNetwork", selection: $downloadSettings.network) {
+                        Text("settings.downloadNetwork.wifiOnly")
+                            .tag(DownloadSettings.NetworkPolicy.wifiOnly)
+                        Text("settings.downloadNetwork.wifiAndCellular")
+                            .tag(DownloadSettings.NetworkPolicy.wifiAndCellular)
+                    }
+                    .accessibilityIdentifier("settings.downloadNetwork")
+                } footer: {
+                    Text("settings.downloadNetwork.footer")
                 }
 
                 Section {

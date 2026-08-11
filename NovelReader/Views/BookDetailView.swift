@@ -132,7 +132,7 @@ struct BookDetailView: View {
                     if env.downloader.isBusy {
                         Button("book.download.pause") { env.downloader.pause() }
                     } else if env.downloader.canResume {
-                        Button("book.download.resume") { env.downloader.resume() }
+                        Button("book.download.resume") { env.requestResume() }
                     }
                     Spacer()
                     Button("common.cancel", role: .destructive) {

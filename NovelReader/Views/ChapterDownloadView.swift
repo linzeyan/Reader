@@ -151,9 +151,11 @@ struct ChapterDownloadView: View {
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
+    /// Through the environment rather than straight to the queue: on a metered
+    /// connection under the Wi-Fi-only policy this asks before spending data.
     private func start(_ wanted: [Chapter]) {
         guard let rule else { return }
-        env.downloader.start(book: book, rule: rule, chapters: wanted)
+        env.requestDownload(book: book, rule: rule, chapters: wanted)
     }
 
     private func reload() {

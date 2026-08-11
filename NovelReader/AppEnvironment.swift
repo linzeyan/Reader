@@ -22,6 +22,8 @@ final class AppEnvironment {
     /// Shared by every unattended fetch — downloads and the reader's read-ahead.
     let pacer: RequestPacer
     let cloud: CloudSync
+    let monitor: NetworkMonitor
+    let downloadSettings: DownloadSettings
 
     /// The library, kept here so every screen sees the same list without each one
     /// re-querying on appear.
@@ -32,6 +34,17 @@ final class AppEnvironment {
     /// Surfaced as a banner rather than an alert — most failures here are "one
     /// site is unhappy", not "the app is broken".
     var banner: String?
+    /// Set when a download would run on a metered connection under the Wi-Fi-only
+    /// policy; drives the confirmation alert the root view owns.
+    var meteredPrompt: MeteredDownloadRequest?
+    /// Consent is per run, not permanent: saying yes once must not silently turn
+    /// the setting into "Wi-Fi and cellular".
+    private var meteredConsent = false
+    /// Set when *the app going away* stopped a download, so returning continues
+    /// it. Never set for a pause the user asked for.
+    private var resumeWhenActive = false
+    /// The background time bought to finish the chapter in flight. At most one.
+    private var backgroundAssertion: UIBackgroundTaskIdentifier = .invalid
 
     init(
         database: AppDatabase,
@@ -53,7 +66,11 @@ final class AppEnvironment {
         self.pacer = pacer
         self.downloader = DownloadManager(service: bookService, downloads: self.downloads, pacer: pacer)
         self.cloud = CloudSync(repo: repo)
+        let monitor = NetworkMonitor()
+        self.monitor = monitor
+        self.downloadSettings = DownloadSettings()
         self.cloud.onRemoteChange = { [weak self] in self?.reloadLibrary() }
+        monitor.onChange = { [weak self] _ in self?.enforceNetworkPolicy() }
         reloadLibrary()
     }
 
@@ -164,6 +181,118 @@ final class AppEnvironment {
         if let updated = books.first(where: { $0.id == book.id }) { cloud.push(updated) }
     }
 
+    // MARK: - Downloads
+
+    /// The one way a chapter download starts.
+    ///
+    /// Screens call this instead of `downloader.start` so the network policy is
+    /// checked in exactly one place: a download of a whole book is the only thing
+    /// this app does that can spend a lot of data with nobody watching, and under
+    /// the Wi-Fi-only policy a metered connection asks before it does.
+    func requestDownload(book: Book, rule: SiteRule, chapters: [Chapter]) {
+        // A new run gets a new decision — consent for the previous one says
+        // nothing about this one.
+        meteredConsent = false
+        request(.start(book: book, rule: rule, chapters: chapters))
+    }
+
+    /// Resuming is a start as far as the data plan is concerned: the run may have
+    /// been paused precisely because the connection changed.
+    func requestResume() {
+        request(.resume)
+    }
+
+    func confirmMeteredDownload() {
+        guard let prompt = meteredPrompt else { return }
+        meteredPrompt = nil
+        // Covers the rest of this run, so a queue the user just okayed is not
+        // stopped again by the very connection they approved. The setting itself
+        // is untouched and the next run asks again.
+        meteredConsent = true
+        perform(prompt.work)
+    }
+
+    func cancelMeteredDownload() {
+        meteredPrompt = nil
+    }
+
+    private func request(_ work: MeteredDownloadRequest.Work) {
+        if !meteredConsent, downloadSettings.network.needsConfirmation(on: monitor.connection) {
+            meteredPrompt = MeteredDownloadRequest(work: work)
+        } else {
+            perform(work)
+        }
+    }
+
+    private func perform(_ work: MeteredDownloadRequest.Work) {
+        switch work {
+        case .start(let book, let rule, let chapters):
+            downloader.start(book: book, rule: rule, chapters: chapters)
+        case .resume:
+            downloader.resume()
+        }
+    }
+
+    // MARK: - Leaving and returning
+
+    /// The fetcher's WKWebView stops dead the moment the process is suspended, so
+    /// a download running when the app goes away simply stalls — and it stalled
+    /// *silently*, which is indistinguishable from a bug. This is that hole.
+    ///
+    /// iOS grants roughly thirty seconds of background time: enough for the
+    /// chapter already on the wire, nowhere near enough for the queue. So the
+    /// queue finishes that one chapter, then pauses with a reason, and the
+    /// assertion is released the moment it comes to rest rather than being held
+    /// for the full grace period.
+    func enterBackground() {
+        guard downloader.isBusy else { return }
+        resumeWhenActive = true
+        let reason = String(localized: "downloads.paused.background")
+        backgroundAssertion = UIApplication.shared.beginBackgroundTask(withName: "FinishChapter") {
+            // Out of time. Stop now, saved or not: the alternative is iOS killing
+            // the process, which teaches the user nothing.
+            Task { @MainActor [weak self] in
+                self?.downloader.pause(reason: reason)
+                self?.endBackgroundAssertion()
+            }
+        }
+        downloader.stopAfterCurrentChapter(reason: reason) { [weak self] in
+            self?.endBackgroundAssertion()
+        }
+    }
+
+    /// Coming back continues what going away stopped.
+    ///
+    /// Through `requestResume` rather than straight to the queue: the connection
+    /// may well have changed while the app was away, which is precisely when the
+    /// Wi-Fi-only check earns its keep.
+    func becomeActive() {
+        guard resumeWhenActive else { return }
+        resumeWhenActive = false
+        requestResume()
+    }
+
+    /// Ending an assertion twice traps, and either the drain callback or the
+    /// expiration handler can get here first.
+    private func endBackgroundAssertion() {
+        guard backgroundAssertion != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundAssertion)
+        backgroundAssertion = .invalid
+    }
+
+    /// Walking out of the house mid-download must not keep spending data under a
+    /// Wi-Fi-only policy — the setting would be a promise the app breaks the
+    /// moment the user stops looking.
+    ///
+    /// Pausing rather than cancelling: the queue keeps its remaining work, and
+    /// the resume button asks about cellular the same way a fresh start does.
+    private func enforceNetworkPolicy() {
+        guard downloader.isBusy, !meteredConsent,
+              downloadSettings.network.needsConfirmation(on: monitor.connection)
+        else { return }
+        downloader.pause(reason: String(localized: "downloads.cellular.paused"))
+    }
+
     // MARK: - Errors
 
     /// Routes a fetch failure: a challenge becomes the interactive sheet,
@@ -175,4 +304,20 @@ final class AppEnvironment {
             banner = error.localizedDescription
         }
     }
+}
+
+/// A download waiting for the user to okay cellular data, carrying the work it
+/// will do once they say yes.
+///
+/// The work travels with the request rather than being re-derived on confirm: the
+/// screen that queued it may be gone by then, and "which chapters did they pick"
+/// is not something the alert can reconstruct.
+struct MeteredDownloadRequest: Identifiable {
+    enum Work {
+        case start(book: Book, rule: SiteRule, chapters: [Chapter])
+        case resume
+    }
+
+    let id = UUID()
+    let work: Work
 }

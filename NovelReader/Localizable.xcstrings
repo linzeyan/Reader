@@ -3528,6 +3528,222 @@
           }
         }
       }
+    },
+    "settings.downloadNetwork": {
+      "comment": "Which connections chapter downloads may use.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download using"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载使用的网络"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下載使用的網路"
+          }
+        }
+      }
+    },
+    "settings.downloadNetwork.wifiOnly": {
+      "comment": "Download network policy: ask before using cellular data.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wi-Fi only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅 Wi-Fi"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅 Wi-Fi"
+          }
+        }
+      }
+    },
+    "settings.downloadNetwork.wifiAndCellular": {
+      "comment": "Download network policy: never ask.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wi-Fi and cellular"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wi-Fi 与移动网络"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wi-Fi 與行動網路"
+          }
+        }
+      }
+    },
+    "settings.downloadNetwork.footer": {
+      "comment": "Spells out both behaviours, including the mid-download pause.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With Wi-Fi only, starting a download on cellular asks first, and a download that switches to cellular pauses. With Wi-Fi and cellular, downloads never ask. Reading and searching always use whatever connection is available."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选「仅 Wi-Fi」时，在移动网络上开始下载会先询问；下载途中切换到移动网络会自动暂停。选「Wi-Fi 与移动网络」则不再询问。阅读与搜索一律使用当前可用的网络。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選「僅 Wi-Fi」時，在行動網路上開始下載會先問過你；下載途中切換到行動網路會自動暫停。選「Wi-Fi 與行動網路」則不再詢問。閱讀與搜尋一律使用當前可用的網路。"
+          }
+        }
+      }
+    },
+    "downloads.cellular.title": {
+      "comment": "Alert title before spending cellular data on a download.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download over cellular?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用移动网络下载？"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用行動網路下載？"
+          }
+        }
+      }
+    },
+    "downloads.cellular.message": {
+      "comment": "Says what it costs and that the choice covers this download only.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device is on a cellular connection. A whole book's chapters can use a lot of data. This choice applies to this download only."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前是移动网络连接。整本书的章节可能用掉不少流量。这次选择只对本次下载有效。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前是行動網路連線。整本書的章節可能用掉不少數據。這次選擇只對本次下載有效。"
+          }
+        }
+      }
+    },
+    "downloads.cellular.confirm": {
+      "comment": "Confirms downloading on cellular this once.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download anyway"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用移动网络下载"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用行動網路下載"
+          }
+        }
+      }
+    },
+    "downloads.paused.background": {
+      "comment": "Shown on the download row when leaving the app stopped the queue.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused because the app left the screen. It continues when you come back."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App 进入后台，下载已暂停；回到 App 会自动继续。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App 進入背景，下載已暫停；回到 App 會自動繼續。"
+          }
+        }
+      }
+    },
+    "downloads.cellular.paused": {
+      "comment": "Shown on the download row when the connection turned metered mid-run.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused: this device is now on cellular, and downloads are set to Wi-Fi only."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已切换到移动网络，下载暂停（设定为仅 Wi-Fi 下载）。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已切換到行動網路，下載暫停（設定為僅 Wi-Fi 下載）。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
