@@ -24,6 +24,7 @@ struct ZipArchive {
         case unsupportedCompression(UInt16, String)
         case truncated
         case inflateFailed(String)
+        case checksumMismatch(String)
 
         var description: String {
             switch self {
@@ -39,12 +40,15 @@ struct ZipArchive {
                 return "truncated or corrupt archive"
             case .inflateFailed(let name):
                 return "could not inflate \(name)"
+            case .checksumMismatch(let name):
+                return "checksum mismatch for \(name)"
             }
         }
     }
 
     private struct Entry {
         let method: UInt16
+        let crc: UInt32
         let compressedSize: Int
         let uncompressedSize: Int
         let localHeaderOffset: Int
@@ -82,11 +86,25 @@ struct ZipArchive {
             throw ZipError.truncated
         }
         let payload = bytes[start ..< start + entry.compressedSize]
+        let content: Data
         switch entry.method {
-        case 0: return Data(payload)
-        case 8: return try Self.inflate(payload, expecting: entry.uncompressedSize, name: name)
+        case 0: content = Data(payload)
+        case 8: content = try Self.inflate(payload, expecting: entry.uncompressedSize, name: name)
         default: throw ZipError.unsupportedCompression(entry.method, name)
         }
+        // Checked rather than trusted, because the failure this catches has no
+        // other symptom: a stored entry that lost a byte to a truncated download
+        // or a bad copy comes back the right length and reads as text, and the
+        // damage only ever surfaces as one chapter that is subtly wrong. The
+        // checksum is what turns that into a refused import instead.
+        //
+        // Both storage methods, not just `stored`: inflate already rejects a
+        // stream whose length disagrees with the directory, but a corrupted
+        // stream can still inflate to the right number of wrong bytes.
+        guard Crc32.compute(content) == entry.crc else {
+            throw ZipError.checksumMismatch(name)
+        }
+        return content
     }
 
     // MARK: - Central directory
@@ -132,6 +150,7 @@ struct ZipArchive {
             if !name.hasSuffix("/") {
                 result[name] = Entry(
                     method: method,
+                    crc: u32(bytes, cursor + 16),
                     compressedSize: Int(u32(bytes, cursor + 20)),
                     uncompressedSize: Int(u32(bytes, cursor + 24)),
                     localHeaderOffset: Int(u32(bytes, cursor + 42))

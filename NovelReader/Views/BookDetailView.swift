@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Where a bookmark is turned into something readable: metadata, the chapter
 /// index, and the download controls (requirements 4.2 / 4.3).
@@ -9,6 +10,12 @@ struct BookDetailView: View {
     @State private var chapters: [Chapter] = []
     @State private var isRefreshing = false
     @State private var query = ""
+    @State private var isExporting = false
+    /// The format waiting for the user to accept that the file will be
+    /// incomplete. Non-nil only while that question is on screen.
+    @State private var partialFormat: BookExporter.Format?
+    /// A finished export, waiting for the user to choose where it goes.
+    @State private var pendingExport: BookExporter.Export?
 
     private var rule: SiteRule? { env.sites.rule(id: book.siteId) }
 
@@ -76,6 +83,32 @@ struct BookDetailView: View {
                     .disabled(isRefreshing || rule == nil)
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) { exportMenu }
+        }
+        // Asked *before* the file is written, not reported after: someone
+        // exporting a book to read elsewhere needs the chance to download the
+        // rest first, and by the time a file is in the share sheet the decision
+        // has already been made for them.
+        .confirmationDialog(
+            Text("book.export.partial \(downloadedCount) \(chapters.count)"),
+            isPresented: partialBinding,
+            titleVisibility: .visible,
+            // `presenting:` rather than reading the state inside the action:
+            // dismissing the dialog clears it, and which format was tapped must
+            // not depend on whether that happens first.
+            presenting: partialFormat
+        ) { format in
+            Button("book.export.partial.confirm") { Task { await runExport(format) } }
+            Button("common.cancel", role: .cancel) {}
+        }
+        .fileExporter(
+            isPresented: exportBinding,
+            document: pendingExport.map(BookExportDocument.init),
+            contentType: pendingExport?.format.contentType ?? .plainText,
+            defaultFilename: pendingExport?.filename
+        ) { result in
+            if case .failure(let error) = result { env.report(error) }
+            pendingExport = nil
         }
         .task { await loadChapters() }
     }
@@ -131,6 +164,45 @@ struct BookDetailView: View {
         }
     }
 
+    /// In the toolbar rather than among the actions below, for two reasons: it is
+    /// an action on the whole book, and the actions section is the one thing this
+    /// screen hides when a book's rule has gone missing — which is exactly the
+    /// moment rescuing the text that is still on the device matters most.
+    @ViewBuilder
+    private var exportMenu: some View {
+        if isExporting {
+            ProgressView()
+        } else {
+            Menu {
+                Button {
+                    beginExport(.text)
+                } label: {
+                    Label("book.export.text", systemImage: "doc.plaintext")
+                }
+                Button {
+                    beginExport(.epub)
+                } label: {
+                    Label("book.export.epub", systemImage: "book.closed")
+                }
+            } label: {
+                Label("book.export", systemImage: "square.and.arrow.up")
+            }
+            .accessibilityIdentifier("book.export")
+            // Disabled rather than hidden: the header directly above already says
+            // how many chapters are on the device, so a greyed-out export reads as
+            // "nothing to write yet" rather than as a broken button.
+            .disabled(downloadedCount == 0)
+        }
+    }
+
+    private var partialBinding: Binding<Bool> {
+        Binding(get: { partialFormat != nil }, set: { if !$0 { partialFormat = nil } })
+    }
+
+    private var exportBinding: Binding<Bool> {
+        Binding(get: { pendingExport != nil }, set: { if !$0 { pendingExport = nil } })
+    }
+
     @ViewBuilder
     private var downloadStatus: some View {
         if let progress = env.downloader.progress {
@@ -160,6 +232,31 @@ struct BookDetailView: View {
     }
 
     private var downloadedCount: Int { chapters.filter(\.isDownloaded).count }
+
+    // MARK: - Exporting
+
+    /// A whole book goes straight to work; a partial one asks first.
+    private func beginExport(_ format: BookExporter.Format) {
+        if downloadedCount < chapters.count {
+            partialFormat = format
+        } else {
+            Task { await runExport(format) }
+        }
+    }
+
+    /// `BookExporter` is not main-actor bound, so the reads and the deflate pass
+    /// leave this actor on their own; only the state around them is set here.
+    private func runExport(_ format: BookExporter.Format) async {
+        partialFormat = nil
+        isExporting = true
+        defer { isExporting = false }
+        do {
+            pendingExport = try await BookExporter(downloads: env.downloads)
+                .export(book: current, chapters: chapters, format: format)
+        } catch {
+            env.report(error)
+        }
+    }
 
     // MARK: - Loading
 
@@ -199,6 +296,32 @@ struct BookDetailView: View {
                 env.report(error)
             }
         }
+    }
+}
+
+/// The bytes an export produced, in the shape `fileExporter` wants.
+///
+/// `fileExporter` rather than a `ShareLink`: a share link needs its file to exist
+/// when the button is *drawn*, which would mean writing out a whole novel every
+/// time this screen appears, on the chance that someone taps it. The save sheet it
+/// presents can still hand the file to another app, and it is what "export" means
+/// here — a file the user files away, not a message they send.
+///
+/// Write-only. The app already reads these files, through `LocalBookImporter`, and
+/// a second way in would be a second thing to keep correct.
+struct BookExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText, .epub] }
+
+    private let data: Data
+
+    init(_ export: BookExporter.Export) { data = export.data }
+
+    init(configuration: ReadConfiguration) throws {
+        throw CocoaError(.fileReadUnsupportedScheme)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }
 

@@ -4056,6 +4056,150 @@
           }
         }
       }
+    },
+    "book.export": {
+      "comment": "Menu that writes the book out as a file.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导出"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "匯出"
+          }
+        }
+      }
+    },
+    "book.export.text": {
+      "comment": "Exports the book as a UTF-8 text file.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plain Text (.txt)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "纯文本（.txt）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "純文字（.txt）"
+          }
+        }
+      }
+    },
+    "book.export.epub": {
+      "comment": "Exports the book as an EPUB.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EPUB (.epub)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EPUB（.epub）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EPUB（.epub）"
+          }
+        }
+      }
+    },
+    "book.export.partial %lld %lld": {
+      "comment": "Warning before exporting a book whose chapters are only partly on the device.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only %1$lld of %2$lld chapters are on this device. The exported file will contain those chapters and nothing else."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机只有 %1$lld / %2$lld 章，导出的文件只会包含这些章节。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裝置上只有 %1$lld / %2$lld 章，匯出的檔案只會包含這些章節。"
+          }
+        }
+      }
+    },
+    "book.export.partial.confirm": {
+      "comment": "Exports anyway, knowing the file will hold only part of the book.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Anyway"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仍要导出"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仍要匯出"
+          }
+        }
+      }
+    },
+    "book.export.error.empty": {
+      "comment": "Nothing to export: none of the book's text is on the device.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None of this book's text is on the device yet, so there is nothing to export."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这本书还没有任何内容存在本机，没有东西可以导出。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這本書還沒有任何內容存在裝置上，沒有東西可以匯出。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
