@@ -1,12 +1,18 @@
 import XCTest
 @testable import NovelReader
 
-/// EPUB chapter text is read by loading the archive's XHTML into the app's one
-/// web view and running the *same* extractor the site rules run. That is the
-/// whole reason there is no second HTML reader in this codebase, so it has to be
+/// EPUB chapter text is read by loading the archive's XHTML into a web view of
+/// its own and running the *same* extractor the site rules run. That is the whole
+/// reason there is no second HTML reader in this codebase, so it has to be
 /// covered: if `evaluateJavaScript` stopped working on a locally loaded document
 /// — most plausibly because content scripting is switched off for it — every
 /// imported EPUB would come out empty with nothing to say why.
+///
+/// The other half of what these tests pin down is that the document stays where
+/// it was put. An imported file is markup from a stranger, and the view the app
+/// fetches sites with carries every cookie the user has — including
+/// `cf_clearance` — and is the view the challenge sheet shows full screen, with
+/// no URL bar. Those two must not be the same web view.
 ///
 /// Offline: the document arrives as bytes and its base URL is `about:blank`.
 @MainActor
@@ -127,18 +133,56 @@ final class EmbeddedHTMLExtractionTests: XCTestCase {
         )
     }
 
+    /// What the isolation is actually made of, asserted rather than assumed. The
+    /// session a stranger's markup loads in must not be the session carrying
+    /// `cf_clearance`, and scripting must be off for good rather than switched back
+    /// on the moment extraction returns.
+    func testTheImportViewIsIsolatedFromTheFetchersSession() async throws {
+        let fetcher = WebFetcher()
+        _ = try await fetcher.extract(
+            html: Data("<html><body><p>一。</p></body></html>".utf8),
+            extracting: try ExtractorScript.chapter(LocalBookImporter.embeddedDocumentRule),
+            as: ExtractorScript.ChapterPayload.self
+        )
+
+        let importView = try XCTUnwrap(fetcher.importView, "an import must build its own view")
+        XCTAssertNotIdentical(importView, fetcher.webView)
+        XCTAssertFalse(
+            importView.configuration.websiteDataStore.isPersistent,
+            "an imported document must not load in the session that holds the user's cookies"
+        )
+        XCTAssertFalse(
+            importView.configuration.defaultWebpagePreferences.allowsContentJavaScript,
+            "scripting stays off permanently; restoring it is what made the hijack land"
+        )
+        XCTAssertTrue(
+            fetcher.webView.configuration.websiteDataStore.isPersistent,
+            "and the fetcher's own session must stay persistent — cf_clearance lives there"
+        )
+    }
+
     /// A remote subresource needs no scripting either, and one `<img>` would hand the
     /// file's author the reader's IP address and the fact they opened this book. The
     /// text still has to come out with every request blocked.
     func testADocumentWithRemoteSubresourcesStillExtracts() async throws {
-        let payload = try await extract("""
-        <html><body>
-          <img src="https://example.com/beacon.png" width="1" height="1"/>
-          <link rel="stylesheet" href="https://example.com/style.css"/>
-          <p>雪停了。</p>
-        </body></html>
-        """)
+        let fetcher = WebFetcher()
+        let script = try ExtractorScript.chapter(LocalBookImporter.embeddedDocumentRule)
+        let payload = try await fetcher.extract(
+            html: Data("""
+            <html><body>
+              <img src="https://example.com/beacon.png" width="1" height="1"/>
+              <link rel="stylesheet" href="https://example.com/style.css"/>
+              <p>雪停了。</p>
+            </body></html>
+            """.utf8),
+            extracting: script, as: ExtractorScript.ChapterPayload.self
+        )
 
         XCTAssertEqual(payload.paragraphs, ["雪停了。"])
+        // Reaching this line is the assertion that the blocking rule list compiled and
+        // was attached. `extract` throws `.documentIsolationUnavailable` instead of
+        // loading the document without it, so a regression to a web view that can
+        // still reach the network fails here rather than shipping quietly.
+        XCTAssertNotNil(fetcher.importView, "the import must have built its own web view")
     }
 }
