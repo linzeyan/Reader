@@ -50,6 +50,12 @@ enum LocalBookError: LocalizedError {
 /// text file is a second or two of decoding, splitting and file writes, all of
 /// which has to stay off the main thread. The one main-actor hop is the web view
 /// that reads EPUB documents, and `WebFetcher` already owns that.
+///
+/// Cancellation is cooperative and checked per unit of work — per spine document,
+/// per chapter written — rather than between the phases: an EPUB is hundreds of
+/// extractions and a novel is hundreds of file writes, and a cancel that waited
+/// for the current phase to end would be a cancel the user watches do nothing.
+/// Anything already written is undone before the error escapes; see `rollBack`.
 struct LocalBookImporter {
     /// Progress as a 0…1 fraction rather than a count of chapters. An EPUB is
     /// extracted and then written — two passes of different lengths over the
@@ -73,6 +79,10 @@ struct LocalBookImporter {
         let data = try? Data(contentsOf: url)
         if scoped { url.stopAccessingSecurityScopedResource() }
         guard let data, !data.isEmpty else { throw LocalBookError.unreadable }
+        // Reading the file is itself long enough to cancel during — the picker
+        // hands over documents that live on iCloud Drive — so the first checkpoint
+        // sits here, before any of the expensive work starts.
+        try Task.checkCancellation()
 
         let parsed: (title: String?, author: String?, chapters: [ImportedChapter])
         let isEpub = url.pathExtension.lowercased() == "epub"
@@ -80,6 +90,10 @@ struct LocalBookImporter {
             parsed = try await epub(data, progress: progress)
         } else {
             guard let text = TextBookParser.decode(data) else { throw LocalBookError.unknownEncoding }
+            // Decoding a large file can be the slow step; the split after it is one
+            // pass and not worth threading a cancellation check through, which is
+            // why the checkpoint sits between them rather than inside the parser.
+            try Task.checkCancellation()
             parsed = (nil, nil, TextBookParser.chapters(from: text))
         }
         guard !parsed.chapters.isEmpty else { throw LocalBookError.empty }
@@ -118,6 +132,10 @@ struct LocalBookImporter {
         let script = try ExtractorScript.chapter(Self.embeddedDocumentRule)
         var chapters: [ImportedChapter] = []
         for (offset, item) in document.items.enumerated() {
+            // Before the extraction, not after: each document is a round trip
+            // through the web view, and one of those is the whole distance between
+            // "it stopped" and "it stops eventually".
+            try Task.checkCancellation()
             let payload = try await fetcher.extract(
                 html: item.xhtml, extracting: script, as: ExtractorScript.ChapterPayload.self
             )
@@ -167,6 +185,9 @@ struct LocalBookImporter {
     /// download makes: file first, then the `downloadedAt` flag. Nothing about
     /// an imported chapter is stored differently from a downloaded one, and that
     /// is what makes the rest of the app work on these books unchanged.
+    ///
+    /// This is the only phase that writes anything, so it is the only one that has
+    /// to undo itself — everything before it can stop wherever it likes.
     private func store(
         title: String,
         author: String?,
@@ -175,31 +196,67 @@ struct LocalBookImporter {
         progressBase: Double,
         progress: @escaping ProgressHandler
     ) async throws -> Book {
+        try Task.checkCancellation()
+        // Asked before the upsert, because the answer decides how far a rollback
+        // may go: re-importing a file the shelf already holds must not be able to
+        // take the existing book down with it.
+        let wasAlreadyOnTheShelf = try repo.book(
+            id: Book.makeId(siteId: Book.localSiteId, siteBookId: siteBookId)
+        ) != nil
         let book = try repo.bookmark(
             siteId: Book.localSiteId, siteBookId: siteBookId, title: title, author: author
         )
-        try repo.replaceCatalog(
-            bookId: book.id,
-            entries: chapters.enumerated().map { offset, chapter in
-                (
-                    siteChapterId: Self.chapterId(offset),
-                    title: chapter.title,
-                    // `Chapter.url` is not nullable and means nothing for a book
-                    // that came out of a file. It carries a scheme nothing can
-                    // fetch, so a code path that ever tries to load it fails
-                    // loudly instead of quietly hitting some site.
-                    url: "\(Book.localSiteId)://\(siteBookId)/\(offset)"
-                )
-            }
-        )
-        for (offset, chapter) in chapters.enumerated() {
-            try downloads.save(
-                paragraphs: chapter.paragraphs, book: book, siteChapterId: Self.chapterId(offset)
+        do {
+            try repo.replaceCatalog(
+                bookId: book.id,
+                entries: chapters.enumerated().map { offset, chapter in
+                    (
+                        siteChapterId: Self.chapterId(offset),
+                        title: chapter.title,
+                        // `Chapter.url` is not nullable and means nothing for a book
+                        // that came out of a file. It carries a scheme nothing can
+                        // fetch, so a code path that ever tries to load it fails
+                        // loudly instead of quietly hitting some site.
+                        url: "\(Book.localSiteId)://\(siteBookId)/\(offset)"
+                    )
+                }
             )
-            let done = Double(offset + 1) / Double(chapters.count)
-            await progress(progressBase + done * (1 - progressBase))
+            for (offset, chapter) in chapters.enumerated() {
+                try Task.checkCancellation()
+                try downloads.save(
+                    paragraphs: chapter.paragraphs, book: book, siteChapterId: Self.chapterId(offset)
+                )
+                let done = Double(offset + 1) / Double(chapters.count)
+                await progress(progressBase + done * (1 - progressBase))
+            }
+        } catch {
+            rollBack(book, keepingRow: wasAlreadyOnTheShelf)
+            throw error
         }
         return book
+    }
+
+    /// Undoes a partial import — a cancel, or a write that failed part-way.
+    ///
+    /// A book left here would sit on the shelf claiming a full catalog while
+    /// holding its first few chapters, and nothing in the row would say so: the
+    /// reader finds out by running off the end of the text. That is strictly worse
+    /// than an import that plainly failed and left no trace.
+    ///
+    /// Both calls are the ones removing a bookmark already makes — the flags and
+    /// files through `DownloadStore`, the row through `LibraryRepo` — rather than a
+    /// private undo path, because a second way to delete a book is a second way for
+    /// the index and the disk to drift apart.
+    private func rollBack(_ book: Book, keepingRow: Bool) {
+        // Errors are swallowed on purpose: the caller's error is the one worth
+        // reporting, and a failed cleanup must not replace "cancelled" with some
+        // filesystem message about the cleanup itself.
+        try? downloads.delete(.book(book))
+        // A re-import keeps the row. The reading position and any custom name
+        // predate this import and belong to the user, not to it. Stripped of its
+        // text the book reports `contentDeleted`, which the reader already explains
+        // and a finished import repairs.
+        if !keepingRow { try? repo.removeBookmark(bookId: book.id) }
     }
 
     /// Zero-padded so the files on disk sort in reading order, which is what
