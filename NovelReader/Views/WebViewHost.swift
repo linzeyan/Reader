@@ -63,9 +63,25 @@ struct ChallengeSheet: View {
     let url: URL
     let onDone: () -> Void
 
+    /// Followed live rather than read once from `url`. This sheet is the one place
+    /// the app hands a full-screen browser to the user with no address bar, and a
+    /// challenge page is free to redirect — a label naming the site the app meant
+    /// to visit, while the field being typed into belongs to somewhere else, would
+    /// be worse than showing nothing.
+    @State private var current: URL?
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                Text(site)
+                    .font(.footnote.monospaced())
+                    .lineLimit(1)
+                    // The host is the part that matters, so a long path is what
+                    // gets eaten — and truncating the middle keeps a lookalike
+                    // domain from hiding behind an ellipsis.
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal)
                 Text("challenge.explain")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -87,5 +103,15 @@ struct ChallengeSheet: View {
             }
         }
         .interactiveDismissDisabled()
+        .onReceive(webView.publisher(for: \.url)) { current = $0 }
+    }
+
+    /// A bare host for ordinary https, where the scheme is noise. Anything else —
+    /// plain http, a data or file URL — is shown whole, because that is precisely
+    /// the case where the user needs to see what they are really looking at.
+    private var site: String {
+        let shown = current ?? url
+        guard shown.scheme == "https", let host = shown.host() else { return shown.absoluteString }
+        return host
     }
 }

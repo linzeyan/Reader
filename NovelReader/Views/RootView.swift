@@ -84,13 +84,19 @@ struct RootView: View {
     @ViewBuilder
     private var importBanner: some View {
         if let importProgress {
-            ProgressView(value: importProgress) { Text("library.import.working") }
-                .font(.footnote)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.bar, in: .rect(cornerRadius: 12))
-                .padding(.horizontal)
-                .transition(.move(edge: .top).combined(with: .opacity))
+            HStack(spacing: 14) {
+                ProgressView(value: importProgress) { Text("library.import.working") }
+                // The same escape the library's own import banner offers. A file
+                // arriving from another app is the case most likely to be the wrong
+                // one, so this is where waiting it out would hurt most.
+                Button("common.cancel") { env.cancelImport() }
+            }
+            .font(.footnote)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.bar, in: .rect(cornerRadius: 12))
+            .padding(.horizontal)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -109,6 +115,9 @@ struct RootView: View {
         defer { importProgress = nil }
         do {
             _ = try await env.importLocalBook(from: url) { importProgress = $0 }
+        } catch is CancellationError {
+            // Stopping was the user's own decision; reporting it back as a failure
+            // would read as the import having gone wrong.
         } catch {
             env.report(error)
         }
