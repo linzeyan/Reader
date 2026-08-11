@@ -1081,6 +1081,30 @@
         }
       }
     },
+    "fetch.error.isolation": {
+      "comment": "Shown when an imported file cannot be opened in a sandboxed web view.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file could not be opened safely. Nothing was imported."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法安全开启这个档案，未汇入任何内容。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法安全開啟這個檔案，未匯入任何內容。"
+          }
+        }
+      }
+    },
     "fetch.error.timeout": {
       "comment": "Shown when a page load exceeds the fetch timeout.",
       "extractionState": "manual",
@@ -4053,6 +4077,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "匯入的書刪掉就沒有了，App 無法重新下載本機檔案。"
+          }
+        }
+      }
+    },
+    "fetch.error.isolation": {
+      "comment": "An imported file could not be opened in an isolated web view, so it was not opened at all.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file could not be opened safely, so it was not opened. Please try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法在隔离环境中打开这个文件，因此没有打开。请再试一次。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法在隔離環境中開啟這個檔案，因此沒有開啟。請再試一次。"
           }
         }
       }

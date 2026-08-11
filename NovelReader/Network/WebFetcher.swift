@@ -25,6 +25,14 @@ final class WebFetcher: NSObject {
         case navigationFailed(String)
         case timedOut
         case extractionFailed(String)
+        /// The sandboxed web view an imported document is read in could not be
+        /// built, because its block-everything content rules would not compile.
+        ///
+        /// Reading the document anyway is not an option: without those rules the
+        /// file's own `<img>` and `<link>` tags reach the network and tell their
+        /// author who opened the book and from which address. An import that
+        /// cannot be isolated has to fail.
+        case documentIsolationUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -32,6 +40,7 @@ final class WebFetcher: NSObject {
             case .navigationFailed(let m): return m
             case .timedOut: return String(localized: "fetch.error.timeout")
             case .extractionFailed(let m): return m
+            case .documentIsolationUnavailable: return String(localized: "fetch.error.isolation")
             }
         }
     }
@@ -42,8 +51,20 @@ final class WebFetcher: NSObject {
     let webView: WKWebView
 
     private var navigationContinuation: CheckedContinuation<Void, Error>?
+    /// Which web view the armed continuation belongs to. Navigation events from any
+    /// other one are ignored: an imported document that tries to navigate after its
+    /// text has been extracted must not resume — or fail — a fetch that started
+    /// afterwards.
+    private var navigatingView: WKWebView?
     /// Serialises fetches: each waits for the previous one to finish.
     private var queueTail: Task<Void, Never> = Task {}
+    /// The isolated web view imported files are loaded into. See `extract`.
+    ///
+    /// Not private so a test can check how it is configured. `WKUserContentController`
+    /// has no getter for the rule lists attached to it, so "the document really was
+    /// sandboxed" can only be asserted from the store and the scripting flag — plus
+    /// the fact that `extract` throws when the rule list is missing.
+    private(set) var importView: WKWebView?
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -80,9 +101,11 @@ final class WebFetcher: NSObject {
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
-            try await self.navigate(timeout: timeout) { self.webView.load(URLRequest(url: url)) }
+            try await self.navigate(timeout: timeout, in: self.webView) {
+                self.webView.load(URLRequest(url: url))
+            }
             try await self.failIfChallenged()
-            return try await self.evaluate(script, as: type)
+            return try await self.evaluate(script, as: type, in: self.webView)
         }
     }
 
@@ -101,13 +124,15 @@ final class WebFetcher: NSObject {
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
-            try await self.navigate(timeout: timeout) { self.webView.load(URLRequest(url: url)) }
+            try await self.navigate(timeout: timeout, in: self.webView) {
+                self.webView.load(URLRequest(url: url))
+            }
             try await self.failIfChallenged()
-            try await self.navigate(timeout: timeout) {
+            try await self.navigate(timeout: timeout, in: self.webView) {
                 self.webView.evaluateJavaScript(submitScript, completionHandler: nil)
             }
             try await self.failIfChallenged()
-            return try await self.evaluate(script, as: type)
+            return try await self.evaluate(script, as: type, in: self.webView)
         }
     }
 
@@ -120,9 +145,24 @@ final class WebFetcher: NSObject {
     /// second HTML reader written in Swift would be a worse copy that drifts
     /// away from this one.
     ///
-    /// Queued through `serialised` like every other load, for the reason the
-    /// whole type is serialised: there is one web view, and importing a book must
-    /// not navigate it out from under a download that is part-way through a page.
+    /// An imported file is content from outside the app, so it is loaded into a
+    /// **separate** web view that has nothing worth stealing: a non-persistent data
+    /// store, content scripting off for good, and every outgoing request blocked.
+    /// It never touches `webView` — the one holding the user's cookies for every
+    /// site they read, and the one the challenge sheet shows them full screen.
+    ///
+    /// Sharing that web view was a hole, not a shortcut. Switching content
+    /// scripting off does not stop `<meta http-equiv="refresh">`, which the HTML
+    /// parser implements: a book could point the fetcher's web view at any site it
+    /// liked, and the flag was restored the moment this call returned, so the
+    /// navigation landed with scripting back on. From there the document could keep
+    /// interrupting real fetches — `fail(with:)` deliberately ignores the -999 that
+    /// a superseded navigation reports — and a page claiming to be a Cloudflare
+    /// challenge gets handed to the user in a sheet that shows no URL.
+    ///
+    /// Still queued through `serialised`, but for a different reason now: one
+    /// navigation continuation is armed at a time, so two loads must not overlap
+    /// even when they are on different web views.
     func extract<T: Decodable>(
         html: Data,
         extracting script: String,
@@ -130,45 +170,75 @@ final class WebFetcher: NSObject {
         timeout: Duration = .seconds(15)
     ) async throws -> T {
         try await serialised {
-            let allowedScripts = self.contentJavaScriptEnabled
-            // An imported file is content from outside the app, and this web view
-            // holds the user's cookies for every site they read. The document's
-            // origin is opaque (see `Self.localBaseURL`) so it cannot reach those
-            // cookies, but there is no reason to let a book's markup execute at
-            // all — nothing we extract from it needs scripting. `evaluateJavaScript`
-            // is unaffected: it is not web content.
-            //
-            // Restored in a `defer` because leaving it off would break every later
-            // site fetch: clearing a Cloudflare challenge needs a JS engine.
-            self.contentJavaScriptEnabled = false
-            defer { self.contentJavaScriptEnabled = allowedScripts }
-            try await self.navigate(timeout: timeout) {
+            let view = try await self.importWebView()
+            try await self.navigate(timeout: timeout, in: view) {
                 // text/html, not application/xhtml+xml: WebKit's XML parser
                 // abandons the whole document at the first well-formedness error
                 // and real EPUBs contain them, while the HTML parser is
                 // error-tolerant and builds the same DOM from valid input.
-                self.webView.load(
+                view.load(
                     html,
                     mimeType: "text/html",
                     characterEncodingName: "UTF-8",
                     baseURL: Self.localBaseURL
                 )
             }
-            return try await self.evaluate(script, as: type)
+            return try await self.evaluate(script, as: type, in: view)
         }
     }
 
     /// Base URL for locally supplied markup. `about:blank` gives the document an
-    /// opaque origin, so it shares nothing with the sites this web view has
-    /// cookies for.
+    /// opaque origin, and `decidePolicyFor` below refuses to let the import view
+    /// navigate anywhere else.
     private static let localBaseURL = URL(string: "about:blank")!
 
-    /// WebKit declares `defaultWebpagePreferences` as an implicitly unwrapped
-    /// optional, which a `let` binding turns into a real optional. Funnelling it
-    /// through one accessor keeps that out of the code that cares about the flag.
-    private var contentJavaScriptEnabled: Bool {
-        get { webView.configuration.defaultWebpagePreferences.allowsContentJavaScript }
-        set { webView.configuration.defaultWebpagePreferences.allowsContentJavaScript = newValue }
+    /// Built on first import rather than at init: most sessions never import a
+    /// file, and the rule list below costs a compile.
+    private func importWebView() async throws -> WKWebView {
+        if let importView { return importView }
+        let rules = try await Self.compileBlockAllRules()
+        let config = WKWebViewConfiguration()
+        // Nothing an imported book needs outlives its import, and this store must
+        // not be the one carrying cf_clearance.
+        config.websiteDataStore = .nonPersistent()
+        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        config.userContentController.add(rules)
+        let view = WKWebView(frame: webView.frame, configuration: config)
+        view.navigationDelegate = self
+        importView = view
+        return view
+    }
+
+    /// Blocks every request a loaded document makes.
+    ///
+    /// The opaque origin stops an imported file from *reading* anything; it does
+    /// nothing about sending. A single `<img src="https://…">` needs no scripting
+    /// and would tell whoever built the file the reader's IP address, the time, and
+    /// that they opened this particular book — one beacon per chapter reports
+    /// reading progress. Extraction needs no subresource, so none is allowed.
+    ///
+    /// A failure to compile throws rather than falling back to an unfiltered web
+    /// view: quietly restoring network access is exactly the outcome this exists to
+    /// prevent.
+    private static func compileBlockAllRules() async throws -> WKContentRuleList {
+        guard let store = WKContentRuleListStore.default() else {
+            throw FetchError.documentIsolationUnavailable
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            store.compileContentRuleList(
+                forIdentifier: "import-block-all",
+                encodedContentRuleList: #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}}]"#
+            ) { list, error in
+                if let list {
+                    continuation.resume(returning: list)
+                } else {
+                    // WebKit's own error is dropped on purpose: what the user can act
+                    // on is "this file could not be opened safely", and the reason a
+                    // rule list failed to compile is not something they can fix.
+                    continuation.resume(throwing: FetchError.documentIsolationUnavailable)
+                }
+            }
+        }
     }
 
     private func failIfChallenged() async throws {
@@ -196,11 +266,12 @@ final class WebFetcher: NSObject {
     /// Not private so a test can drive it with a trigger that navigates nowhere:
     /// "this call always finishes" is the invariant the whole fetch queue rests
     /// on, and it is not reachable through the public surface without a network.
-    func navigate(timeout: Duration, trigger: @escaping () -> Void) async throws {
+    func navigate(timeout: Duration, in view: WKWebView, trigger: @escaping () -> Void) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { @MainActor in
                 try await withCheckedThrowingContinuation { continuation in
                     self.navigationContinuation = continuation
+                    self.navigatingView = view
                     trigger()
                 }
             }
@@ -224,12 +295,15 @@ final class WebFetcher: NSObject {
     private func timeOut() {
         navigationContinuation?.resume(throwing: FetchError.timedOut)
         navigationContinuation = nil
+        navigatingView = nil
     }
 
-    private func evaluate<T: Decodable>(_ script: String, as type: T.Type) async throws -> T {
+    private func evaluate<T: Decodable>(
+        _ script: String, as type: T.Type, in view: WKWebView
+    ) async throws -> T {
         let result: Any?
         do {
-            result = try await webView.evaluateJavaScript(script)
+            result = try await view.evaluateJavaScript(script)
         } catch {
             throw FetchError.extractionFailed(error.localizedDescription)
         }
@@ -259,7 +333,7 @@ final class WebFetcher: NSObject {
         })()
         """
         struct Probe: Decodable { let challenged: Bool; let url: String }
-        let probeResult = try await evaluate(probe, as: Probe.self)
+        let probeResult = try await evaluate(probe, as: Probe.self, in: webView)
         guard probeResult.challenged else { return nil }
         return URL(string: probeResult.url)
     }
@@ -268,12 +342,36 @@ final class WebFetcher: NSObject {
 // MARK: - WKNavigationDelegate
 
 extension WebFetcher: WKNavigationDelegate {
+    /// The import web view is allowed exactly the one load `extract` gives it.
+    ///
+    /// `allowsContentJavaScript = false` is not a navigation policy: a `<meta
+    /// http-equiv="refresh">` is the HTML parser's job and runs without scripting.
+    /// Refusing anything but `about:blank` here is what actually keeps an imported
+    /// book inside its own document.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard webView === importView else {
+            // The fetcher's own web view has to be free to navigate: sites bounce
+            // the first request, and clearing a challenge is a navigation.
+            decisionHandler(.allow)
+            return
+        }
+        let isLocal = navigationAction.request.url == Self.localBaseURL
+        decisionHandler(isLocal ? .allow : .cancel)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard webView === navigatingView else { return }
         navigationContinuation?.resume()
         navigationContinuation = nil
+        navigatingView = nil
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard webView === navigatingView else { return }
         fail(with: error)
     }
 
@@ -282,6 +380,7 @@ extension WebFetcher: WKNavigationDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
+        guard webView === navigatingView else { return }
         fail(with: error)
     }
 
@@ -298,5 +397,6 @@ extension WebFetcher: WKNavigationDelegate {
         guard !(nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) else { return }
         navigationContinuation?.resume(throwing: FetchError.navigationFailed(error.localizedDescription))
         navigationContinuation = nil
+        navigatingView = nil
     }
 }

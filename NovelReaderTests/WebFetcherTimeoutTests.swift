@@ -16,7 +16,7 @@ final class WebFetcherTimeoutTests: XCTestCase {
         do {
             // A trigger that does nothing at all: WebKit will never report a
             // navigation, so only the timeout can end this.
-            try await fetcher.navigate(timeout: .milliseconds(200)) {}
+            try await fetcher.navigate(timeout: .milliseconds(200), in: fetcher.webView) {}
             XCTFail("a navigation that never happens must not succeed")
         } catch let error as WebFetcher.FetchError {
             guard case .timedOut = error else {
@@ -32,7 +32,7 @@ final class WebFetcherTimeoutTests: XCTestCase {
         let fetcher = WebFetcher()
         for attempt in 1...3 {
             do {
-                try await fetcher.navigate(timeout: .milliseconds(150)) {}
+                try await fetcher.navigate(timeout: .milliseconds(150), in: fetcher.webView) {}
                 XCTFail("attempt \(attempt) should have timed out")
             } catch {
                 // Expected — what is being checked is that we get here at all.

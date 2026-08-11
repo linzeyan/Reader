@@ -58,9 +58,8 @@ final class EmbeddedHTMLExtractionTests: XCTestCase {
         XCTAssertEqual(payload.paragraphs, [])
     }
 
-    /// A book's own markup must not execute. The document's origin is opaque so it
-    /// could not reach the cookies this web view holds for the user's sites in any
-    /// case, but nothing we extract needs scripting, so it stays off.
+    /// A book's own markup must not execute. Nothing we extract needs scripting, and
+    /// the view it loads into has it switched off permanently.
     func testEmbeddedScriptsDoNotRun() async throws {
         let payload = try await extract("""
         <html><head><title>real</title></head>
@@ -73,9 +72,9 @@ final class EmbeddedHTMLExtractionTests: XCTestCase {
         XCTAssertEqual(payload.paragraphs, ["原文。"])
     }
 
-    /// Whatever an import did to the web view, an ordinary fetch has to still be
-    /// possible afterwards — the two share one instance and one queue.
-    func testFetcherIsStillUsableAfterwards() async throws {
+    /// Repeated imports must keep working, and must leave the fetcher's own web view
+    /// exactly as they found it — the import is loaded somewhere else entirely.
+    func testRepeatedImportsLeaveTheFetchersWebViewAlone() async throws {
         let fetcher = WebFetcher()
         let script = try ExtractorScript.chapter(LocalBookImporter.embeddedDocumentRule)
         for round in 1...3 {
@@ -87,7 +86,59 @@ final class EmbeddedHTMLExtractionTests: XCTestCase {
         }
         XCTAssertTrue(
             fetcher.webView.configuration.defaultWebpagePreferences.allowsContentJavaScript,
-            "content scripting must be restored, or every site fetch would break"
+            "the fetcher's own view must keep scripting — clearing a challenge needs it"
         )
+        XCTAssertNil(
+            fetcher.webView.url,
+            "an import must not navigate the web view that holds the user's cookies"
+        )
+    }
+
+    /// The vulnerability this separation exists for. Switching content scripting off
+    /// does not stop a `<meta http-equiv="refresh">` — the HTML parser implements it
+    /// — so a book used to be able to point the app's cookie-bearing, sheet-visible
+    /// web view at a site of its choosing, with scripting restored by the time the
+    /// navigation landed.
+    func testAMetaRefreshCannotNavigateTheFetchersWebView() async throws {
+        let fetcher = WebFetcher()
+        let script = try ExtractorScript.chapter(LocalBookImporter.embeddedDocumentRule)
+
+        let payload = try await fetcher.extract(
+            html: Data("""
+            <html><head>
+              <meta http-equiv="refresh" content="0;url=https://example.com/hijacked">
+            </head><body><p>正文。</p></body></html>
+            """.utf8),
+            extracting: script, as: ExtractorScript.ChapterPayload.self
+        )
+
+        XCTAssertEqual(payload.paragraphs, ["正文。"], "the text still has to come out")
+        // Give the refresh the chance it would need to fire.
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertNil(fetcher.webView.url)
+        // And the import view itself must not have gone anywhere either.
+        let landed = try await fetcher.extract(
+            html: Data("<html><body><p>第二份。</p></body></html>".utf8),
+            extracting: script, as: ExtractorScript.ChapterPayload.self
+        )
+        XCTAssertEqual(
+            landed.paragraphs, ["第二份。"],
+            "a hijack attempt must not leave the import view stuck on someone else's page"
+        )
+    }
+
+    /// A remote subresource needs no scripting either, and one `<img>` would hand the
+    /// file's author the reader's IP address and the fact they opened this book. The
+    /// text still has to come out with every request blocked.
+    func testADocumentWithRemoteSubresourcesStillExtracts() async throws {
+        let payload = try await extract("""
+        <html><body>
+          <img src="https://example.com/beacon.png" width="1" height="1"/>
+          <link rel="stylesheet" href="https://example.com/style.css"/>
+          <p>雪停了。</p>
+        </body></html>
+        """)
+
+        XCTAssertEqual(payload.paragraphs, ["雪停了。"])
     }
 }
