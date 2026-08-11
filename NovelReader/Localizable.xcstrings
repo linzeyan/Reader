@@ -4080,30 +4080,6 @@
           }
         }
       }
-    },
-    "fetch.error.isolation": {
-      "comment": "An imported file could not be opened in an isolated web view, so it was not opened at all.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This file could not be opened safely, so it was not opened. Please try again."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法在隔离环境中打开这个文件，因此没有打开。请再试一次。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "無法在隔離環境中開啟這個檔案，因此沒有開啟。請再試一次。"
-          }
-        }
-      }
     }
   },
   "version": "1.0"
