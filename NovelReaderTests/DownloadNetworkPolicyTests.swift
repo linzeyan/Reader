@@ -94,7 +94,8 @@ final class DownloadNetworkPolicyTests: XCTestCase {
         let chapters = (1...2).map {
             Chapter(
                 id: "\($0)", bookId: "book", siteChapterId: "\($0)", index: $0,
-                title: "chapter", url: "https://example.com/\($0)", downloadedAt: nil
+                title: "chapter", url: "https://example.com/\($0)", addedAt: nil,
+                downloadedAt: nil
             )
         }
         manager.start(book: book, rule: makeRule(), chapters: chapters)

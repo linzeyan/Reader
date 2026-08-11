@@ -56,7 +56,7 @@ struct LibraryView: View {
                 Section(group.name) {
                     ForEach(group.books) { book in
                         NavigationLink(value: book) {
-                            BookRow(book: book)
+                            BookRow(book: book, newChapterCount: env.newChapterCounts[book.id] ?? 0)
                         }
                         .accessibilityIdentifier("library.book")
                         .swipeActions(edge: .trailing) {
@@ -103,6 +103,11 @@ struct LibraryView: View {
 /// hit looks identical to its library entry.
 struct BookRow: View {
     let book: Book
+    /// Chapters the site has added past the reader's position. Handed in rather
+    /// than counted here: one grouped query fills the whole list (see
+    /// `LibraryRepo.newChapterCounts`), where a per-row count would be one query
+    /// per bookmark every time the shelf is drawn.
+    let newChapterCount: Int
 
     var body: some View {
         HStack(spacing: 12) {
@@ -113,10 +118,17 @@ struct BookRow: View {
                 if let author = book.author, !author.isEmpty {
                     Text(author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                if let index = book.lastReadChapterIndex {
-                    Text("library.progress \(index + 1)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                HStack(spacing: 6) {
+                    if let index = book.lastReadChapterIndex {
+                        Text("library.progress \(index + 1)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    if newChapterCount > 0 {
+                        Text("library.newChapters \(newChapterCount)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.red)
+                    }
                 }
             }
         }
