@@ -98,6 +98,51 @@ final class AppDatabase {
             }
         }
 
+        // The reading position becomes a text anchor (see `TextAnchor`), and saved
+        // positions get a table of their own.
+        //
+        // `lastReadOffset` is *copied*, not discarded: despite the name it already
+        // held a paragraph index — the scroll view recorded which paragraph came
+        // into view — so carrying it over under its true name is the honest
+        // conversion, where resetting it would throw away a position the app really
+        // does know and drop every reader back at the top of their chapter.
+        //
+        // The character offset stays null. Nothing has ever recorded one, and
+        // deriving a plausible value would claim precision the old data never had.
+        //
+        // The old column is dropped rather than left in place: two columns for one
+        // number is how the two of them end up disagreeing.
+        migrator.registerMigration("v4.readingAnchors") { db in
+            try db.alter(table: Book.databaseTableName) { t in
+                t.add(column: "lastReadParagraph", .integer)
+                t.add(column: "lastReadCharacterOffset", .integer)
+            }
+            try db.execute(sql: """
+                UPDATE "book" SET "lastReadParagraph" = "lastReadOffset"
+                WHERE "lastReadOffset" IS NOT NULL
+                """)
+            try db.alter(table: Book.databaseTableName) { t in
+                t.drop(column: "lastReadOffset")
+            }
+
+            // No unique index on the position: `ReadingBookmark.makeId` derives the
+            // primary key from it, so a duplicate cannot be inserted in the first
+            // place. Deleting a book takes its saved positions with it — a bookmark
+            // into a book that is no longer on the shelf has nowhere to jump.
+            try db.create(table: ReadingBookmark.databaseTableName) { t in
+                t.primaryKey("id", .text)
+                t.column("bookId", .text)
+                    .notNull()
+                    .indexed()
+                    .references(Book.databaseTableName, onDelete: .cascade)
+                t.column("chapterIndex", .integer).notNull()
+                t.column("paragraph", .integer).notNull()
+                t.column("characterOffset", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("excerpt", .text)
+            }
+        }
+
         return migrator
     }
 }

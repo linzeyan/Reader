@@ -10,6 +10,15 @@ import Foundation
 /// `Chapter.downloadedAt` means "a local file exists on *this* device"; copying
 /// that flag to a device that has no files would make the reader offer chapters
 /// it cannot open. Downloads stay device-local by design.
+///
+/// **Saved positions (`ReadingBookmark`) are not synced either**, for the same
+/// class of reason. A bookmark names a paragraph inside a chapter as the site rule
+/// on *this* device split it, and rules are installed and derived per device — the
+/// same paragraph index under a different build of a rule is a different sentence.
+/// A reading position that lands a screen off corrects itself as soon as the reader
+/// scrolls; a bookmark that jumps to the wrong sentence is just wrong, with nothing
+/// to correct it. The key budget says the same thing from the other side: this store
+/// is one key per book, and bookmarks per book are unbounded.
 @MainActor
 @Observable
 final class CloudSync {
@@ -26,8 +35,19 @@ final class CloudSync {
         var coverURL: String?
         var addedAt: Date
         var updatedAt: Date
-        var lastReadChapterIndex: Int?
-        var lastReadOffset: Int?
+        /// The reading position, carried as the anchor itself rather than as flat
+        /// fields, so the wire format cannot describe a position the app's own model
+        /// cannot hold.
+        ///
+        /// This replaced a flat `lastReadChapterIndex` / `lastReadOffset` pair, and
+        /// no compatibility path was kept: a payload written by an older build simply
+        /// decodes with `position == nil`, which reads as "this record carries no
+        /// position" — true, since the field it did carry was named for something
+        /// else. Nothing is lost by it. Every record in this store is a mirror of a
+        /// local row, so the device that owns the position re-publishes it in the new
+        /// shape on its next page turn, and the merge is last-writer-wins on
+        /// `updatedAt`, which a mirror of an unchanged row cannot win.
+        var position: ReadingPosition?
     }
 
     private(set) var lastSyncedAt: Date?
@@ -129,7 +149,7 @@ final class CloudSync {
             siteId: book.siteId, siteBookId: book.siteBookId, title: book.title,
             displayName: book.displayName, author: book.author, coverURL: book.coverURL,
             addedAt: book.addedAt, updatedAt: book.updatedAt,
-            lastReadChapterIndex: book.lastReadChapterIndex, lastReadOffset: book.lastReadOffset
+            position: book.readingPosition
         )
         guard let data = try? JSONEncoder().encode(record) else { return }
         store.set(data, forKey: Self.keyPrefix + book.id)
@@ -169,11 +189,8 @@ final class CloudSync {
             now: record.updatedAt
         )
         try repo.rename(bookId: id, to: record.displayName, now: record.updatedAt)
-        if let index = record.lastReadChapterIndex {
-            try repo.updateProgress(
-                bookId: id, chapterIndex: index,
-                offset: record.lastReadOffset ?? 0, now: record.updatedAt
-            )
+        if let position = record.position {
+            try repo.updateProgress(bookId: id, position: position, now: record.updatedAt)
         }
     }
 }

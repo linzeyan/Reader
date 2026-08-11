@@ -11,7 +11,9 @@ import SwiftUI
 /// with one hand, and the top third of a modern iPhone is out of thumb reach.
 struct ReaderView: View {
     let book: Book
-    let startIndex: Int
+    /// Where to open. A position rather than a chapter number, so continuing a book
+    /// and jumping to a saved position are the same operation.
+    let position: ReadingPosition
 
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
@@ -49,7 +51,7 @@ struct ReaderView: View {
             guard model == nil else { return }
             let created = ReaderModel(book: book, env: env)
             model = created
-            await created.start(at: startIndex)
+            await created.start(at: position)
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn }
         .onDisappear {
@@ -99,6 +101,9 @@ struct ReaderView: View {
                     .font(settings.font)
                     .lineSpacing(settings.lineSpacing)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // Every paragraph is a scroll destination, which is what makes a
+                    // stored anchor something the reader can actually land on.
+                    .id(TextAnchor.paragraphID(chapterId: item.chapter.id, paragraph: offset))
                     // Progress is recorded from whatever scrolls into view; there
                     // is no cheaper way to know the reading position in a lazy
                     // stack on iOS 17.
@@ -143,12 +148,22 @@ struct ReaderView: View {
         HStack(spacing: 0) {
             control("chevron.left", label: "common.back") { dismiss() }
             control("list.bullet", label: "reader.catalog") { showCatalog = true }
+            // Filled when the page on screen is already saved: a bookmark the reader
+            // cannot see is one they will add twice.
+            control(
+                model.isCurrentPositionBookmarked ? "bookmark.fill" : "bookmark",
+                label: model.isCurrentPositionBookmarked
+                    ? "reader.bookmark.remove" : "reader.bookmark.add"
+            ) {
+                model.toggleBookmark()
+            }
+            .accessibilityIdentifier("reader.bookmark")
             control("arrow.up.to.line", label: "reader.previousChapter") {
-                Task { await model.jump(to: model.currentChapterIndex - 1) }
+                Task { await model.jump(to: .chapterStart(model.currentChapterIndex - 1)) }
             }
             .disabled(model.currentChapterIndex <= 0)
             control("arrow.down.to.line", label: "reader.nextChapter") {
-                Task { await model.jump(to: model.currentChapterIndex + 1) }
+                Task { await model.jump(to: .chapterStart(model.currentChapterIndex + 1)) }
             }
             .disabled(model.currentChapterIndex >= model.chapters.count - 1)
             control("textformat.size", label: "reader.settings") { showSettings = true }
@@ -179,7 +194,7 @@ struct ReaderView: View {
             List(model?.chapters ?? []) { chapter in
                 Button {
                     showCatalog = false
-                    Task { await model?.jump(to: chapter.index) }
+                    Task { await model?.jump(to: .chapterStart(chapter.index)) }
                 } label: {
                     HStack {
                         ChapterRow(chapter: chapter, book: book)
@@ -218,6 +233,11 @@ final class ReaderModel {
     private(set) var isLoading = false
     private(set) var error: String?
     private(set) var currentChapterIndex = 0
+    private(set) var currentAnchor = TextAnchor.start
+    /// Ids of this book's saved positions, so the bookmark button can show whether
+    /// the page on screen is one of them. Held as a set rather than re-queried on
+    /// every scroll: `note` fires per paragraph.
+    private(set) var bookmarkedIDs: Set<String> = []
     /// Set when the view should scroll somewhere; cleared by the view once done.
     var scrollTarget: String?
 
@@ -226,9 +246,19 @@ final class ReaderModel {
         return last.chapter.index < chapters.count - 1
     }
 
+    var currentPosition: ReadingPosition {
+        ReadingPosition(chapterIndex: currentChapterIndex, anchor: currentAnchor)
+    }
+
+    var isCurrentPositionBookmarked: Bool {
+        bookmarkedIDs.contains(ReadingBookmark.makeId(bookId: book.id, position: currentPosition))
+    }
+
     private let book: Book
     private let env: AppEnvironment
-    private var currentOffset = 0
+    /// The anchor a jump asked for, held until the paragraph it names is actually on
+    /// screen. See `note`.
+    private var restoring: TextAnchor?
     private var persistedIndex: Int?
     /// The one chapter read ahead, held in memory only. Never more than one:
     /// this is here to hide a page load, not to become a second download queue.
@@ -242,26 +272,45 @@ final class ReaderModel {
 
     // MARK: Loading
 
-    func start(at index: Int) async {
+    func start(at position: ReadingPosition) async {
         chapters = (try? env.repo.chapters(bookId: book.id)) ?? []
+        bookmarkedIDs = Set((try? env.repo.readingBookmarks(bookId: book.id))?.map(\.id) ?? [])
         guard !chapters.isEmpty else { return }
-        await jump(to: min(max(index, 0), chapters.count - 1))
+        let index = min(max(position.chapterIndex, 0), chapters.count - 1)
+        await jump(to: ReadingPosition(chapterIndex: index, anchor: position.anchor))
     }
 
-    /// Replaces what is on screen with a single chapter. Everything before it is
-    /// dropped rather than kept: an unbounded scroll history is the fastest way
-    /// to make a long novel run the app out of memory.
-    func jump(to index: Int) async {
-        guard chapters.indices.contains(index) else { return }
+    /// Replaces what is on screen with a single chapter, landing on `position`.
+    /// Everything before it is dropped rather than kept: an unbounded scroll history
+    /// is the fastest way to make a long novel run the app out of memory.
+    func jump(to position: ReadingPosition) async {
+        guard chapters.indices.contains(position.chapterIndex) else { return }
         persistProgress()
         // Whatever was read ahead belonged to the old position.
         readAheadTask?.cancel()
         readAhead = nil
         loaded = []
-        currentChapterIndex = index
-        currentOffset = 0
-        await append(chapters[index])
-        scrollTarget = chapters[index].id
+        currentChapterIndex = position.chapterIndex
+        currentAnchor = position.anchor
+        await append(chapters[position.chapterIndex])
+        let landing = landingAnchor(for: position.anchor)
+        currentAnchor = landing
+        // Only worth guarding when there is text above the landing paragraph for the
+        // scroll to travel through.
+        restoring = landing.paragraph > 0 ? landing : nil
+        scrollTarget = landing.scrollID(chapterId: chapters[position.chapterIndex].id)
+    }
+
+    /// A stored anchor can outlive the text it named: a chapter re-fetched from the
+    /// site can come back with fewer paragraphs than when the position was recorded.
+    /// Clamping keeps the jump inside the chapter — the end of the right chapter is
+    /// closer to the truth than not moving at all, and an anchor that no paragraph
+    /// can satisfy would leave `note` waiting for a paragraph that never appears.
+    private func landingAnchor(for anchor: TextAnchor) -> TextAnchor {
+        let count = loaded.first?.paragraphs.count ?? 0
+        guard count > 0 else { return .start }
+        guard anchor.paragraph >= count else { return anchor }
+        return TextAnchor(paragraph: count - 1, characterOffset: 0)
     }
 
     func loadNext() async {
@@ -356,18 +405,62 @@ final class ReaderModel {
 
     // MARK: Progress
 
+    /// Records that a paragraph came into view.
+    ///
+    /// Notes are ignored until a jump has landed. Restoring a position renders every
+    /// paragraph the scroll passes on the way down, and the last of those to appear
+    /// would otherwise overwrite the position just restored with one near the top of
+    /// the chapter — turning "continue reading" into "read this chapter again".
     func note(chapterIndex: Int, paragraph: Int) {
+        if let restoring {
+            guard chapterIndex == currentChapterIndex, paragraph >= restoring.paragraph else { return }
+            self.restoring = nil
+        }
         currentChapterIndex = chapterIndex
-        currentOffset = paragraph
+        // A scroll view can only say which paragraph appeared, so the offset within
+        // it is honestly zero rather than guessed at. See `TextAnchor`.
+        currentAnchor = TextAnchor(paragraph: paragraph, characterOffset: 0)
     }
 
     /// Written on chapter change and on leaving the reader rather than on every
     /// paragraph: the position only matters when reading stops.
     func persistProgress() {
         guard !loaded.isEmpty else { return }
-        guard persistedIndex != currentChapterIndex || currentOffset > 0 else { return }
+        guard persistedIndex != currentChapterIndex || currentAnchor.paragraph > 0 else { return }
         persistedIndex = currentChapterIndex
-        env.recordProgress(book: book, chapterIndex: currentChapterIndex, offset: currentOffset)
+        env.recordProgress(book: book, position: currentPosition)
+    }
+
+    // MARK: Saved positions
+
+    /// One button both saves and unsaves, because the filled icon is the only thing
+    /// on screen that says this page is already saved — so the tap that produced it
+    /// has to be the tap that undoes it.
+    ///
+    /// No confirmation, matching the library's rule: the app asks before a delete
+    /// that destroys text it cannot fetch again (`LibraryView`), and the sentence a
+    /// bookmark points at stays exactly where it was.
+    func toggleBookmark() {
+        let position = currentPosition
+        let id = ReadingBookmark.makeId(bookId: book.id, position: position)
+        if bookmarkedIDs.contains(id) {
+            try? env.repo.removeReadingBookmark(id: id)
+            bookmarkedIDs.remove(id)
+        } else {
+            _ = try? env.repo.addReadingBookmark(
+                bookId: book.id, position: position, excerpt: currentExcerpt()
+            )
+            bookmarkedIDs.insert(id)
+        }
+    }
+
+    /// Captured at save time rather than looked up when the list is drawn: the text
+    /// of a chapter read online is held in memory only, so by the time the list
+    /// appears there may be nothing left to quote.
+    private func currentExcerpt() -> String? {
+        guard let chapter = loaded.first(where: { $0.chapter.index == currentChapterIndex })
+        else { return nil }
+        return currentAnchor.excerpt(in: chapter.paragraphs)
     }
 }
 

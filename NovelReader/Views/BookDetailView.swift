@@ -54,7 +54,7 @@ struct BookDetailView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(filtered) { chapter in
-                        NavigationLink(value: ReadingTarget(book: current, startIndex: chapter.index)) {
+                        NavigationLink(value: ReadingTarget(book: current, position: .chapterStart(chapter.index))) {
                             ChapterRow(chapter: chapter, book: current)
                         }
                     }
@@ -67,7 +67,7 @@ struct BookDetailView: View {
         .navigationTitle(current.shownName)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: ReadingTarget.self) { target in
-            ReaderView(book: target.book, startIndex: target.startIndex)
+            ReaderView(book: target.book, position: target.position)
         }
         .toolbar {
             // Hidden, not disabled, for an imported book: there is nowhere to
@@ -137,14 +137,29 @@ struct BookDetailView: View {
 
     @ViewBuilder
     private var actions: some View {
-        NavigationLink(value: ReadingTarget(book: current, startIndex: current.lastReadChapterIndex ?? 0)) {
+        // Continuing lands on the stored anchor, not merely in the right chapter:
+        // that is the whole point of recording a paragraph.
+        NavigationLink(
+            value: ReadingTarget(book: current, position: current.readingPosition ?? .chapterStart(0))
+        ) {
             Label(
-                current.lastReadChapterIndex == nil ? "book.startReading" : "book.continueReading",
+                current.readingPosition == nil ? "book.startReading" : "book.continueReading",
                 systemImage: "book"
             )
         }
         .accessibilityIdentifier("book.read")
         .disabled(chapters.isEmpty)
+
+        // Always present, and with no count on it. A row that appears only once the
+        // feature has been used is a feature nobody finds, and a count cached here
+        // would go stale the moment a bookmark is added in the reader pushed on top
+        // of this screen — the list itself is the one place that cannot be wrong.
+        NavigationLink {
+            BookmarkListView(book: current)
+        } label: {
+            Label("bookmarks.title", systemImage: "bookmark")
+        }
+        .accessibilityIdentifier("book.bookmarks")
 
         // One entry point rather than "download all" and "delete all" buttons:
         // both of those live on the management screen now, next to the
@@ -330,7 +345,7 @@ struct BookExportDocument: FileDocument {
 /// 600-element array pushed through the stack.
 struct ReadingTarget: Hashable {
     let book: Book
-    let startIndex: Int
+    let position: ReadingPosition
 }
 
 struct ChapterRow: View {

@@ -93,7 +93,7 @@ enum DemoSeed {
             )
         }
         if let chapter = demo.readingChapter {
-            try? env.repo.updateProgress(bookId: book.id, chapterIndex: chapter, offset: 0)
+            try? env.repo.updateProgress(bookId: book.id, position: .chapterStart(chapter))
         }
     }
 
