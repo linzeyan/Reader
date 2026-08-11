@@ -68,6 +68,30 @@ final class ZipArchiveTests: XCTestCase {
         }
     }
 
+    /// The failure with no other symptom: one flipped byte in a *stored* entry
+    /// comes back the right length and reads as text, so without the checksum it
+    /// would land in a chapter file and only ever look like a typo in the novel.
+    ///
+    /// The byte is flipped in the payload rather than in the recorded checksum,
+    /// because that is the direction damage actually travels — a truncated
+    /// download or a bad copy corrupts the data, not the directory.
+    func testCorruptedStoredEntryIsRefused() throws {
+        var bytes = ZipWriter.archive([
+            ZipWriter.Entry(name: "c1.xhtml", text: "<html><body><p>月光落在草上。</p></body></html>")
+        ])
+        // A stored entry's payload begins right after the local header and its
+        // name; `ZipWriter` writes no extra field, so the offset is exact.
+        let payload = 30 + "c1.xhtml".utf8.count
+        bytes[payload + 9] ^= 0x01
+
+        let archive = try ZipArchive(data: bytes)
+        XCTAssertThrowsError(try archive.data(named: "c1.xhtml")) { error in
+            guard case ZipArchive.ZipError.checksumMismatch = error else {
+                return XCTFail("expected a checksum error, got \(error)")
+            }
+        }
+    }
+
     func testUnsupportedCompressionMethodIsRefused() {
         let bytes = ZipWriter.archive([
             // 12 is bzip2: legal ZIP, never used by an EPUB, and not something we

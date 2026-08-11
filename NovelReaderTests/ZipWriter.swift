@@ -121,9 +121,9 @@ enum ZipWriter {
         return output.prefix(written)
     }
 
-    /// `ZipArchive` does not verify the checksum, but a fixture that is a valid
-    /// archive is worth the eight lines: it stays usable if that ever changes,
-    /// and it can be opened by other tools while debugging.
+    /// Computed here rather than through the app's own `Crc32`, deliberately: the
+    /// reader verifies this field, and a fixture that borrowed the very code under
+    /// test would agree with it even if both were wrong.
     private static func crc32(_ data: Data) -> UInt32 {
         var crc: UInt32 = 0xffff_ffff
         for byte in data {
