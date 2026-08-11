@@ -5016,7 +5016,127 @@
           }
         }
       }
-    }
+    },
+      "reader.settings.mode": {
+        "comment": "Picker label for how the reader turns text: one continuous scroll, or fixed pages.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Page turning"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "翻页方式"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "翻頁方式"
+            }
+          }
+        }
+      },
+      "reader.settings.mode.scroll": {
+        "comment": "Reading mode: one continuous scrolling column.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Scroll"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "滚动"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "捲動"
+            }
+          }
+        }
+      },
+      "reader.settings.mode.paginated": {
+        "comment": "Reading mode: fixed pages turned left and right.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Pages"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "分页"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "分頁"
+            }
+          }
+        }
+      },
+      "reader.page %lld %lld": {
+        "comment": "Accessibility label for the page counter in the paginated reader: current page of a known total.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Page %1$lld of %2$lld"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "第 %1$lld 页，共 %2$lld 页"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "第 %1$lld 頁，共 %2$lld 頁"
+            }
+          }
+        }
+      },
+      "reader.page.partial %lld %lld": {
+        "comment": "Accessibility label for the page counter while the rest of the chapter is still being laid out, so the total is a lower bound.",
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Page %1$lld of at least %2$lld"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "第 %1$lld 页，至少共 %2$lld 页"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "第 %1$lld 頁，至少共 %2$lld 頁"
+            }
+          }
+        }
+      }
   },
   "version": "1.0"
 }

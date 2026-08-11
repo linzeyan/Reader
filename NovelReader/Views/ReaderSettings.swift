@@ -77,8 +77,28 @@ final class ReaderSettings {
         }
     }
 
+    /// How the text moves under the reader.
+    ///
+    /// Two renderers rather than one engine with a flag: a continuous column across
+    /// chapter boundaries and a fixed page are different reading experiences, not
+    /// different animations, and readers hold strong opinions about which one a novel
+    /// belongs in. Scrolling stays the default — it is what the app has always done.
+    enum Mode: String, CaseIterable, Identifiable {
+        case scroll, paginated
+
+        var id: String { rawValue }
+
+        var nameKey: LocalizedStringKey {
+            switch self {
+            case .scroll: return "reader.settings.mode.scroll"
+            case .paginated: return "reader.settings.mode.paginated"
+            }
+        }
+    }
+
     static let shared = ReaderSettings()
 
+    var mode: Mode { didSet { defaults.set(mode.rawValue, forKey: Keys.mode) } }
     var fontSize: Double { didSet { defaults.set(fontSize, forKey: Keys.fontSize) } }
     var lineSpacing: Double { didSet { defaults.set(lineSpacing, forKey: Keys.lineSpacing) } }
     var paragraphSpacing: Double { didSet { defaults.set(paragraphSpacing, forKey: Keys.paragraphSpacing) } }
@@ -96,6 +116,7 @@ final class ReaderSettings {
     }
 
     private enum Keys {
+        static let mode = "reader.mode"
         static let fontSize = "reader.fontSize"
         static let lineSpacing = "reader.lineSpacing"
         static let paragraphSpacing = "reader.paragraphSpacing"
@@ -108,6 +129,7 @@ final class ReaderSettings {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        mode = (defaults.string(forKey: Keys.mode).flatMap(Mode.init(rawValue:))) ?? .scroll
         fontSize = defaults.object(forKey: Keys.fontSize) as? Double ?? 19
         lineSpacing = defaults.object(forKey: Keys.lineSpacing) as? Double ?? 9
         paragraphSpacing = defaults.object(forKey: Keys.paragraphSpacing) as? Double ?? 14

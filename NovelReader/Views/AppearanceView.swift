@@ -11,6 +11,19 @@ struct ReadingAppearanceSections: View {
 
     var body: some View {
         Group {
+            Section {
+                // First, and segmented: it is the one setting here that changes how
+                // the page behaves rather than how it looks, and the rest of this
+                // form reads differently depending on which side it is on.
+                Picker("reader.settings.mode", selection: $settings.mode) {
+                    ForEach(ReaderSettings.Mode.allCases) { mode in
+                        Text(mode.nameKey).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("reader.settings.mode")
+            }
+
             Section("reader.settings.text") {
                 Picker("reader.settings.font", selection: $settings.fontName) {
                     Text("reader.settings.font.system").tag(String?.none)
