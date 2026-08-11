@@ -43,4 +43,19 @@ extension DownloadSettings.NetworkPolicy {
     func needsConfirmation(on connection: NetworkMonitor.Connection) -> Bool {
         self == .wifiOnly && connection == .cellular
     }
+
+    /// Whether a download may run with nobody there to ask.
+    ///
+    /// Deliberately stricter than `needsConfirmation`, and the asymmetry is the
+    /// point. In the foreground an unreported connection asks nothing, because the
+    /// user is holding the phone and a warning about cellular on a device that
+    /// turns out to be on Wi-Fi is a lie. In the background the same uncertainty
+    /// has to resolve the other way: guessing wrong spends somebody's data plan
+    /// while their phone is in a pocket, and guessing "no" costs one wake-up.
+    func allowsUnattendedDownload(on connection: NetworkMonitor.Connection) -> Bool {
+        switch self {
+        case .wifiOnly: return connection == .wifi
+        case .wifiAndCellular: return connection != .offline
+        }
+    }
 }

@@ -50,9 +50,16 @@ final class DownloadManager {
     /// Set while the queue is meant to stop after the chapter on the wire.
     private(set) var isDraining = false
     private var drainReason: String?
-    /// Whatever is being held open to pay for that last chapter — a background
-    /// assertion, in the only case that uses this.
+    /// Whatever is being held open until the queue comes to rest — a background
+    /// assertion, or a `BGTask` waiting to hand the system's time back.
     private var onStopped: (() -> Void)?
+    /// Which run the queue is on.
+    ///
+    /// A cancelled run still executes: the task body is scheduled, runs once, and
+    /// reaches its `defer`. Without this it would release a hold taken out by the
+    /// run that *replaced* it — telling a background window its queue had come to
+    /// rest before the first chapter had even been requested.
+    private var runToken = 0
 
     init(service: BookService, downloads: DownloadStore, pacer: RequestPacer) {
         self.service = service
@@ -62,6 +69,10 @@ final class DownloadManager {
 
     var isBusy: Bool { status == .running }
     var canResume: Bool { status == .paused && !remaining.isEmpty }
+    /// How many chapters the queue still owes. Read by the background task, which
+    /// has to be able to report how much a wake-up actually achieved — and whose
+    /// whole purpose is to answer whether it achieved anything at all.
+    var remainingCount: Int { remaining.count }
 
     // MARK: - Control
 
@@ -120,11 +131,18 @@ final class DownloadManager {
         self.onStopped = onStopped
     }
 
-    func resume() {
+    /// - Parameter onStopped: called once the queue comes back to rest, however it
+    ///   ends — emptied, stuck on a challenge, or paused from outside. Set after
+    ///   `run`, which clears any hold a previous drain request left behind.
+    ///   `stopAfterCurrentChapter` uses the same slot: a background window wants
+    ///   the whole queue rather than one chapter, but wants telling at the same
+    ///   moment, because that is when it can hand the system's time back.
+    func resume(onStopped: (() -> Void)? = nil) {
         guard canResume else { return }
         pendingChallenge = nil
         lastError = nil
         run()
+        if let onStopped { self.onStopped = onStopped }
     }
 
     func cancel() {
@@ -148,12 +166,15 @@ final class DownloadManager {
         // next one it would stop that run after a single chapter, with nothing
         // on screen to explain why.
         clearDrain()
+        runToken += 1
+        let token = runToken
         task = Task { [weak self] in
             guard let self else { return }
             // Released on every exit — normal end, cancellation, challenge,
             // drain. A background assertion held past the point where the queue
-            // stopped is time iOS took from the user for nothing.
-            defer { self.notifyStopped() }
+            // stopped is time iOS took from the user for nothing. Only for this
+            // run, though: see `runToken`.
+            defer { if self.runToken == token { self.notifyStopped() } }
             while !Task.isCancelled, let chapter = self.remaining.first {
                 do {
                     let paragraphs = try await self.service.chapterParagraphs(

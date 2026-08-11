@@ -26,6 +26,14 @@ final class AppEnvironment {
     let downloadSettings: DownloadSettings
     let librarySettings: LibrarySettings
     let localImporter: LocalBookImporter
+    let backgroundDownloads: BackgroundDownloads
+
+    /// The environment the running app is using, for the one caller that cannot be
+    /// handed it: `BGTaskScheduler`'s launch handler is registered before any view
+    /// exists and can fire without one ever existing. Weak on purpose — a
+    /// background launch with no scene must report a lost queue rather than build
+    /// a second object graph nobody owns.
+    private(set) static weak var live: AppEnvironment?
 
     /// The library, kept here so every screen sees the same list without each one
     /// re-querying on appear.
@@ -73,15 +81,24 @@ final class AppEnvironment {
         self.search = SearchService(fetcher: fetcher)
         let pacer = RequestPacer()
         self.pacer = pacer
-        self.downloader = DownloadManager(service: bookService, downloads: self.downloads, pacer: pacer)
+        let downloader = DownloadManager(
+            service: bookService, downloads: self.downloads, pacer: pacer
+        )
+        self.downloader = downloader
         self.localImporter = LocalBookImporter(
             repo: repo, downloads: self.downloads, fetcher: fetcher
         )
         self.cloud = CloudSync(repo: repo)
         let monitor = NetworkMonitor()
         self.monitor = monitor
-        self.downloadSettings = DownloadSettings()
+        let downloadSettings = DownloadSettings()
+        self.downloadSettings = downloadSettings
         self.librarySettings = LibrarySettings()
+        self.backgroundDownloads = BackgroundDownloads(
+            downloader: downloader,
+            settings: downloadSettings,
+            connection: { monitor.connection }
+        )
         self.cloud.onRemoteChange = { [weak self] in self?.reloadLibrary() }
         monitor.onChange = { [weak self] _ in self?.enforceNetworkPolicy() }
         reloadLibrary()
@@ -89,6 +106,9 @@ final class AppEnvironment {
 
     static func makeShared() -> AppEnvironment {
         let env = makeFromDisk()
+        // Only the app's own graph is published. Environments built directly — by
+        // tests — must not become the one a background task would drive.
+        live = env
         #if DEBUG
         // Screenshot mode: a launch argument swaps in a fictional demo library.
         // Debug-only, so a shipping binary does not contain it.
@@ -326,6 +346,9 @@ final class AppEnvironment {
     /// queue finishes that one chapter, then pauses with a reason, and the
     /// assertion is released the moment it comes to rest rather than being held
     /// for the full grace period.
+    ///
+    /// What is left over is handed to `BGTaskScheduler`, which is the only way the
+    /// rest of a long book can arrive without the app being on screen.
     func enterBackground() {
         guard downloader.isBusy else { return }
         resumeWhenActive = true
@@ -339,7 +362,14 @@ final class AppEnvironment {
             }
         }
         downloader.stopAfterCurrentChapter(reason: reason) { [weak self] in
-            self?.endBackgroundAssertion()
+            guard let self else { return }
+            self.endBackgroundAssertion()
+            // Asked for here, and only here, because this is the first moment the
+            // answer is known: the chapter that was on the wire may have been the
+            // last one. It is also the only place that knows the queue was stopped
+            // *by the app leaving* — a queue the user paused themselves must not be
+            // restarted behind their back.
+            self.backgroundDownloads.scheduleIfNeeded()
         }
     }
 

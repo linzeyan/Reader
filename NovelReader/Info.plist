@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Continues a chapter download that backgrounding had to pause. Must match
+	     BackgroundDownloads.identifier; iOS traps at registration otherwise. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.zeyanlin.novelreader.downloads</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
@@ -71,6 +77,14 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- "processing" only. A paced download of a long book is minutes of work, not
+	     the seconds an app-refresh window grants, and it is not a background
+	     URLSession: the chapters come through the one WKWebView that holds the
+	     site's Cloudflare clearance cookie. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

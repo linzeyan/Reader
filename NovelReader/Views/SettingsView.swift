@@ -41,6 +41,8 @@ struct SettingsView: View {
                     Text("settings.downloadNetwork.footer")
                 }
 
+                BackgroundDownloadsSection()
+
                 Section {
                     NavigationLink("settings.storage") { StorageView() }
                         .accessibilityIdentifier("settings.storage")
@@ -64,6 +66,64 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "—"
         let build = info?["CFBundleVersion"] as? String ?? "—"
         return "\(short) (\(build))"
+    }
+}
+
+// MARK: - Background downloads
+
+/// The only window onto a feature that by definition runs where nobody can see
+/// it. Without this the honest answer to "did it download anything overnight?" is
+/// "look at the chapter list and guess", which cannot distinguish a background
+/// window that never got granted from one that ran and fetched nothing because
+/// iOS had suspended the web content process.
+private struct BackgroundDownloadsSection: View {
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        Section {
+            if let run = env.backgroundDownloads.lastRun {
+                LabeledContent("settings.background.when") {
+                    Text(run.startedAt, format: .relative(presentation: .named))
+                }
+                LabeledContent("settings.background.result") {
+                    Text(Self.label(for: run.outcome))
+                }
+                LabeledContent("settings.background.chapters", value: "\(run.chapters)")
+                LabeledContent("settings.background.connection") {
+                    Text(Self.label(for: run.connection))
+                }
+            } else {
+                Text("settings.background.never").foregroundStyle(.secondary)
+            }
+            if let error = env.backgroundDownloads.lastScheduleError {
+                LabeledContent("settings.background.scheduleError") { Text(error) }
+                    .foregroundStyle(.orange)
+            }
+        } header: {
+            Text("settings.background")
+        } footer: {
+            Text("settings.background.footer")
+        }
+    }
+
+    private static func label(for outcome: BackgroundDownloadRun.Outcome) -> LocalizedStringKey {
+        switch outcome {
+        case .completed: return "settings.background.outcome.completed"
+        case .expired: return "settings.background.outcome.expired"
+        case .stalled: return "settings.background.outcome.stalled"
+        case .blockedByPolicy: return "settings.background.outcome.blockedByPolicy"
+        case .nothingToDo: return "settings.background.outcome.nothingToDo"
+        case .queueLost: return "settings.background.outcome.queueLost"
+        }
+    }
+
+    private static func label(for connection: NetworkMonitor.Connection) -> LocalizedStringKey {
+        switch connection {
+        case .wifi: return "settings.background.connection.wifi"
+        case .cellular: return "settings.background.connection.cellular"
+        case .offline: return "settings.background.connection.offline"
+        case .unknown: return "settings.background.connection.unknown"
+        }
     }
 }
 
