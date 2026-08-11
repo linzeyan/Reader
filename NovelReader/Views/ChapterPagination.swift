@@ -51,6 +51,10 @@ struct ChapterText {
     /// index a `TextAnchor` stores. Excludes the newline that separates paragraphs,
     /// so an offset inside a range is always an offset inside real text.
     let paragraphRanges: [NSRange]
+    /// The composed text as an `NSString`. Held rather than bridged on demand because
+    /// every offset in this type is a UTF-16 index, and a press-and-drag asks for
+    /// characters dozens of times a second.
+    private let characters: NSString
 
     init(title: String, paragraphs: [String], typography: ReaderTypography) {
         let composed = NSMutableAttributedString()
@@ -95,6 +99,169 @@ struct ChapterText {
 
         attributed = composed
         paragraphRanges = ranges
+        characters = composed.string as NSString
+    }
+}
+
+// MARK: - Text coordinates
+
+/// Converting between stored anchors and offsets into the composed chapter.
+///
+/// Lives on the text rather than on the paginator because none of it depends on
+/// layout: the scrolling reader needs the same answers, and a copy of this arithmetic
+/// on the other side of the app is how one highlight ends up covering two different
+/// passages.
+extension ChapterText {
+    /// UTF-16 offset into the composed chapter for an anchor.
+    ///
+    /// Clamps rather than fails: a stored anchor can outlive the text it named when a
+    /// chapter comes back from the site shorter than it was, and the end of the right
+    /// chapter is closer to the truth than refusing to open it. Mirrors the scrolling
+    /// reader's `landingAnchor`.
+    func offset(for anchor: TextAnchor) -> Int {
+        guard !paragraphRanges.isEmpty else { return 0 }
+        let index = min(max(anchor.paragraph, 0), paragraphRanges.count - 1)
+        let range = paragraphRanges[index]
+        return range.location + min(max(anchor.characterOffset, 0), range.length)
+    }
+
+    /// The anchor for a position in the composed chapter.
+    ///
+    /// Never rounds *forward* to the next paragraph. Switching renderers loses the
+    /// character offset — a scroll view can only put a whole paragraph at the top of
+    /// the screen — so an anchor that erred forwards would let a mode switch skip
+    /// text. Erring backwards re-shows a line the reader has already read, which they
+    /// will forgive.
+    func anchor(atOffset offset: Int) -> TextAnchor {
+        // Before the first paragraph is the chapter heading, which belongs to the
+        // start of the chapter rather than to a paragraph of its own.
+        guard let index = paragraphRanges.lastIndex(where: { $0.location <= offset }) else {
+            return .start
+        }
+        let range = paragraphRanges[index]
+        return TextAnchor(
+            paragraph: index,
+            characterOffset: min(offset - range.location, range.length)
+        )
+    }
+
+    /// The composed ranges one highlight covers, one per paragraph it touches.
+    ///
+    /// Per paragraph rather than a single run from start to end, so the separators
+    /// between paragraphs are left unpainted. The scrolling reader draws paragraphs as
+    /// separate views and has no separator to paint; painting one here would make the
+    /// same highlight look like a different shape in each mode.
+    func ranges(of highlight: TextHighlight) -> [NSRange] {
+        guard !paragraphRanges.isEmpty else { return [] }
+        let lower = max(highlight.startParagraph, 0)
+        let upper = min(highlight.endParagraph, paragraphRanges.count - 1)
+        guard lower <= upper else { return [] }
+        return (lower...upper).compactMap { index in
+            let paragraph = paragraphRanges[index]
+            guard let inParagraph = highlight.range(
+                inParagraph: index, length: paragraph.length
+            ) else { return nil }
+            return NSRange(
+                location: paragraph.location + inParagraph.location, length: inParagraph.length
+            )
+        }
+    }
+
+    /// The anchor pair and quoted text a composed range names.
+    ///
+    /// The quote keeps the separators the painting drops: a passage that runs from the
+    /// end of one paragraph into the next reads as two lines in the marks list, which
+    /// is what it looked like on the page.
+    func selection(for range: NSRange) -> TextSelection? {
+        guard range.length > 0, NSMaxRange(range) <= characters.length else { return nil }
+        return TextSelection(
+            start: anchor(atOffset: range.location),
+            end: anchor(atOffset: NSMaxRange(range)),
+            text: characters.substring(with: range)
+        )
+    }
+}
+
+// MARK: - Sentence snapping
+
+/// Growing a press-and-drag into something worth marking.
+///
+/// Selection is snapped to whole sentences rather than to characters, and that is the
+/// reason the paginated reader needs no drag handles. A finger covers the text it is
+/// selecting, so character-precise dragging on a phone means aiming at glyphs the hand
+/// is hiding; sentences are boundaries a reader can see before they press. It also
+/// means a highlight can never start mid-word or end mid-clause, which is the failure
+/// mode of every handle-free selection that snaps to nothing.
+extension ChapterText {
+    /// What ends a sentence.
+    ///
+    /// The CJK terminators this app mostly reads, plus the Latin ones. `.` is included
+    /// knowing it splits "Mr. Smith" wrongly: over-splitting is recoverable by sliding
+    /// the finger further, whereas a paragraph with no terminator at all can only be
+    /// marked whole.
+    private static let terminators = Set("。．！？!?；;…⋯.".unicodeScalars.map { UInt16($0.value) })
+
+    /// Punctuation that belongs to the sentence it closes, so 「…。」 ends after the
+    /// bracket rather than between the two marks.
+    private static let closers = Set("」』〉》】）)］]｝}”’\"'".unicodeScalars.map { UInt16($0.value) })
+
+    /// Expands two character positions into the whole sentences they fall in.
+    ///
+    /// Returns nil for anything a `TextAnchor` cannot name — the chapter heading sits
+    /// before the first paragraph, and a highlight on it could not be stored, let alone
+    /// found again.
+    func sentenceRange(from: Int, to: Int) -> NSRange? {
+        guard let first = paragraphRanges.first else { return nil }
+        let lower = min(from, to)
+        let upper = max(from, to)
+        guard upper >= first.location else { return nil }
+        let startParagraph = paragraphRanges[anchor(atOffset: max(lower, first.location)).paragraph]
+        let endParagraph = paragraphRanges[anchor(atOffset: upper).paragraph]
+        let head = sentenceStart(at: lower, in: startParagraph)
+        let tail = sentenceEnd(at: upper, in: endParagraph)
+        guard tail > head else { return nil }
+        return NSRange(location: head, length: tail - head)
+    }
+
+    /// The sentence boundary at or before `offset`, never leaving the paragraph.
+    private func sentenceStart(at offset: Int, in paragraph: NSRange) -> Int {
+        var index = clamp(offset, to: paragraph)
+        while index > paragraph.location, !endsSentence(before: index, in: paragraph) {
+            index -= 1
+        }
+        return index
+    }
+
+    /// The sentence boundary after `offset`, never leaving the paragraph.
+    ///
+    /// Starts one past the offset so that pressing *on* a full stop selects the
+    /// sentence it ends rather than the one after it.
+    private func sentenceEnd(at offset: Int, in paragraph: NSRange) -> Int {
+        let end = NSMaxRange(paragraph)
+        var index = min(clamp(offset, to: paragraph) + 1, end)
+        while index < end, !endsSentence(before: index, in: paragraph) {
+            index += 1
+        }
+        return index
+    }
+
+    /// Whether a sentence finishes immediately before `index`.
+    private func endsSentence(before index: Int, in paragraph: NSRange) -> Bool {
+        let end = NSMaxRange(paragraph)
+        guard index > paragraph.location, index <= end else { return false }
+        // A closer sitting at this position still belongs to the sentence being closed,
+        // so the boundary is on the far side of it.
+        if index < end, Self.closers.contains(characters.character(at: index)) { return false }
+        var scan = index - 1
+        while scan >= paragraph.location, Self.closers.contains(characters.character(at: scan)) {
+            scan -= 1
+        }
+        guard scan >= paragraph.location else { return false }
+        return Self.terminators.contains(characters.character(at: scan))
+    }
+
+    private func clamp(_ offset: Int, to paragraph: NSRange) -> Int {
+        min(max(offset, paragraph.location), NSMaxRange(paragraph))
     }
 }
 
@@ -281,7 +448,7 @@ final class ChapterPaginator {
 
     /// The page showing the text an anchor names, measuring as far as it takes.
     func pageIndex(for anchor: TextAnchor) -> Int {
-        let target = offset(for: anchor)
+        let target = text.offset(for: anchor)
         var index = 0
         while true {
             paginate(through: index)
@@ -300,39 +467,61 @@ final class ChapterPaginator {
     func anchor(at pageIndex: Int) -> TextAnchor {
         paginate(through: pageIndex)
         guard pages.indices.contains(pageIndex) else { return .start }
-        return anchor(atOffset: pages[pageIndex].range.location)
+        return text.anchor(atOffset: pages[pageIndex].range.location)
     }
 
-    /// UTF-16 offset into the composed chapter for an anchor.
+    // MARK: - Touching text
+
+    /// The character under a point on a page, in the page's own coordinates.
     ///
-    /// Clamps rather than fails: a stored anchor can outlive the text it named when a
-    /// chapter comes back from the site shorter than it was, and the end of the right
-    /// chapter is closer to the truth than refusing to open it. Mirrors the scrolling
-    /// reader's `landingAnchor`.
-    func offset(for anchor: TextAnchor) -> Int {
-        guard !text.paragraphRanges.isEmpty else { return 0 }
-        let index = min(max(anchor.paragraph, 0), text.paragraphRanges.count - 1)
-        let range = text.paragraphRanges[index]
-        return range.location + min(max(anchor.characterOffset, 0), range.length)
+    /// The one thing only the paginated renderer can answer, and therefore the reason
+    /// highlights are made here and nowhere else: a scroll view of SwiftUI `Text`
+    /// knows which paragraph is on screen, this knows which character is under a
+    /// finger.
+    ///
+    /// Clamped into the page rather than allowed to run off it, so a finger dragged
+    /// past the bottom edge selects to the end of what the reader can see instead of
+    /// silently marking text on a page they have not turned to.
+    func offset(at point: CGPoint, onPage index: Int) -> Int? {
+        guard pages.indices.contains(index) else { return nil }
+        let page = pages[index]
+        let inColumn = CGPoint(x: point.x, y: point.y + page.top)
+        guard let fragment = layoutManager.textLayoutFragment(for: inColumn) else { return nil }
+        let frame = fragment.layoutFragmentFrame
+        let local = CGPoint(x: inColumn.x - frame.minX, y: inColumn.y - frame.minY)
+        guard let line = fragment.textLineFragments.last(where: {
+            $0.typographicBounds.minY <= local.y
+        }) ?? fragment.textLineFragments.first else { return nil }
+        let bounds = line.typographicBounds
+        let inLine = CGPoint(x: local.x - bounds.minX, y: local.y - bounds.minY)
+        let offset = offset(of: fragment.rangeInElement.location)
+            + line.characterRange.location
+            + line.characterIndex(for: inLine)
+        return min(max(offset, page.range.location), NSMaxRange(page.range))
     }
 
-    /// The anchor for a position in the composed chapter.
+    /// Rects covering a character range on one page, in the page's own coordinates.
     ///
-    /// Never rounds *forward* to the next paragraph. Switching renderers loses the
-    /// character offset — a scroll view can only put a whole paragraph at the top of
-    /// the screen — so an anchor that erred forwards would let a mode switch skip
-    /// text. Erring backwards re-shows a line the reader has already read, which they
-    /// will forgive.
-    private func anchor(atOffset offset: Int) -> TextAnchor {
-        let ranges = text.paragraphRanges
-        // Before the first paragraph is the chapter heading, which belongs to the
-        // start of the chapter rather than to a paragraph of its own.
-        guard let index = ranges.lastIndex(where: { $0.location <= offset }) else { return .start }
-        let range = ranges[index]
-        return TextAnchor(
-            paragraph: index,
-            characterOffset: min(offset - range.location, range.length)
-        )
+    /// One rect per line, so a passage that wraps is marked as the lines a reader sees
+    /// rather than as one block over the whole column. Empty when the range is on
+    /// another page: a highlight that straddles a page break is drawn as its visible
+    /// part on each side, from the same stored anchors.
+    func rects(for range: NSRange, onPage index: Int) -> [CGRect] {
+        guard pages.indices.contains(index), range.length > 0 else { return [] }
+        let page = pages[index]
+        let visible = NSIntersectionRange(range, page.range)
+        guard visible.length > 0,
+              let start = location(at: visible.location),
+              let end = location(at: NSMaxRange(visible)),
+              let textRange = NSTextRange(location: start, end: end)
+        else { return [] }
+        layoutManager.ensureLayout(for: textRange)
+        var rects: [CGRect] = []
+        layoutManager.enumerateTextSegments(in: textRange, type: .highlight) { _, rect, _, _ in
+            if !rect.isEmpty { rects.append(rect.offsetBy(dx: 0, dy: -page.top)) }
+            return true
+        }
+        return rects
     }
 
     // MARK: - Drawing

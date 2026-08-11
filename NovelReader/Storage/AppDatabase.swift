@@ -143,6 +143,37 @@ final class AppDatabase {
             }
         }
 
+        // Highlights: a pair of anchors instead of one, in a table of their own.
+        //
+        // Not columns hung off `readingBookmark` with a nullable end: a bookmark and a
+        // highlight are read back for different screens, ordered differently and
+        // deleted independently, and a table where half the rows leave half the
+        // columns null is a table every query has to remember to filter.
+        //
+        // The excerpt is `notNull` where the bookmark's is not: a highlight is made out
+        // of text that was on screen, so there is always something honest to store,
+        // and the list would be unreadable without it.
+        migrator.registerMigration("v5.highlights") { db in
+            try db.create(table: TextHighlight.databaseTableName) { t in
+                // No unique index on the span: `TextHighlight.makeId` derives the
+                // primary key from it, so marking the same passage twice cannot insert
+                // a second row. Deleting a book takes its highlights with it, for the
+                // same reason its bookmarks go — they point into text that is gone.
+                t.primaryKey("id", .text)
+                t.column("bookId", .text)
+                    .notNull()
+                    .indexed()
+                    .references(Book.databaseTableName, onDelete: .cascade)
+                t.column("chapterIndex", .integer).notNull()
+                t.column("startParagraph", .integer).notNull()
+                t.column("startCharacterOffset", .integer).notNull()
+                t.column("endParagraph", .integer).notNull()
+                t.column("endCharacterOffset", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("excerpt", .text).notNull()
+            }
+        }
+
         return migrator
     }
 }

@@ -22,6 +22,13 @@ struct ReadingAppearanceSections: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("reader.settings.mode")
+            } footer: {
+                // The one place the asymmetry between the two renderers can be stated
+                // where it is actionable. Highlights show in both modes but can only be
+                // made on a page, because only the paginated renderer knows where each
+                // character sits — and the moment a reader picks a mode is the moment
+                // that consequence is worth knowing.
+                Text("reader.settings.mode.footer")
             }
 
             Section("reader.settings.text") {

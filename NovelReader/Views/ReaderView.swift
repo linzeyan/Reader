@@ -129,6 +129,7 @@ struct ReaderView: View {
                 settings: settings,
                 landing: openAtLastPage == current.chapter.id
                     ? .lastPage : .anchor(model.currentAnchor),
+                highlights: model.highlights(inChapter: current.chapter.index),
                 onAnchorChange: { anchor in
                     openAtLastPage = nil
                     // Any page that does turn answers the question the notice asked.
@@ -136,7 +137,11 @@ struct ReaderView: View {
                     model.notePage(chapterIndex: current.chapter.index, anchor: anchor)
                 },
                 onTapCenter: { showControls.toggle() },
-                onTurnPast: { edge in turnChapter(past: edge, model: model) }
+                onTurnPast: { edge in turnChapter(past: edge, model: model) },
+                onHighlight: { selection in
+                    model.addHighlight(chapterIndex: current.chapter.index, selection: selection)
+                },
+                onRemoveHighlight: { model.removeHighlight($0) }
             )
             .overlay(alignment: .bottom) {
                 if reachedEndOfBook {
@@ -183,7 +188,8 @@ struct ReaderView: View {
     }
 
     private func chapterBlock(_ item: ReaderModel.LoadedChapter, model: ReaderModel) -> some View {
-        VStack(alignment: .leading, spacing: settings.paragraphSpacing) {
+        let highlights = model.highlights(inChapter: item.chapter.index)
+        return VStack(alignment: .leading, spacing: settings.paragraphSpacing) {
             Text(item.chapter.title)
                 .font(.system(size: settings.fontSize + 4, weight: .semibold))
                 .padding(.top, 28)
@@ -191,7 +197,7 @@ struct ReaderView: View {
                 .id(item.id)
 
             ForEach(Array(item.paragraphs.enumerated()), id: \.offset) { offset, paragraph in
-                Text(paragraph)
+                paragraphText(paragraph, highlights: highlights, paragraph: offset)
                     .font(settings.font)
                     .lineSpacing(settings.lineSpacing)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -205,6 +211,28 @@ struct ReaderView: View {
             }
         }
         .foregroundStyle(settings.theme.foreground)
+    }
+
+    /// One paragraph, with any highlight over it tinted in.
+    ///
+    /// The scrolling renderer is left as it was — a plain `Text` per paragraph with the
+    /// same modifiers — and only the *string* becomes attributed, and only when a
+    /// highlight actually reaches this paragraph. Highlights are shown in both modes
+    /// because a mark the reader made has to still be there when they switch; they are
+    /// *made* only in paged mode, because nothing here knows where a character sits.
+    private func paragraphText(
+        _ text: String, highlights: [TextHighlight], paragraph: Int
+    ) -> Text {
+        guard !highlights.isEmpty else { return Text(text) }
+        let length = (text as NSString).length
+        let ranges = highlights.compactMap { $0.range(inParagraph: paragraph, length: length) }
+        guard !ranges.isEmpty else { return Text(text) }
+        var attributed = AttributedString(text)
+        for range in ranges {
+            guard let bounds = Range(range, in: attributed) else { continue }
+            attributed[bounds].backgroundColor = settings.theme.highlight
+        }
+        return Text(attributed)
     }
 
     @ViewBuilder
@@ -332,6 +360,11 @@ final class ReaderModel {
     /// the page on screen is one of them. Held as a set rather than re-queried on
     /// every scroll: `note` fires per paragraph.
     private(set) var bookmarkedIDs: Set<String> = []
+    /// This book's highlights, grouped the way both renderers ask for them: one
+    /// chapter at a time. Grouped once on open rather than queried per chapter because
+    /// the scrolling reader can have several chapters on screen and re-draws every
+    /// paragraph of them as it scrolls.
+    private(set) var highlightsByChapter: [Int: [TextHighlight]] = [:]
     /// Set when the view should scroll somewhere; cleared by the view once done.
     var scrollTarget: String?
 
@@ -376,6 +409,9 @@ final class ReaderModel {
     func start(at position: ReadingPosition) async {
         chapters = (try? env.repo.chapters(bookId: book.id)) ?? []
         bookmarkedIDs = Set((try? env.repo.readingBookmarks(bookId: book.id))?.map(\.id) ?? [])
+        highlightsByChapter = Dictionary(
+            grouping: (try? env.repo.highlights(bookId: book.id)) ?? [], by: \.chapterIndex
+        )
         guard !chapters.isEmpty else { return }
         let index = min(max(position.chapterIndex, 0), chapters.count - 1)
         await jump(to: ReadingPosition(chapterIndex: index, anchor: position.anchor))
@@ -587,6 +623,31 @@ final class ReaderModel {
     private func currentExcerpt() -> String? {
         guard let chapter = currentLoadedChapter else { return nil }
         return currentAnchor.excerpt(in: chapter.paragraphs)
+    }
+
+    // MARK: Highlights
+
+    func highlights(inChapter index: Int) -> [TextHighlight] {
+        highlightsByChapter[index] ?? []
+    }
+
+    /// No confirmation and no undo prompt, matching the bookmark button: the mark is
+    /// visible the instant it is made, and the way to undo it is to tap it.
+    func addHighlight(chapterIndex: Int, selection: TextSelection) {
+        guard let stored = try? env.repo.addHighlight(
+            bookId: book.id, chapterIndex: chapterIndex, selection: selection
+        ) else { return }
+        var marks = highlightsByChapter[chapterIndex] ?? []
+        // The repository is idempotent on the span, so re-marking a passage returns the
+        // row that is already on screen; appending it again would paint it twice.
+        guard !marks.contains(where: { $0.id == stored.id }) else { return }
+        marks.append(stored)
+        highlightsByChapter[chapterIndex] = marks
+    }
+
+    func removeHighlight(_ highlight: TextHighlight) {
+        try? env.repo.removeHighlight(id: highlight.id)
+        highlightsByChapter[highlight.chapterIndex]?.removeAll { $0.id == highlight.id }
     }
 }
 
