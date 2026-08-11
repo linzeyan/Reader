@@ -17,33 +17,16 @@ final class HighlightGestureTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["-NovelReaderDemoSeed"]
+        // Paginated mode comes from the launch arguments rather than from tapping the
+        // setting. Tapping it would *persist* the choice in this simulator, and the
+        // reading mode decides which renderer every later test gets — the live smoke
+        // walk asserts on the scrolling reader's text, so this test would quietly
+        // break it. The argument domain lasts exactly as long as this launch.
+        app.launchArguments = ["-NovelReaderDemoSeed", "-reader.mode", "paginated"]
         app.launch()
     }
 
-    /// The tab bar is a bottom bar on iPhone and a row of plain buttons at the top on
-    /// iPad. SwiftUI names each tab after its SF Symbol, which is the same on both.
-    private func tab(_ symbol: String) -> XCUIElement {
-        let inBar = app.tabBars.buttons[symbol]
-        return inBar.exists ? inBar : app.buttons[symbol].firstMatch
-    }
-
     func testPressingAndSlidingOnAPageOffersToMarkThePassage() throws {
-        // Paginated mode is chosen from Settings, not from the reader's own sheet: the
-        // reader's control bar is addressable only by localized labels.
-        let settings = tab("gearshape")
-        XCTAssertTrue(settings.waitForExistence(timeout: 20))
-        settings.tap()
-        let appearance = app.buttons["settings.appearance"]
-        XCTAssertTrue(appearance.waitForExistence(timeout: 10))
-        appearance.tap()
-        let mode = app.segmentedControls["reader.settings.mode"]
-        XCTAssertTrue(mode.waitForExistence(timeout: 10))
-        // By index, not by title: `Mode.allCases` is scroll then paginated, and the
-        // titles are translated.
-        mode.buttons.element(boundBy: 1).tap()
-
-        tab("books.vertical").tap()
         let book = app.descendants(matching: .any).matching(identifier: "library.book").firstMatch
         XCTAssertTrue(book.waitForExistence(timeout: 20), "the demo library should be seeded")
         book.tap()

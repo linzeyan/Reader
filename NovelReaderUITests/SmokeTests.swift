@@ -13,6 +13,11 @@ final class SmokeTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
+        // The renderer this walk asserts about, stated rather than inherited. The
+        // reading mode is a persisted setting, so whatever ran last in this
+        // simulator would otherwise decide which reader these tests get — and
+        // `reader.text` is published by the scrolling one alone.
+        app.launchArguments = ["-reader.mode", "scroll"]
         app.launch()
     }
 
