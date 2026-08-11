@@ -11,7 +11,10 @@ import Network
 @MainActor
 @Observable
 final class NetworkMonitor {
-    enum Connection: Equatable {
+    /// Codable so `BackgroundDownloadRun` can say which connection a background
+    /// window ran on — "it fetched nothing" and "it fetched nothing *on
+    /// cellular*" are different bugs.
+    enum Connection: String, Codable, Equatable {
         /// No path report has arrived yet. Treated as "not metered" everywhere:
         /// a warning shown because the OS had not answered yet is worse than a
         /// missed one in the first milliseconds after launch.

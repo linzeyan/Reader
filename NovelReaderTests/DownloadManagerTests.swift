@@ -116,6 +116,29 @@ final class DownloadManagerTests: XCTestCase {
         manager.cancel()
     }
 
+    /// A cancelled run still executes its own teardown: the task body is already
+    /// scheduled, so it runs once and reaches its `defer`. That teardown must not
+    /// release a hold taken out by the run that replaced it — a background window
+    /// told "the queue is at rest" before its first chapter had even been requested
+    /// would hand the system's time straight back, having fetched nothing.
+    func testTheTeardownOfAReplacedRunDoesNotReleaseTheNewOne() async throws {
+        let manager = try makeManager()
+        manager.start(
+            book: makeBook(), rule: makeRule(), chapters: [makeChapter("1"), makeChapter("2")]
+        )
+        manager.pause()
+        var released = false
+
+        manager.resume { released = true }
+        // Let the cancelled run's body get as far as its defer.
+        for _ in 0..<5 { await Task.yield() }
+
+        XCTAssertFalse(released, "The hold belongs to the run that is now going")
+        XCTAssertTrue(manager.isBusy)
+        manager.cancel()
+        XCTAssertTrue(released, "…and is released once that run really does stop")
+    }
+
     /// The same hazard with the queue non-empty but moved on: whatever is at the
     /// head now belongs to a different run, and must not be consumed by the old
     /// one's progress accounting.

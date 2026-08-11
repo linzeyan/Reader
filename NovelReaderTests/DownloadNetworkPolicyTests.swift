@@ -58,6 +58,34 @@ final class DownloadNetworkPolicyTests: XCTestCase {
         XCTAssertFalse(DownloadSettings.NetworkPolicy.wifiOnly.needsConfirmation(on: .unknown))
     }
 
+    // MARK: - The policy where there is nobody to ask
+
+    /// A prompt is the foreground's answer to a metered connection. A background
+    /// window has no such answer available, so "Wi-Fi only" has to mean Wi-Fi and
+    /// nothing else — including the connection the system has not classified yet,
+    /// which the foreground deliberately lets pass. Guessing wrong here spends a
+    /// data plan while the phone is in a pocket; guessing "no" costs one wake-up.
+    func testWifiOnlyRunsUnattendedOnNothingButWifi() {
+        let policy = DownloadSettings.NetworkPolicy.wifiOnly
+        XCTAssertTrue(policy.allowsUnattendedDownload(on: .wifi))
+        XCTAssertFalse(policy.allowsUnattendedDownload(on: .cellular))
+        XCTAssertFalse(
+            policy.allowsUnattendedDownload(on: .unknown),
+            "An unclassified connection is not evidence of Wi-Fi"
+        )
+        XCTAssertFalse(policy.allowsUnattendedDownload(on: .offline))
+    }
+
+    /// Once the user has said the data is theirs to spend, the background must
+    /// actually spend it — the only connection left to refuse is no connection.
+    func testAllowingCellularRunsUnattendedWhereverThereIsAConnection() {
+        let policy = DownloadSettings.NetworkPolicy.wifiAndCellular
+        XCTAssertTrue(policy.allowsUnattendedDownload(on: .wifi))
+        XCTAssertTrue(policy.allowsUnattendedDownload(on: .cellular))
+        XCTAssertTrue(policy.allowsUnattendedDownload(on: .unknown))
+        XCTAssertFalse(policy.allowsUnattendedDownload(on: .offline))
+    }
+
     /// The default is the promise: a fresh install must not be able to spend
     /// cellular data on a download without being asked.
     func testThePolicyDefaultsToWifiOnlyAndPersists() throws {
