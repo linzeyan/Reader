@@ -250,17 +250,20 @@ struct LibraryRepo {
     /// The predicate restates `Chapter.isNew(in:)` in SQL — the aggregate cannot
     /// be expressed any other way — so the two have to move together, which
     /// `NewChapterTests` pins.
-    func newChapterCounts() throws -> [String: Int] {
-        try writer.read { db in
+    func newChapterCounts(now: Date = .now) throws -> [String: Int] {
+        // `> cutoff` carries the null check with it — a null addedAt compares to null,
+        // never to true — so the expiry and "was it ever stamped" stay one condition.
+        let cutoff = now.addingTimeInterval(-Chapter.newWindow)
+        return try writer.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT chapter."bookId" AS bookId, COUNT(*) AS newCount
                 FROM chapter
                 JOIN book ON book."id" = chapter."bookId"
-                WHERE chapter."addedAt" IS NOT NULL
+                WHERE chapter."addedAt" > ?
                   AND (book."lastReadChapterIndex" IS NULL
                        OR chapter."index" > book."lastReadChapterIndex")
                 GROUP BY chapter."bookId"
-                """)
+                """, arguments: [cutoff])
             return rows.reduce(into: [String: Int]()) { counts, row in
                 counts[row["bookId"] as String] = row["newCount"] as Int
             }

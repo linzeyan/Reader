@@ -119,11 +119,23 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     /// Derived rather than stored as a flag cleared on read: a flag would need a
     /// write per chapter opened, and it would go stale the moment progress
     /// arrives from another device.
-    func isNew(in book: Book) -> Bool {
-        guard addedAt != nil else { return false }
+    /// And it expires: a chapter stops being new a day after it appeared, read or not.
+    ///
+    /// Two reasons. Reading past it is otherwise the only way to clear the marker, and
+    /// that is not always available — the reader's own catalog sheet holds the book it
+    /// was opened with, so chapters read during that session keep their dot until the
+    /// reader leaves. More fundamentally, "new" is a claim about recency: a chapter the
+    /// site published last month is not news the reader is missing, it is simply a
+    /// chapter they have not reached, which their position already tells them.
+    func isNew(in book: Book, now: Date = .now) -> Bool {
+        guard let addedAt, now.timeIntervalSince(addedAt) < Self.newWindow else { return false }
         guard let lastRead = book.lastReadChapterIndex else { return true }
         return index > lastRead
     }
+
+    /// How long a chapter stays marked. Shared with the shelf's counting query so the
+    /// two statements of this rule cannot drift to different numbers.
+    static let newWindow: TimeInterval = 24 * 60 * 60
 
     static func makeId(bookId: String, siteChapterId: String) -> String {
         "\(bookId)|\(siteChapterId)"

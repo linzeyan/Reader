@@ -91,7 +91,35 @@ final class NewChapterTests: XCTestCase {
             second.timeIntervalSince1970,
             accuracy: 1
         )
-        XCTAssertTrue(added.isNew(in: try XCTUnwrap(repo.book(id: book.id))))
+        // Asked at the moment it appeared: the marker expires a day later, and this
+        // fixture is deliberately dated in the past.
+        XCTAssertTrue(added.isNew(in: try XCTUnwrap(repo.book(id: book.id)), now: second))
+    }
+
+    /// The marker also expires on its own, and it has to: reading past a chapter is not
+    /// always available to dismiss it — the reader's own catalog sheet is drawn from the
+    /// book it was opened with, so chapters read in that session keep their dot until
+    /// the reader leaves — and a chapter the site published last month is not news
+    /// however you got there.
+    func testAChapterStopsBeingNewADayAfterItAppeared() throws {
+        let repo = try makeRepo()
+        let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        try repo.replaceCatalog(bookId: book.id, entries: entries(2), now: first)
+        let appeared = first.addingTimeInterval(day)
+        try repo.replaceCatalog(bookId: book.id, entries: entries(3), now: appeared)
+
+        let reloaded = try XCTUnwrap(repo.book(id: book.id))
+        let added = try chapter("3", of: repo, bookId: book.id)
+        let inTime = appeared.addingTimeInterval(day - 60)
+        let tooLate = appeared.addingTimeInterval(day + 60)
+
+        XCTAssertTrue(added.isNew(in: reloaded, now: inTime))
+        XCTAssertFalse(added.isNew(in: reloaded, now: tooLate))
+        // The shelf count restates the rule in SQL, so it has to expire on the same
+        // schedule — otherwise the badge and the number it shows disagree for a day.
+        XCTAssertEqual(try repo.newChapterCounts(now: inTime)[book.id], 1)
+        XCTAssertNil(try repo.newChapterCounts(now: tooLate)[book.id])
     }
 
     /// Re-stamping known chapters on every refresh is the failure mode that
