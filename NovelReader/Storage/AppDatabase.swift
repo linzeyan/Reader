@@ -87,6 +87,17 @@ final class AppDatabase {
             }
         }
 
+        // When a catalog refresh first saw a chapter, so the site adding chapter
+        // 431 can be told apart from the reader simply not having reached it.
+        // Nullable, and deliberately left null for everything already indexed:
+        // there is no honest answer for those rows, and calling them new would
+        // light up every book in the library on the first launch after an update.
+        migrator.registerMigration("v3.chapterAddedAt") { db in
+            try db.alter(table: Chapter.databaseTableName) { t in
+                t.add(column: "addedAt", .datetime)
+            }
+        }
+
         return migrator
     }
 }

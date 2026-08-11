@@ -56,7 +56,7 @@ final class DownloadManagerTests: XCTestCase {
     private func makeChapter(_ id: String) -> Chapter {
         Chapter(
             id: id, bookId: "book", siteChapterId: id, index: 0,
-            title: "chapter", url: "https://example.com/\(id)", downloadedAt: nil
+            title: "chapter", url: "https://example.com/\(id)", addedAt: nil, downloadedAt: nil
         )
     }
 

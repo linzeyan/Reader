@@ -26,6 +26,9 @@ final class AppEnvironment {
     /// The library, kept here so every screen sees the same list without each one
     /// re-querying on appear.
     private(set) var books: [Book] = []
+    /// How many chapters each book has gained since the reader left off, so the
+    /// library can badge a row without querying per book while it scrolls.
+    private(set) var newChapterCounts: [String: Int] = [:]
     /// Set when a site demands an interactive challenge; drives the sheet that
     /// hands the web view to the user.
     var challenge: ChallengeRequest?
@@ -92,6 +95,10 @@ final class AppEnvironment {
 
     func reloadLibrary() {
         books = (try? repo.allBooks()) ?? []
+        // Loaded together with the books: the two are read as one list, and a
+        // separately refreshed count would show a badge next to a book that has
+        // already been removed.
+        newChapterCounts = (try? repo.newChapterCounts()) ?? [:]
     }
 
     /// Books grouped by source, in the rule order the settings screen shows.

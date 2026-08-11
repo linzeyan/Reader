@@ -94,6 +94,12 @@ struct LibraryRepo {
     /// Rows are upserted and stale ones removed rather than the table being
     /// wiped and refilled, so `downloadedAt` survives a catalog refresh — losing
     /// it would make every already-downloaded chapter look missing.
+    ///
+    /// A chapter absent from the previous catalog is stamped `addedAt`, which is
+    /// what the red "new" marker reads. The diff lives here rather than in the
+    /// caller because only this transaction knows which ids were already stored,
+    /// and because `catalogUpdatedAt` — the thing that says whether there *was* a
+    /// previous catalog — is written by the same write.
     func replaceCatalog(
         bookId: String,
         entries: [(siteChapterId: String, title: String, url: String)],
@@ -101,6 +107,10 @@ struct LibraryRepo {
     ) throws {
         try writer.write { db in
             let keptIds = Set(entries.map { Chapter.makeId(bookId: bookId, siteChapterId: $0.siteChapterId) })
+            let stored = try Book.fetchOne(db, key: bookId)
+            // Nothing is new on the first fetch: a book whose every chapter is
+            // flagged is a book with no flags worth reading.
+            let isFirstCatalog = stored?.catalogUpdatedAt == nil
 
             for (index, entry) in entries.enumerated() {
                 let id = Chapter.makeId(bookId: bookId, siteChapterId: entry.siteChapterId)
@@ -108,11 +118,15 @@ struct LibraryRepo {
                     existing.index = index
                     existing.title = entry.title
                     existing.url = entry.url
+                    // `addedAt` is intentionally not touched: rewriting it every
+                    // refresh would either clear the marker the reader has not
+                    // seen yet or re-raise it daily on chapters they have read.
                     try existing.update(db)
                 } else {
                     try Chapter(
                         id: id, bookId: bookId, siteChapterId: entry.siteChapterId,
-                        index: index, title: entry.title, url: entry.url, downloadedAt: nil
+                        index: index, title: entry.title, url: entry.url,
+                        addedAt: isFirstCatalog ? nil : now, downloadedAt: nil
                     ).insert(db)
                 }
             }
@@ -124,7 +138,7 @@ struct LibraryRepo {
             // Stamped here rather than by the caller: the freshness of the
             // catalog is a property of this write, and a caller that forgot to
             // stamp it would make the book look permanently stale.
-            if var book = try Book.fetchOne(db, key: bookId) {
+            if var book = stored {
                 book.catalogUpdatedAt = now
                 try book.update(db)
             }
@@ -136,6 +150,33 @@ struct LibraryRepo {
             try Chapter.filter(Column("bookId") == bookId)
                 .order(Column("index"))
                 .fetchAll(db)
+        }
+    }
+
+    /// How many chapters each book has gained since the reader's position, keyed
+    /// by book id. Books with none are absent rather than mapped to zero.
+    ///
+    /// One grouped query for the whole library, not one per bookmark: this feeds
+    /// every row of the library list, and a per-book count would turn drawing a
+    /// 40-book shelf into 40 round trips on every reload.
+    ///
+    /// The predicate restates `Chapter.isNew(in:)` in SQL — the aggregate cannot
+    /// be expressed any other way — so the two have to move together, which
+    /// `NewChapterTests` pins.
+    func newChapterCounts() throws -> [String: Int] {
+        try writer.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT chapter."bookId" AS bookId, COUNT(*) AS newCount
+                FROM chapter
+                JOIN book ON book."id" = chapter."bookId"
+                WHERE chapter."addedAt" IS NOT NULL
+                  AND (book."lastReadChapterIndex" IS NULL
+                       OR chapter."index" > book."lastReadChapterIndex")
+                GROUP BY chapter."bookId"
+                """)
+            return rows.reduce(into: [String: Int]()) { counts, row in
+                counts[row["bookId"] as String] = row["newCount"] as Int
+            }
         }
     }
 

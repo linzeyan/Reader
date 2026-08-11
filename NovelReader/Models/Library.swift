@@ -64,10 +64,31 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     var index: Int
     var title: String
     var url: String
+    /// When a catalog refresh first saw this chapter, and `nil` when it arrived
+    /// with the book's very first catalog — an entire book cannot be "new", so
+    /// the first fetch deliberately marks nothing. Also `nil` for every chapter
+    /// indexed before this column existed, which is the same honest answer.
+    var addedAt: Date?
     /// Non-nil exactly when a local text file exists (requirement 4.2).
     var downloadedAt: Date?
 
     var isDownloaded: Bool { downloadedAt != nil }
+
+    /// Whether to flag this chapter as newly published by the site.
+    ///
+    /// "New" means the site added it after we already had a catalog — not
+    /// "unread". Unread would paint a never-opened book entirely red, which
+    /// says nothing; a chapter that appeared while the reader was away is the
+    /// only thing they cannot already see from their reading position.
+    ///
+    /// Derived rather than stored as a flag cleared on read: a flag would need a
+    /// write per chapter opened, and it would go stale the moment progress
+    /// arrives from another device.
+    func isNew(in book: Book) -> Bool {
+        guard addedAt != nil else { return false }
+        guard let lastRead = book.lastReadChapterIndex else { return true }
+        return index > lastRead
+    }
 
     static func makeId(bookId: String, siteChapterId: String) -> String {
         "\(bookId)|\(siteChapterId)"

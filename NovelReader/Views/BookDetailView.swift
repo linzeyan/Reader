@@ -45,7 +45,7 @@ struct BookDetailView: View {
                 } else {
                     ForEach(filtered) { chapter in
                         NavigationLink(value: ReadingTarget(book: current, startIndex: chapter.index)) {
-                            ChapterRow(chapter: chapter)
+                            ChapterRow(chapter: chapter, book: current)
                         }
                     }
                 }
@@ -174,6 +174,10 @@ struct BookDetailView: View {
         defer { isRefreshing = false }
         do {
             chapters = try await env.bookService.refreshCatalog(rule: rule, book: current)
+            // The write went to the database, not to the in-memory library, and
+            // this is the moment new chapters appear — without this the shelf
+            // keeps showing yesterday's count until something else reloads it.
+            env.reloadLibrary()
         } catch {
             if case WebFetcher.FetchError.challengePresented = error {
                 env.report(error)
@@ -194,6 +198,11 @@ struct ReadingTarget: Hashable {
 
 struct ChapterRow: View {
     let chapter: Chapter
+    /// The owning book, which is what makes "new" answerable — the flag depends
+    /// on the reading position, which lives on the book. Passed explicitly, with
+    /// no default: three screens draw this row, and a default would let one of
+    /// them silently stop showing the marker.
+    let book: Book
 
     var body: some View {
         HStack {
@@ -201,6 +210,13 @@ struct ChapterRow: View {
                 .lineLimit(1)
                 .foregroundStyle(chapter.isDownloaded ? .primary : .secondary)
             Spacer()
+            // Deliberately the same weight as the downloaded arrow next to it:
+            // this is a hint about one row, not a call to action.
+            if chapter.isNew(in: book) {
+                Text("chapter.new")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.red)
+            }
             if chapter.isDownloaded {
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.caption)

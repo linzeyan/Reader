@@ -182,7 +182,7 @@ struct ReaderView: View {
                     Task { await model?.jump(to: chapter.index) }
                 } label: {
                     HStack {
-                        ChapterRow(chapter: chapter)
+                        ChapterRow(chapter: chapter, book: book)
                         if chapter.index == model?.currentChapterIndex {
                             Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tint)
                         }
