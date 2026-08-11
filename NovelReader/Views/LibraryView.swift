@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Requirement 3: bookmarks, grouped per source.
 ///
@@ -8,6 +9,9 @@ import SwiftUI
 struct LibraryView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var adding = false
+    @State private var picking = false
+    /// 0…1 while an import runs, nil otherwise — so it doubles as "busy".
+    @State private var importProgress: Double?
     @State private var renaming: Book?
     @State private var draftName = ""
 
@@ -22,6 +26,11 @@ struct LibraryView: View {
             }
             .navigationTitle("tab.library")
             .toolbar {
+                // Two buttons rather than one menu: the ways in are not
+                // interchangeable — adding by URL needs an installed rule while
+                // importing a file needs nothing at all — so a fresh install with
+                // no sources yet has to be able to reach the second one, and
+                // neither is worth burying behind an extra tap.
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         adding = true
@@ -29,10 +38,30 @@ struct LibraryView: View {
                         Label("library.add", systemImage: "plus")
                     }
                     .accessibilityIdentifier("library.add")
-                    .disabled(env.sites.rules.isEmpty)
+                    .disabled(env.sites.rules.isEmpty || importProgress != nil)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        picking = true
+                    } label: {
+                        Label("library.import", systemImage: "square.and.arrow.down")
+                    }
+                    .accessibilityIdentifier("library.import")
+                    .disabled(importProgress != nil)
                 }
             }
+            .overlay(alignment: .top) { importBanner }
+            .animation(.snappy, value: importProgress == nil)
             .sheet(isPresented: $adding) { AddBookSheet() }
+            // Only the two types this app can actually read. Opening a book from
+            // another app is a separate feature: it needs document types declared
+            // in Info.plist, which is a shipping-configuration change.
+            .fileImporter(isPresented: $picking, allowedContentTypes: [.plainText, .epub]) { result in
+                switch result {
+                case .success(let url): Task { await runImport(url) }
+                case .failure(let failure): env.report(failure)
+                }
+            }
             .alert("library.rename", isPresented: renamingBinding) {
                 TextField("library.rename.placeholder", text: $draftName)
                 Button("common.cancel", role: .cancel) { renaming = nil }
@@ -48,6 +77,36 @@ struct LibraryView: View {
 
     private var renamingBinding: Binding<Bool> {
         Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
+    }
+
+    /// Determinate, because an import is long enough that a spinner alone would
+    /// look stuck: a full-length novel is hundreds of chapter files being written
+    /// one at a time.
+    @ViewBuilder
+    private var importBanner: some View {
+        if let importProgress {
+            ProgressView(value: importProgress) { Text("library.import.working") }
+                .font(.footnote)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.bar, in: .rect(cornerRadius: 12))
+                .padding(.horizontal)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    /// Explicitly main-actor: the import runs off the main thread on purpose, so
+    /// the state this sets around it would otherwise be written from wherever the
+    /// task happened to land.
+    @MainActor
+    private func runImport(_ url: URL) async {
+        importProgress = 0
+        defer { importProgress = nil }
+        do {
+            try await env.importLocalBook(from: url) { importProgress = $0 }
+        } catch {
+            env.report(error)
+        }
     }
 
     private var list: some View {
@@ -95,6 +154,10 @@ struct LibraryView: View {
             } else {
                 Button("library.add") { adding = true }.buttonStyle(.borderedProminent)
             }
+            // Offered even with no sources installed: a file on the device is a
+            // book this app can read today, and it is the only such book a fresh
+            // install has.
+            Button("library.import") { picking = true }.buttonStyle(.bordered)
         }
     }
 }

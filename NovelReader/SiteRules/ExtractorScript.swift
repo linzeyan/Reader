@@ -81,8 +81,13 @@ enum ExtractorScript {
         """
     }
 
-    static func chapter(_ rule: SiteRule) throws -> String {
-        let cfg = try json(rule.chapter)
+    static func chapter(_ rule: SiteRule) throws -> String { try chapter(rule.chapter) }
+
+    /// The chapter extractor built from the config alone, for content that has
+    /// no site behind it: an imported EPUB document is read by exactly this
+    /// script, so a local book and a fetched page are normalised identically.
+    static func chapter(_ config: SiteRule.Chapter) throws -> String {
+        let cfg = try json(config)
         return """
         (function () {
           \(helpers)

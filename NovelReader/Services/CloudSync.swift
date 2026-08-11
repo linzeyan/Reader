@@ -116,7 +116,15 @@ final class CloudSync {
         store.synchronize()
     }
 
+    /// Books imported from a file on the device are skipped.
+    ///
+    /// What travels through here is a bookmark, a custom name and a reading
+    /// position — none of which mean anything on a device that does not have the
+    /// file. Syncing one would put a book in the other device's library that it
+    /// can never open. This is the same reason the download index stays local:
+    /// a record whose text only exists on one device must not claim otherwise.
     private func write(_ book: Book) {
+        guard !book.isLocal else { return }
         let record = Record(
             siteId: book.siteId, siteBookId: book.siteBookId, title: book.title,
             displayName: book.displayName, author: book.author, coverURL: book.coverURL,

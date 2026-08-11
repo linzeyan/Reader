@@ -70,7 +70,17 @@ final class SiteStore {
     /// Which installed rule can read this URL — the entry point for "paste a link".
     func rule(matching url: URL) -> SiteRule? { rules.first { $0.matches(url) } }
 
-    func name(ofSite siteId: String) -> String { rule(id: siteId)?.name ?? siteId }
+    /// What to call a source on screen.
+    ///
+    /// `Book.localSiteId` is named here because it has no rule file and never
+    /// will: it is the reserved source for imported files. Falling through to the
+    /// raw id — which is what bookmarks of a *removed* rule correctly do, so that
+    /// reinstalling the rule brings the name back — would label a shelf of the
+    /// user's own files "local".
+    func name(ofSite siteId: String) -> String {
+        if siteId == Book.localSiteId { return String(localized: "site.local") }
+        return rule(id: siteId)?.name ?? siteId
+    }
 
     /// Sites that declare a `search` block, in the order the UI should try them.
     var searchableRules: [SiteRule] { rules.filter { $0.search != nil } }
@@ -84,6 +94,13 @@ final class SiteStore {
             rule = try JSONDecoder().decode(SiteRule.self, from: data)
         } catch {
             throw ImportError.malformed(error.localizedDescription)
+        }
+        // `Book.localSiteId` belongs to imported files. A rule claiming it would
+        // take over those books' screens — they would be labelled with the site's
+        // name and offer to refetch a catalog from a site that has never seen
+        // them — so the id is refused rather than allowed to collide.
+        guard rule.id != Book.localSiteId else {
+            throw ImportError.malformed("the source id \"\(Book.localSiteId)\" is reserved")
         }
         let target = directory.appendingPathComponent(
             ChapterFileStore.safeComponent(rule.id)

@@ -303,6 +303,11 @@ final class ReaderModel {
             return readAhead.paragraphs
         }
         guard let rule = env.sites.rule(id: book.siteId) else {
+            // An imported book has no site to fall back to. Reaching here means
+            // its text is gone from disk — deleted from the storage screen — and
+            // re-importing the file is the only way back, so say that instead of
+            // reporting a bad URL for a book that never had one.
+            if book.isLocal { throw LocalBookError.contentDeleted }
             throw BookService.ServiceError.badURL
         }
         return try await env.bookService.chapterParagraphs(rule: rule, chapter: chapter)
