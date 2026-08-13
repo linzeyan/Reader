@@ -483,7 +483,10 @@ final class ChapterPaginator {
     ///
     /// Clamped into the page rather than allowed to run off it, so a finger dragged
     /// past the bottom edge selects to the end of what the reader can see instead of
-    /// silently marking text on a page they have not turned to.
+    /// silently marking text on a page they have not turned to. A selection that carries
+    /// on to the next page gets there by that page being turned to first — see
+    /// `SelectionEdgeRule` — and then asking *it* for the offset, so the clamp never has
+    /// to be relaxed for a passage to span a page break.
     func offset(at point: CGPoint, onPage index: Int) -> Int? {
         guard pages.indices.contains(index) else { return nil }
         let page = pages[index]
