@@ -16,6 +16,88 @@ enum PageLanding: Equatable {
     case lastPage
 }
 
+/// Which way a page turn goes.
+///
+/// Distinct from `PageEdge`, which names a turn that ran *off* the chapter: this one
+/// always lands on another page of the same chapter.
+enum PageTurn: Equatable {
+    case backward
+    case forward
+}
+
+/// When a selection dragged against the top or bottom of a page turns it.
+///
+/// A value of its own, and pure: the caller keeps the clock and passes in how long the
+/// finger has rested in an edge strip, so the rule that decides when the book moves
+/// under a reader's finger can be exercised without a page, a gesture or a simulator.
+struct SelectionEdgeRule {
+    /// Depth of the strip along the top and bottom of the page.
+    ///
+    /// Top and bottom rather than the sides, even though pages turn sideways: a strip
+    /// down the right-hand edge is the end of every line on the page, so a finger
+    /// resting in it would mean "the next page" while it almost always means "the end of
+    /// this line". Text carries on below the bottom of the page, which is where a finger
+    /// extending a selection ends up anyway. Deep enough to rest a thumb in, shallow
+    /// enough that the last line of the page is still somewhere a selection can stop.
+    let stripHeight: CGFloat
+    /// How long the finger has to rest in the strip before the page moves.
+    ///
+    /// The same wait as the press that starts a selection, and for the same reason:
+    /// holding still is how this page is told "I mean this". Turning on contact instead
+    /// would make one quick slide down the page into three page turns, which loses the
+    /// reader their place and the passage they were picking out with it.
+    let dwell: TimeInterval
+
+    init(stripHeight: CGFloat = 40, dwell: TimeInterval = 0.4) {
+        self.stripHeight = stripHeight
+        self.dwell = dwell
+    }
+
+    /// The strip a point falls in, or nil for the body of the page.
+    ///
+    /// Points beyond the page count as being in the strip they left through: a finger
+    /// dragged clean off the bottom has not stopped asking for the text that follows.
+    func strip(at point: CGPoint, in size: CGSize) -> PageTurn? {
+        // Two strips and no text between them would turn the page under every press.
+        guard size.height > stripHeight * 2 else { return nil }
+        if point.y >= size.height - stripHeight { return .forward }
+        if point.y <= stripHeight { return .backward }
+        return nil
+    }
+
+    /// The strip a finger has just arrived in, having come from the body of the page.
+    ///
+    /// What arms a turn, rather than merely being in the strip. Holding still is what a
+    /// press *is*, so position alone would turn the page under a reader pressing on the
+    /// last line of it — which is a reader marking that line, not asking for the next
+    /// page. Arriving somewhere is something only a drag can do.
+    func arrival(at point: CGPoint, from previous: CGPoint?, in size: CGSize) -> PageTurn? {
+        guard let arrived = strip(at: point, in: size),
+              let previous, strip(at: previous, in: size) == nil
+        else { return nil }
+        return arrived
+    }
+
+    /// The turn a resting finger has earned, or nil to stay on this page.
+    ///
+    /// Stops at both ends of the chapter rather than turning past them. Carrying a
+    /// selection into the next chapter would need a highlight whose two anchors named
+    /// different chapters, which is not a thing this app can store.
+    func turn(
+        at point: CGPoint,
+        in size: CGSize,
+        heldFor elapsed: TimeInterval,
+        page: Int,
+        of pageCount: Int
+    ) -> PageTurn? {
+        guard elapsed >= dwell, let strip = strip(at: point, in: size) else { return nil }
+        switch strip {
+        case .backward: return page > 0 ? .backward : nil
+        case .forward: return page + 1 < pageCount ? .forward : nil
+        }
+    }
+}
+
 /// One chapter, one page at a time.
 ///
 /// Deliberately dumb about books: it is handed a chapter's text and reports where the
@@ -48,16 +130,47 @@ struct PaginatedChapterView: View {
     @State private var renderedKey: String?
     @State private var pageIndex = 0
     @State private var turningForward = true
+    /// Identity of the page view, bumped by the turns that should slide.
+    ///
+    /// A fresh identity is what plays the transition — and also what tears the UIKit view
+    /// down, which cancels the press holding a selection open. So a page turned *by* a
+    /// selection reaching the edge moves `pageIndex` and leaves this alone: the same view
+    /// redraws the new page, the finger keeps its gesture, and the text does not slide
+    /// out from under a reader who is aiming at it.
+    @State private var pageTransition = 0
     @State private var dragOffset: CGFloat = 0
     /// The composed-string range the reader is picking out, held as a range rather than
     /// as anchors because it is redrawn on every movement of the finger and only has to
     /// become a storable pair once, at the moment it is committed.
     @State private var selection: NSRange?
+    /// The end of the selection the finger is *not* holding, as an offset into the
+    /// composed chapter.
+    ///
+    /// Kept rather than re-derived from the point the press began at: once a page has
+    /// turned under the finger, that point on screen names a different character. Only
+    /// the far end of a selection follows the finger.
+    @State private var selectionAnchor: Int?
+    /// Where the finger last was, in the page's own coordinates. Re-read while the finger
+    /// is still, because standing still is what turns the page here and a gesture
+    /// recogniser says nothing at all until the touch moves.
+    @State private var dragPoint: CGPoint?
+    /// The strip the finger is resting in and when it got there — the whole of the
+    /// auto-turn's memory.
+    @State private var edgeHold: EdgeHold?
     /// True while the finger is still down, which is what tells the difference between
     /// a selection being dragged and one waiting for an answer.
     @State private var isDragging = false
     /// The highlight a tap landed on, waiting to be removed or dismissed.
     @State private var picked: TextHighlight?
+
+    /// A finger resting against the top or bottom of the page while extending a
+    /// selection.
+    private struct EdgeHold {
+        let turn: PageTurn
+        let since: Date
+    }
+
+    private static let edgeRule = SelectionEdgeRule()
 
     /// Everything that changes where the page breaks fall. Bundled so one comparison
     /// covers a rotation, a font change, a spacing change and a new chapter — and so
@@ -102,7 +215,7 @@ struct PaginatedChapterView: View {
                     selectionColor: UIColor(settings.theme.selection),
                     onSelectionDrag: { drag in select(drag, in: paginator) }
                 )
-                .id(pageIndex)
+                .id(pageTransition)
                 .transition(.asymmetric(
                     insertion: .move(edge: turningForward ? .trailing : .leading),
                     removal: .move(edge: turningForward ? .leading : .trailing)
@@ -156,6 +269,21 @@ struct PaginatedChapterView: View {
         )
         .overlay(alignment: .bottom) { actionBar }
         .animation(.snappy(duration: 0.18), value: isChoosing)
+        // A finger held against an edge is reported once and then never again: a long
+        // press recogniser only speaks when the touch moves, and standing still is
+        // precisely the gesture that has to turn the page. So while a selection is being
+        // dragged the last known point is fed back through the same path a real report
+        // takes, which is what lets the dwell elapse without the reader wiggling a thumb.
+        .task(id: isDragging) {
+            guard isDragging else { return }
+            while !Task.isCancelled {
+                // Twenty a second: fine enough that the dwell reads as a hold rather than
+                // as a lag, coarse enough to cost less than one moving finger already does.
+                do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+                guard let paginator, let dragPoint else { return }
+                select(TextSelectionDrag(point: dragPoint, phase: .active), in: paginator)
+            }
+        }
     }
 
     // MARK: - Highlights
@@ -216,19 +344,83 @@ struct PaginatedChapterView: View {
     /// The range is not clipped to the page: a sentence that runs over the page break
     /// is still one sentence, and marking half of it because the other half is not on
     /// screen would store a highlight the reader never chose.
+    ///
+    /// Called again on a timer while the finger rests (see the dwell in `page(in:)`), so
+    /// nothing here writes state it is not changing: a page redrawn twenty times a second
+    /// to produce identical pixels would be the standing cost of holding still.
     private func select(_ drag: TextSelectionDrag, in paginator: ChapterPaginator) {
+        var page = pageIndex
         switch drag.phase {
         case .cancelled:
             clearSelection()
             return
-        case .active, .finished:
-            isDragging = drag.phase == .active
+        case .active:
+            if !isDragging { isDragging = true }
+            // Before `dragPoint` moves on: a turn is armed by the finger *arriving* at the
+            // edge, which can only be told from where it was a moment ago.
+            page = turnPastEdge(to: drag.point, from: dragPoint, in: paginator)
+            if dragPoint != drag.point { dragPoint = drag.point }
+        case .finished:
+            isDragging = false
+            dragPoint = nil
+            edgeHold = nil
         }
-        picked = nil
-        guard let from = paginator.offset(at: drag.start, onPage: pageIndex),
-              let to = paginator.offset(at: drag.end, onPage: pageIndex)
-        else { return }
-        selection = paginator.text.sentenceRange(from: from, to: to)
+        if picked != nil { picked = nil }
+        guard let to = paginator.offset(at: drag.point, onPage: page) else { return }
+        // The anchor is whatever the first report of this press landed on, and it stays
+        // put for the rest of the press however many pages the finger travels.
+        let from = selectionAnchor ?? to
+        if selectionAnchor == nil { selectionAnchor = from }
+        let range = paginator.text.sentenceRange(from: from, to: to)
+        if selection != range { selection = range }
+    }
+
+    /// The page under the finger, turned first if the finger has rested against an edge
+    /// long enough to have asked for one.
+    ///
+    /// Not `turn(_:)`: that clears the selection, which is right for a tap or a swipe and
+    /// exactly wrong here. Nothing is animated either — the slide is what a page does
+    /// because the reader swiped it, and playing it under a stationary finger both
+    /// contradicts the gesture and pulls the text they are aiming at out from under them.
+    ///
+    /// Returns the page rather than leaving the caller to re-read `pageIndex`, which is
+    /// `@State` and does not report back the value just written to it.
+    private func turnPastEdge(
+        to point: CGPoint, from previous: CGPoint?, in paginator: ChapterPaginator
+    ) -> Int {
+        guard let strip = Self.edgeRule.strip(at: point, in: paginator.pageSize) else {
+            // Leaving the strip ends the run: a reader who drags back into the text has
+            // stopped asking for pages, and a chapter that kept turning would arrive at
+            // its end under a finger that had gone still somewhere in the middle.
+            if edgeHold != nil { edgeHold = nil }
+            return pageIndex
+        }
+        let now = Date.now
+        guard let hold = edgeHold, hold.turn == strip else {
+            if let arrived = Self.edgeRule.arrival(
+                at: point, from: previous, in: paginator.pageSize
+            ) {
+                edgeHold = EdgeHold(turn: arrived, since: now)
+            }
+            return pageIndex
+        }
+        // Measured one page ahead so that the frontier of a chapter still being laid out
+        // is not mistaken for its last page. A no-op once the frontier is past the finger.
+        paginator.paginate(through: pageIndex + 1)
+        guard let turn = Self.edgeRule.turn(
+            at: point,
+            in: paginator.pageSize,
+            heldFor: now.timeIntervalSince(hold.since),
+            page: pageIndex,
+            of: paginator.pages.count
+        ) else { return pageIndex }
+        // Restarted rather than left running: the next page is another dwell away, so a
+        // finger that stays put turns pages at a rate the reader can still read.
+        edgeHold = EdgeHold(turn: turn, since: now)
+        let page = turn == .forward ? pageIndex + 1 : pageIndex - 1
+        pageIndex = page
+        onAnchorChange(paginator.anchor(at: page))
+        return page
     }
 
     private func commit(_ range: NSRange) {
@@ -239,6 +431,9 @@ struct PaginatedChapterView: View {
 
     private func clearSelection() {
         selection = nil
+        selectionAnchor = nil
+        dragPoint = nil
+        edgeHold = nil
         isDragging = false
         picked = nil
     }
@@ -295,8 +490,10 @@ struct PaginatedChapterView: View {
 
     private func turn(_ delta: Int) {
         guard let paginator else { return }
-        // A selection belongs to the page it was drawn on; carrying it across a turn
-        // would leave a bar offering to mark text that is no longer on screen.
+        // A tap or a swipe that turns the page is the reader leaving the passage behind,
+        // and the bar would be left offering to mark text that is no longer on screen. A
+        // turn the selection itself asked for is the opposite intent and goes through
+        // `turnPastEdge`, which keeps it.
         clearSelection()
         let target = pageIndex + delta
         guard target >= 0 else {
@@ -312,7 +509,11 @@ struct PaginatedChapterView: View {
             return
         }
         turningForward = delta > 0
-        withAnimation(.snappy(duration: 0.22)) { pageIndex = target }
+        withAnimation(.snappy(duration: 0.22)) {
+            // The new identity is what plays the slide; see `pageTransition`.
+            pageTransition += 1
+            pageIndex = target
+        }
         onAnchorChange(paginator.anchor(at: target))
     }
 
@@ -365,9 +566,13 @@ struct PaginatedChapterView: View {
 
 /// One press-and-slide over a page's text.
 ///
-/// Points rather than character offsets: the view reports where the finger is and the
+/// A point rather than character offsets: the view reports where the finger is and the
 /// reader view decides what that means, so the sentence-snapping rules live next to
 /// the text that defines them instead of inside a `UIView`.
+///
+/// The current point only, not the pair. The far end of a selection is the finger; the
+/// near end is an offset the reader view remembers, because the page under the finger can
+/// change mid-press and the point the press began at would then name another character.
 struct TextSelectionDrag {
     enum Phase {
         case active
@@ -378,8 +583,7 @@ struct TextSelectionDrag {
         case cancelled
     }
 
-    let start: CGPoint
-    let end: CGPoint
+    let point: CGPoint
     let phase: Phase
 }
 
@@ -430,9 +634,6 @@ final class ChapterPageView: UIView {
     private var selection: NSRange?
     private var highlightColor: UIColor = .clear
     private var selectionColor: UIColor = .clear
-    /// Where the press that is being tracked started. Held here because
-    /// `UILongPressGestureRecognizer` reports only the current point.
-    private var pressOrigin = CGPoint.zero
 
     var onSelectionDrag: ((TextSelectionDrag) -> Void)?
 
@@ -481,17 +682,12 @@ final class ChapterPageView: UIView {
     @objc private func handlePress(_ gesture: UILongPressGestureRecognizer) {
         let point = gesture.location(in: self)
         switch gesture.state {
-        case .began:
-            pressOrigin = point
-            onSelectionDrag?(TextSelectionDrag(start: point, end: point, phase: .active))
-        case .changed:
-            onSelectionDrag?(TextSelectionDrag(start: pressOrigin, end: point, phase: .active))
+        case .began, .changed:
+            onSelectionDrag?(TextSelectionDrag(point: point, phase: .active))
         case .ended:
-            onSelectionDrag?(TextSelectionDrag(start: pressOrigin, end: point, phase: .finished))
+            onSelectionDrag?(TextSelectionDrag(point: point, phase: .finished))
         case .cancelled, .failed:
-            onSelectionDrag?(
-                TextSelectionDrag(start: pressOrigin, end: point, phase: .cancelled)
-            )
+            onSelectionDrag?(TextSelectionDrag(point: point, phase: .cancelled))
         default:
             break
         }
