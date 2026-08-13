@@ -9,13 +9,20 @@ import Foundation
 /// `Compression` framework already, and a package would add a dependency and a
 /// signing surface in exchange for the hundred lines below.
 ///
+/// Entries land in a file as they arrive rather than in a buffer that is handed
+/// back at the end. A ZIP is written front to back anyway — a local header, its
+/// payload, then the next one — and each entry is deflated on its own, so the
+/// only thing that changes by streaming is where the finished bytes accumulate.
+/// A thirteen-hundred-chapter novel is therefore one chapter of memory at a time
+/// instead of the whole book twice over (once as text, once as an archive).
+///
 /// Output is deterministic: modification times are written as zero rather than
 /// as "now", and nothing else in an entry depends on the clock. Exporting the
 /// same book twice therefore produces byte-identical files, which is what makes
 /// re-importing an export land on the book it came from — `LocalBookImporter`
 /// identifies an imported book by the digest of the file's bytes, so a timestamp
 /// in here would quietly turn every export into a new book.
-struct ZipBuilder {
+final class ZipBuilder {
     struct Entry {
         let name: String
         let data: Data
@@ -35,71 +42,94 @@ struct ZipBuilder {
         }
     }
 
-    /// Entries are written in the order given, which is the order a reader sees
-    /// them in the file.
-    static func archive(_ entries: [Entry]) -> Data {
-        var output = Data()
-        var directory = Data()
-        var count: UInt16 = 0
+    private let handle: FileHandle
+    /// The central directory, which can only be written once the last entry's
+    /// offset is known. Held in memory because that is what the format demands,
+    /// and it is affordable: one record is the entry's name plus 46 bytes, so a
+    /// novel's worth of chapters comes to some tens of kilobytes.
+    private var directory = Data()
+    private var count: UInt16 = 0
+    /// Bytes written so far, which is the next entry's offset. Tracked rather
+    /// than asked of the file handle: `offset()` is a syscall per entry and this
+    /// is the same number.
+    private var written: UInt32 = 0
 
-        for entry in entries {
-            let name = Data(entry.name.utf8)
-            let offset = UInt32(output.count)
-            let deflated = entry.compressed ? deflate(entry.data) : nil
-            let payload = deflated ?? entry.data
-            let method: UInt16 = deflated == nil ? 0 : 8
-            let crc = Crc32.compute(entry.data)
-            // Bit 11 says the name is UTF-8. Every name this app writes is ASCII,
-            // but the flag costs one comparison and its absence on a non-ASCII
-            // name is how entry names come out mangled in other readers.
-            let flags: UInt16 = name.allSatisfy { $0 < 0x80 } ? 0 : 1 << 11
+    /// - Parameter url: the file to write. Truncated if it already exists.
+    init(creating url: URL) throws {
+        // An empty file first: `FileHandle(forWritingTo:)` opens, it does not
+        // create, and `Data.write(to:)` reports why it could not (no directory,
+        // no space) where `FileManager.createFile` returns a bare `false`.
+        try Data().write(to: url)
+        handle = try FileHandle(forWritingTo: url)
+    }
 
-            output.append(u32(0x0403_4b50))
-            output.append(u16(20))                          // version needed: 2.0
-            output.append(u16(flags))
-            output.append(u16(method))
-            output.append(u16(0))                           // modification time
-            output.append(u16(0))                           // modification date
-            output.append(u32(crc))
-            output.append(u32(UInt32(payload.count)))
-            output.append(u32(UInt32(entry.data.count)))
-            output.append(u16(UInt16(name.count)))
-            output.append(u16(0))                           // extra field length
-            output.append(name)
-            output.append(payload)
+    /// Appends one entry. Entries appear in the file in the order they are
+    /// added, which is the order a reader sees them in.
+    func append(_ entry: Entry) throws {
+        let name = Data(entry.name.utf8)
+        let offset = written
+        let deflated = entry.compressed ? Self.deflate(entry.data) : nil
+        let payload = deflated ?? entry.data
+        let method: UInt16 = deflated == nil ? 0 : 8
+        let crc = Crc32.compute(entry.data)
+        // Bit 11 says the name is UTF-8. Every name this app writes is ASCII,
+        // but the flag costs one comparison and its absence on a non-ASCII
+        // name is how entry names come out mangled in other readers.
+        let flags: UInt16 = name.allSatisfy { $0 < 0x80 } ? 0 : 1 << 11
 
-            directory.append(u32(0x0201_4b50))
-            directory.append(u16(20))                       // version made by
-            directory.append(u16(20))                       // version needed
-            directory.append(u16(flags))
-            directory.append(u16(method))
-            directory.append(u16(0))
-            directory.append(u16(0))
-            directory.append(u32(crc))
-            directory.append(u32(UInt32(payload.count)))
-            directory.append(u32(UInt32(entry.data.count)))
-            directory.append(u16(UInt16(name.count)))
-            directory.append(u16(0))                        // extra field length
-            directory.append(u16(0))                        // comment length
-            directory.append(u16(0))                        // disk number
-            directory.append(u16(0))                        // internal attributes
-            directory.append(u32(0))                        // external attributes
-            directory.append(u32(offset))
-            directory.append(name)
-            count += 1
-        }
+        var header = Data()
+        header.append(Self.u32(0x0403_4b50))
+        header.append(Self.u16(20))                     // version needed: 2.0
+        header.append(Self.u16(flags))
+        header.append(Self.u16(method))
+        header.append(Self.u16(0))                      // modification time
+        header.append(Self.u16(0))                      // modification date
+        header.append(Self.u32(crc))
+        header.append(Self.u32(UInt32(payload.count)))
+        header.append(Self.u32(UInt32(entry.data.count)))
+        header.append(Self.u16(UInt16(name.count)))
+        header.append(Self.u16(0))                      // extra field length
+        header.append(name)
+        try handle.write(contentsOf: header)
+        try handle.write(contentsOf: payload)
+        written += UInt32(header.count + payload.count)
 
-        let directoryOffset = UInt32(output.count)
-        output.append(directory)
-        output.append(u32(0x0605_4b50))
-        output.append(u16(0))                               // this disk
-        output.append(u16(0))                               // disk with directory
-        output.append(u16(count))
-        output.append(u16(count))
-        output.append(u32(UInt32(directory.count)))
-        output.append(u32(directoryOffset))
-        output.append(u16(0))                               // comment length
-        return output
+        directory.append(Self.u32(0x0201_4b50))
+        directory.append(Self.u16(20))                  // version made by
+        directory.append(Self.u16(20))                  // version needed
+        directory.append(Self.u16(flags))
+        directory.append(Self.u16(method))
+        directory.append(Self.u16(0))
+        directory.append(Self.u16(0))
+        directory.append(Self.u32(crc))
+        directory.append(Self.u32(UInt32(payload.count)))
+        directory.append(Self.u32(UInt32(entry.data.count)))
+        directory.append(Self.u16(UInt16(name.count)))
+        directory.append(Self.u16(0))                   // extra field length
+        directory.append(Self.u16(0))                   // comment length
+        directory.append(Self.u16(0))                   // disk number
+        directory.append(Self.u16(0))                   // internal attributes
+        directory.append(Self.u32(0))                   // external attributes
+        directory.append(Self.u32(offset))
+        directory.append(name)
+        count += 1
+    }
+
+    /// Writes the central directory and closes the file. Nothing may be appended
+    /// afterwards, and a file left unfinished is not a readable archive — which
+    /// is what makes an abandoned export easy to recognise as one.
+    func finish() throws {
+        var trailer = directory
+        trailer.append(Self.u32(0x0605_4b50))
+        trailer.append(Self.u16(0))                     // this disk
+        trailer.append(Self.u16(0))                     // disk with directory
+        trailer.append(Self.u16(count))
+        trailer.append(Self.u16(count))
+        trailer.append(Self.u32(UInt32(directory.count)))
+        trailer.append(Self.u32(written))
+        trailer.append(Self.u16(0))                     // comment length
+        try handle.write(contentsOf: trailer)
+        try handle.close()
     }
 
     /// Raw DEFLATE, which is what ZIP stores — `COMPRESSION_ZLIB` in this API

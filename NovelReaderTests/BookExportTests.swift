@@ -32,10 +32,16 @@ final class BookExportTests: XCTestCase {
         repo = LibraryRepo(database: database)
         downloads = DownloadStore(database: database, files: ChapterFileStore(root: tempRoot))
         exporter = BookExporter(downloads: downloads)
+        // Cleared at the *start*: the cover tests seed this cache, it is shared by
+        // the whole process, and a leftover response would decide whether a later
+        // test's export carries a cover.
+        URLCache.shared.removeAllCachedResponses()
     }
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: tempRoot)
+        try? FileManager.default.removeItem(at: BookExporter.directory)
+        URLCache.shared.removeAllCachedResponses()
     }
 
     // MARK: - EPUB
@@ -46,10 +52,12 @@ final class BookExportTests: XCTestCase {
     func testExportedEpubIsReadBackByOurOwnReader() async throws {
         let (book, catalog) = try makeBook()
 
-        let export = try await exporter.export(book: book, chapters: catalog, format: .epub)
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
 
         XCTAssertFalse(export.isPartial)
-        let document = try EpubDocument.parse(export.data)
+        let document = try EpubDocument.parse(try bytes(of: export))
         XCTAssertEqual(document.title, "山月記")
         XCTAssertEqual(document.author, "中島敦")
         // Spine order, and titles from the nav document rather than from the
@@ -67,8 +75,10 @@ final class BookExportTests: XCTestCase {
     /// extractor has been over the XHTML.
     func testExportedEpubCanBeImportedAgain() async throws {
         let (book, catalog) = try makeBook()
-        let export = try await exporter.export(book: book, chapters: catalog, format: .epub)
-        let file = try write("export.epub", data: export.data)
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
+        let file = try write("export.epub", data: try bytes(of: export))
 
         let reimported = try await LocalBookImporter(
             repo: repo, downloads: downloads, fetcher: WebFetcher()
@@ -97,9 +107,11 @@ final class BookExportTests: XCTestCase {
     func testMimetypeIsTheFirstEntryAndIsNotCompressed() async throws {
         let (book, catalog) = try makeBook()
 
-        let export = try await exporter.export(book: book, chapters: catalog, format: .epub)
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
 
-        let bytes = [UInt8](export.data)
+        let bytes = [UInt8](try bytes(of: export))
         XCTAssertEqual(Array(bytes[0 ..< 4]), [0x50, 0x4b, 0x03, 0x04], "a local header must open the file")
         XCTAssertEqual(bytes[8], 0, "compression method must be stored")
         XCTAssertEqual(bytes[9], 0)
@@ -121,12 +133,120 @@ final class BookExportTests: XCTestCase {
             ImportedChapter(title: "第一章 <序> & 破題", paragraphs: ["他說：「a < b & c > d」。"])
         ])
 
-        let export = try await exporter.export(book: book, chapters: catalog, format: .epub)
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
 
-        let document = try EpubDocument.parse(export.data)
+        let document = try EpubDocument.parse(try bytes(of: export))
         XCTAssertEqual(document.items.map(\.tocTitle), ["第一章 <序> & 破題"])
         let xhtml = try XCTUnwrap(XMLTree.parse(try XCTUnwrap(document.items.first?.xhtml)))
         XCTAssertEqual(xhtml.first("p")?.text, "他說：「a < b & c > d」。")
+    }
+
+    // MARK: - Style and title page
+
+    /// The stylesheet and the title page are in the container, are wired into the
+    /// package document, and — the part that matters most — do not turn into a
+    /// chapter when the file comes home. The plate carries the book's own name, so
+    /// an importer that read it as content would open the novel on a page
+    /// repeating its title.
+    func testTheEpubCarriesAStylesheetAndATitlePageWithoutGainingAChapter() async throws {
+        let (book, catalog) = try makeBook()
+
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
+
+        let archive = try ZipArchive(data: try bytes(of: export))
+        let css = try XCTUnwrap(try archive.data(named: "OEBPS/style.css"))
+        XCTAssertFalse(css.isEmpty)
+        // No colours anywhere: a reading system's night mode wins by recolouring
+        // what the book did not insist on.
+        XCTAssertFalse(String(decoding: css, as: UTF8.self).contains("color:"))
+
+        let page = String(decoding: try XCTUnwrap(try archive.data(named: "OEBPS/titlepage.xhtml")), as: UTF8.self)
+        XCTAssertTrue(page.contains("<h1>山月記</h1>"), "the title page must name the book")
+        XCTAssertTrue(page.contains("中島敦"), "and its author")
+        XCTAssertTrue(page.contains("style.css"), "and use the stylesheet")
+
+        let opf = String(decoding: try XCTUnwrap(try archive.data(named: "OEBPS/content.opf")), as: UTF8.self)
+        XCTAssertTrue(opf.contains(#"media-type="text/css""#))
+        XCTAssertTrue(
+            opf.contains(#"<itemref idref="titlepage" linear="no"/>"#),
+            "the plate is front matter, not the first chapter"
+        )
+        // EPUB 3 asks that non-linear content stay reachable, and the toc is where
+        // it is reached from. Counted, not merely found: the plate and every
+        // chapter get one entry each, and a toc that lists something twice is a
+        // reading system showing the same page twice.
+        let nav = String(decoding: try XCTUnwrap(try archive.data(named: "OEBPS/nav.xhtml")), as: UTF8.self)
+        XCTAssertTrue(nav.contains(#"<a href="titlepage.xhtml">"#))
+        XCTAssertEqual(nav.components(separatedBy: "<li>").count - 1, 3, "one entry per document")
+
+        XCTAssertEqual(
+            try EpubDocument.parse(try bytes(of: export)).items.count, 2,
+            "the title page must not come back as a chapter"
+        )
+    }
+
+    /// The cover is written only when its bytes are already on the device, because
+    /// an export must not make a network request — a file the user is waiting for
+    /// cannot be waiting on someone else's server.
+    func testTheCoverIsWrittenWhenItsBytesAreAlreadyCached() async throws {
+        let cover = try XCTUnwrap(Data(base64Encoded: Self.pngBase64))
+        cacheCover(cover, mediaType: "image/png")
+        let (book, catalog) = try makeBook(cover: Self.coverURL)
+
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
+
+        let archive = try ZipArchive(data: try bytes(of: export))
+        XCTAssertEqual(try archive.data(named: "OEBPS/cover.png"), cover)
+        let opf = String(decoding: try XCTUnwrap(try archive.data(named: "OEBPS/content.opf")), as: UTF8.self)
+        XCTAssertTrue(
+            opf.contains(#"properties="cover-image""#),
+            "an image no reading system knows is the cover is an image nobody sees"
+        )
+        let page = String(decoding: try XCTUnwrap(try archive.data(named: "OEBPS/titlepage.xhtml")), as: UTF8.self)
+        XCTAssertTrue(page.contains(#"src="cover.png""#))
+    }
+
+    /// The usual case: the user never looked at this book's cover, so nothing on
+    /// the device has it. The title page is still there, in text.
+    func testNoCoverIsWrittenWhenNothingIsCached() async throws {
+        let (book, catalog) = try makeBook(cover: Self.coverURL)
+
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
+
+        let archive = try ZipArchive(data: try bytes(of: export))
+        XCTAssertNil(try archive.data(named: "OEBPS/cover.png"))
+        let opf = String(decoding: try XCTUnwrap(try archive.data(named: "OEBPS/content.opf")), as: UTF8.self)
+        XCTAssertFalse(opf.contains("cover-image"))
+        let page = String(decoding: try XCTUnwrap(try archive.data(named: "OEBPS/titlepage.xhtml")), as: UTF8.self)
+        XCTAssertTrue(page.contains("<h1>山月記</h1>"))
+        XCTAssertFalse(page.contains("<img"))
+    }
+
+    /// A cover in a format EPUB 3.0 does not list as a core type is left out
+    /// rather than declared: an unfallback-able media type makes the whole file
+    /// invalid, which is a high price for a picture.
+    func testACoverInAnUnsupportedFormatIsLeftOut() async throws {
+        cacheCover(Data("RIFF....WEBP".utf8), mediaType: "image/webp")
+        let (book, catalog) = try makeBook(cover: Self.coverURL)
+
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
+
+        let opf = String(
+            decoding: try XCTUnwrap(try ZipArchive(data: try bytes(of: export))
+                .data(named: "OEBPS/content.opf")),
+            as: UTF8.self
+        )
+        XCTAssertFalse(opf.contains("cover-image"))
     }
 
     // MARK: - Plain text
@@ -134,12 +254,95 @@ final class BookExportTests: XCTestCase {
     func testExportedTextFileIsReadBackByTheTextParser() async throws {
         let (book, catalog) = try makeBook()
 
-        let export = try await exporter.export(book: book, chapters: catalog, format: .text)
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .text
+        ) { _ in }
 
-        let text = try XCTUnwrap(TextBookParser.decode(export.data), "must decode as UTF-8")
+        let text = try XCTUnwrap(TextBookParser.decode(try bytes(of: export)), "must decode as UTF-8")
         let parsed = TextBookParser.chapters(from: text)
         XCTAssertEqual(parsed.map(\.title), ["第一章 下山", "第二章 入城"])
         XCTAssertEqual(parsed.map(\.paragraphs), [["雪停了。", "風也停了。"], ["城門在傍晚關上。"]])
+    }
+
+    /// The exact bytes, because the file is now written a chapter at a time: the
+    /// separator has to go before every chapter but the first, and the newline at
+    /// the end has to be the only one. A round trip through our own parser cannot
+    /// see either seam — it drops blank lines.
+    func testTheStreamedTextFileHasNoSeams() async throws {
+        let (book, catalog) = try makeBook()
+
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .text
+        ) { _ in }
+
+        XCTAssertEqual(
+            String(decoding: try bytes(of: export), as: UTF8.self),
+            "第一章 下山\n\n雪停了。\n\n風也停了。\n\n第二章 入城\n\n城門在傍晚關上。\n"
+        )
+    }
+
+    // MARK: - Streaming, progress, cancellation
+
+    /// Writing the book to a file as it goes must not have changed a byte of it.
+    /// An imported book is identified by the digest of its file, so two exports of
+    /// the same book that differed would come back as two books.
+    func testTwoExportsOfTheSameBookAreByteIdentical() async throws {
+        let (book, catalog) = try makeBook()
+        for format in [BookExporter.Format.text, .epub] {
+            let first = try bytes(of: try await exporter.export(
+                book: book, chapters: catalog, format: format
+            ) { _ in })
+            let second = try bytes(of: try await exporter.export(
+                book: book, chapters: catalog, format: format
+            ) { _ in })
+            XCTAssertEqual(first, second)
+        }
+    }
+
+    /// Progress has to be able to drive a determinate bar: it may never run
+    /// backwards, and it has to arrive at 1. A bar that stops short reads as an
+    /// export that hung.
+    func testProgressRunsForwardToOne() async throws {
+        let (book, catalog) = try makeBook(sampleChapters, downloading: 1)
+        let reported = Reported()
+
+        _ = try await exporter.export(book: book, chapters: catalog, format: .epub) {
+            reported.values.append($0)
+        }
+
+        let values = reported.values
+        XCTAssertGreaterThanOrEqual(values.count, catalog.count, "one report per catalog chapter")
+        XCTAssertEqual(values, values.sorted(), "a progress bar must never run backwards")
+        XCTAssertEqual(try XCTUnwrap(values.last), 1, accuracy: 0.0001)
+    }
+
+    /// Cancelling leaves nothing behind. Half an EPUB is not a document, and a
+    /// truncated file sitting where the next export looks is worse than no file:
+    /// the save sheet would happily hand it to the user as their book.
+    func testCancellingAnExportLeavesNoFileBehind() async throws {
+        let (book, catalog) = try makeBook()
+        let exporter = try XCTUnwrap(self.exporter)
+        let canceller = Canceller()
+
+        // Cancelled from the progress callback, so the cancel lands *after* a
+        // chapter has really been written rather than racing the whole export.
+        canceller.task = Task {
+            try await exporter.export(book: book, chapters: catalog, format: .epub) { _ in
+                canceller.reports += 1
+                canceller.cancel()
+            }
+        }
+        do {
+            _ = try await canceller.task?.value
+            XCTFail("a cancelled export must not return a file")
+        } catch is CancellationError {
+            // Expected, and it must be this error rather than a generic failure:
+            // the screen tells the two apart, and a cancel is not a problem to
+            // report back to the user who asked for it.
+        }
+
+        XCTAssertGreaterThan(canceller.reports, 0, "the cancel has to land mid-write to prove anything")
+        XCTAssertEqual(try exportedFiles(), [], "a cancelled export may not leave a file")
     }
 
     // MARK: - Partial books
@@ -151,12 +354,16 @@ final class BookExportTests: XCTestCase {
     func testExportOfAPartlyDownloadedBookHoldsOnlyWhatIsOnDisk() async throws {
         let (book, catalog) = try makeBook(sampleChapters, downloading: 1)
 
-        let export = try await exporter.export(book: book, chapters: catalog, format: .epub)
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .epub
+        ) { _ in }
 
         XCTAssertTrue(export.isPartial)
         XCTAssertEqual(export.chapterCount, 1)
         XCTAssertEqual(export.catalogCount, 2)
-        XCTAssertEqual(try EpubDocument.parse(export.data).items.map(\.tocTitle), ["第一章 下山"])
+        XCTAssertEqual(
+            try EpubDocument.parse(try bytes(of: export)).items.map(\.tocTitle), ["第一章 下山"]
+        )
     }
 
     /// A chapter flagged as downloaded whose file has gone missing counts as
@@ -171,7 +378,9 @@ final class BookExportTests: XCTestCase {
             )
         )
 
-        let export = try await exporter.export(book: book, chapters: catalog, format: .text)
+        let export = try await exporter.export(
+            book: book, chapters: catalog, format: .text
+        ) { _ in }
 
         XCTAssertTrue(export.isPartial)
         XCTAssertEqual(export.chapterCount, 1)
@@ -180,11 +389,12 @@ final class BookExportTests: XCTestCase {
     func testExportingABookWithNothingOnDiskFails() async throws {
         let (book, catalog) = try makeBook(sampleChapters, downloading: 0)
         do {
-            _ = try await exporter.export(book: book, chapters: catalog, format: .epub)
+            _ = try await exporter.export(book: book, chapters: catalog, format: .epub) { _ in }
             XCTFail("a book with no text on the device has nothing to export")
         } catch {
             XCTAssertNotNil(error.localizedDescription)
         }
+        XCTAssertEqual(try exportedFiles(), [], "a failed export may not leave a file")
     }
 
     // MARK: - Naming
@@ -200,6 +410,37 @@ final class BookExportTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// A 1×1 PNG. Real bytes with a real media type, because what the exporter
+    /// decides about a cover is decided from the cached response's type.
+    private static let pngBase64 = """
+    iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC
+    """
+
+    private static let coverURL = "https://example.com/covers/1.png"
+
+    /// Puts a cover where `AsyncImage` would have left one.
+    private func cacheCover(_ data: Data, mediaType: String) {
+        let url = URL(string: Self.coverURL)!
+        let response = HTTPURLResponse(
+            url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": mediaType, "Content-Length": "\(data.count)"]
+        )!
+        URLCache.shared.storeCachedResponse(
+            CachedURLResponse(response: response, data: data), for: URLRequest(url: url)
+        )
+    }
+
+    /// The export is a file now, so every assertion about its contents reads it.
+    private func bytes(of export: BookExporter.Export) throws -> Data {
+        try Data(contentsOf: export.url)
+    }
+
+    private func exportedFiles() throws -> [String] {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: BookExporter.directory.path) else { return [] }
+        return try manager.contentsOfDirectory(atPath: BookExporter.directory.path).sorted()
+    }
+
     /// A bookmarked book with a catalog, and its text written through
     /// `DownloadStore` exactly as a finished download would leave it. The stored
     /// catalog comes back with it, because that is what the exporter is handed.
@@ -207,10 +448,12 @@ final class BookExportTests: XCTestCase {
     /// - Parameter downloading: how many of the chapters get their text on disk.
     ///   Defaults to all of them.
     private func makeBook(
-        _ chapters: [ImportedChapter] = sampleChapters, downloading: Int? = nil
+        _ chapters: [ImportedChapter] = sampleChapters,
+        downloading: Int? = nil,
+        cover: String? = nil
     ) throws -> (book: Book, catalog: [Chapter]) {
         let book = try repo.bookmark(
-            siteId: "alpha", siteBookId: "1", title: "山月記", author: "中島敦"
+            siteId: "alpha", siteBookId: "1", title: "山月記", author: "中島敦", coverURL: cover
         )
         try repo.replaceCatalog(
             bookId: book.id,
@@ -237,5 +480,24 @@ final class BookExportTests: XCTestCase {
         let url = tempRoot.appendingPathComponent(name)
         try data.write(to: url)
         return url
+    }
+
+    /// Collects the progress callbacks, which arrive on the main actor.
+    private final class Reported {
+        var values: [Double] = []
+    }
+
+    /// Holds the export's own task so the progress callback can cancel the very
+    /// export that is reporting to it. Without that circle, "cancel after the
+    /// first chapter" can only be approximated with a sleep, and a
+    /// timing-dependent test of a cancellation path is worse than none.
+    @MainActor
+    private final class Canceller {
+        var task: Task<BookExporter.Export, any Error>?
+        /// How many progress callbacks arrived, which is how the test knows the
+        /// cancel landed after real work rather than before any.
+        var reports = 0
+
+        func cancel() { task?.cancel() }
     }
 }
