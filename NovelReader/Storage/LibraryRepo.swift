@@ -35,7 +35,7 @@ struct LibraryRepo {
                 id: id, siteId: siteId, siteBookId: siteBookId, title: title,
                 displayName: nil, author: author, coverURL: coverURL,
                 addedAt: now, updatedAt: now,
-                lastReadChapterIndex: nil, lastReadParagraph: nil,
+                lastReadSiteChapterId: nil, lastReadParagraph: nil,
                 lastReadCharacterOffset: nil, catalogUpdatedAt: nil
             )
             try book.insert(db)
@@ -80,7 +80,7 @@ struct LibraryRepo {
     func updateProgress(bookId: String, position: ReadingPosition, now: Date = Date()) throws {
         try writer.write { db in
             guard var book = try Book.fetchOne(db, key: bookId) else { return }
-            book.lastReadChapterIndex = position.chapterIndex
+            book.lastReadSiteChapterId = position.siteChapterId
             book.lastReadParagraph = position.anchor.paragraph
             book.lastReadCharacterOffset = position.anchor.characterOffset
             book.updatedAt = now
@@ -122,12 +122,24 @@ struct LibraryRepo {
     /// In reading order rather than by creation time: this list exists to jump back
     /// into the book, and one that runs the same way as the book is the one a reader
     /// can find a place in.
+    ///
+    /// Reading order comes from the catalog, which is why this joins: a bookmark stores
+    /// *which* chapter it is in, and only the chapter row knows what number that is
+    /// today. A bookmark whose chapter the site has since dropped cannot be placed in
+    /// the book, so it cannot be placed in the list either — those sort last, where they
+    /// stay readable and deletable without pushing anything else out of order.
     func readingBookmarks(bookId: String) throws -> [ReadingBookmark] {
         try writer.read { db in
-            try ReadingBookmark
-                .filter(Column("bookId") == bookId)
-                .order(Column("chapterIndex"), Column("paragraph"), Column("characterOffset"))
-                .fetchAll(db)
+            try ReadingBookmark.fetchAll(db, sql: """
+                SELECT "readingBookmark".*
+                FROM "readingBookmark"
+                LEFT JOIN "chapter"
+                       ON "chapter"."bookId" = "readingBookmark"."bookId"
+                      AND "chapter"."siteChapterId" = "readingBookmark"."siteChapterId"
+                WHERE "readingBookmark"."bookId" = ?
+                ORDER BY "chapter"."index" IS NULL, "chapter"."index",
+                         "readingBookmark"."paragraph", "readingBookmark"."characterOffset"
+                """, arguments: [bookId])
         }
     }
 
@@ -142,17 +154,17 @@ struct LibraryRepo {
     @discardableResult
     func addHighlight(
         bookId: String,
-        chapterIndex: Int,
+        siteChapterId: String,
         selection: TextSelection,
         now: Date = Date()
     ) throws -> TextHighlight {
         try writer.write { db in
             let id = TextHighlight.makeId(
-                bookId: bookId, chapterIndex: chapterIndex, selection: selection
+                bookId: bookId, siteChapterId: siteChapterId, selection: selection
             )
             if let existing = try TextHighlight.fetchOne(db, key: id) { return existing }
             let highlight = TextHighlight(
-                bookId: bookId, chapterIndex: chapterIndex, selection: selection, createdAt: now
+                bookId: bookId, siteChapterId: siteChapterId, selection: selection, createdAt: now
             )
             try highlight.insert(db)
             return highlight
@@ -164,13 +176,21 @@ struct LibraryRepo {
     }
 
     /// In reading order, like the saved positions: the list runs the way the book runs,
-    /// which is the only order a reader can find a passage in.
+    /// which is the only order a reader can find a passage in. It joins the catalog for
+    /// that order, and puts what it cannot place last, for the reasons on
+    /// `readingBookmarks`.
     func highlights(bookId: String) throws -> [TextHighlight] {
         try writer.read { db in
-            try TextHighlight
-                .filter(Column("bookId") == bookId)
-                .order(Column("chapterIndex"), Column("startParagraph"), Column("startCharacterOffset"))
-                .fetchAll(db)
+            try TextHighlight.fetchAll(db, sql: """
+                SELECT "textHighlight".*
+                FROM "textHighlight"
+                LEFT JOIN "chapter"
+                       ON "chapter"."bookId" = "textHighlight"."bookId"
+                      AND "chapter"."siteChapterId" = "textHighlight"."siteChapterId"
+                WHERE "textHighlight"."bookId" = ?
+                ORDER BY "chapter"."index" IS NULL, "chapter"."index",
+                         "textHighlight"."startParagraph", "textHighlight"."startCharacterOffset"
+                """, arguments: [bookId])
         }
     }
 
@@ -198,6 +218,23 @@ struct LibraryRepo {
             // Nothing is new on the first fetch: a book whose every chapter is
             // flagged is a book with no flags worth reading.
             let isFirstCatalog = stored?.catalogUpdatedAt == nil
+
+            // Every number below is about to be reassigned, and `chapter_book_index` is
+            // unique and checked row by row: giving chapter 3 its new index while the
+            // chapter that currently holds that index is still waiting its turn fails the
+            // whole write. Which is to say a catalog could only ever be *appended* to —
+            // one inserted or withdrawn chapter and the refresh threw, silently for the
+            // background one, leaving the book stuck on the catalog it already had.
+            //
+            // Parking the current numbering in the negative range clears the way: the
+            // mapping is injective, so the unique index stays satisfied throughout, and
+            // nothing non-negative is left for a new number to collide with. Rows that
+            // are gone from the catalog keep their parked number until they are deleted
+            // below; nothing reads a chapter index inside this transaction.
+            try db.execute(
+                sql: #"UPDATE "chapter" SET "index" = -1 - "index" WHERE "bookId" = ?"#,
+                arguments: [bookId]
+            )
 
             for (index, entry) in entries.enumerated() {
                 let id = Chapter.makeId(bookId: bookId, siteChapterId: entry.siteChapterId)
@@ -247,9 +284,14 @@ struct LibraryRepo {
     /// every row of the library list, and a per-book count would turn drawing a
     /// 40-book shelf into 40 round trips on every reload.
     ///
-    /// The predicate restates `Chapter.isNew(in:)` in SQL — the aggregate cannot
-    /// be expressed any other way — so the two have to move together, which
+    /// The predicate restates `Chapter.isNew(lastReadIndex:)` in SQL — the aggregate
+    /// cannot be expressed any other way — so the two have to move together, which
     /// `NewChapterTests` pins.
+    ///
+    /// The extra join is the reading position: the book stores which chapter it is in,
+    /// and the comparison needs the number, which only that chapter's own row has. A
+    /// null `lastRead."index"` therefore covers both halves of `lastReadIndex(in:)`
+    /// being nil — never opened, and a position naming a chapter the site has dropped.
     func newChapterCounts(now: Date = .now) throws -> [String: Int] {
         // `> cutoff` carries the null check with it — a null addedAt compares to null,
         // never to true — so the expiry and "was it ever stamped" stay one condition.
@@ -259,13 +301,36 @@ struct LibraryRepo {
                 SELECT chapter."bookId" AS bookId, COUNT(*) AS newCount
                 FROM chapter
                 JOIN book ON book."id" = chapter."bookId"
+                LEFT JOIN chapter AS lastRead
+                       ON lastRead."bookId" = book."id"
+                      AND lastRead."siteChapterId" = book."lastReadSiteChapterId"
                 WHERE chapter."addedAt" > ?
-                  AND (book."lastReadChapterIndex" IS NULL
-                       OR chapter."index" > book."lastReadChapterIndex")
+                  AND (lastRead."index" IS NULL OR chapter."index" > lastRead."index")
                 GROUP BY chapter."bookId"
                 """, arguments: [cutoff])
             return rows.reduce(into: [String: Int]()) { counts, row in
                 counts[row["bookId"] as String] = row["newCount"] as Int
+            }
+        }
+    }
+
+    /// Where each book's stored position sits in reading order, keyed by book id. Books
+    /// with no position, or whose chapter the site has dropped, are absent.
+    ///
+    /// The SQL half of `Book.lastReadIndex(in:)`, for the one screen that has the books
+    /// but not their catalogs: the shelf. One query for the whole library, for the same
+    /// reason `newChapterCounts` is one — it feeds every row of the list, where a
+    /// per-book lookup would be a query per row on every reload.
+    func lastReadChapterIndexes() throws -> [String: Int] {
+        try writer.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT book."id" AS bookId, chapter."index" AS chapterIndex
+                FROM book
+                JOIN chapter ON chapter."bookId" = book."id"
+                            AND chapter."siteChapterId" = book."lastReadSiteChapterId"
+                """)
+            return rows.reduce(into: [String: Int]()) { indexes, row in
+                indexes[row["bookId"] as String] = row["chapterIndex"] as Int
             }
         }
     }

@@ -266,7 +266,7 @@ final class BackgroundDownloadTests: XCTestCase {
         let book = Book(
             id: "book", siteId: "demo", siteBookId: "1", title: "t", displayName: nil,
             author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
-            lastReadChapterIndex: nil, lastReadParagraph: nil,
+            lastReadSiteChapterId: nil, lastReadParagraph: nil,
             lastReadCharacterOffset: nil, catalogUpdatedAt: nil
         )
         let chapters = (1...2).map {

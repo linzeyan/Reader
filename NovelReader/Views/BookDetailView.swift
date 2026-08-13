@@ -28,6 +28,20 @@ struct BookDetailView: View {
         return chapters.filter { $0.title.localizedStandardContains(trimmed) }
     }
 
+    /// Resolved once for the whole list rather than per row, and computed rather than
+    /// stored: reading somewhere else in the app moves it, and a copy taken when the
+    /// catalog loaded would keep marking a chapter the reader has already passed.
+    private var lastReadIndex: Int? { current.lastReadIndex(in: chapters) }
+
+    /// Where the read button goes: the stored position, or the first chapter for a book
+    /// nobody has opened. Nil only while there is no catalog to name a chapter with,
+    /// which is the same state `disabled` reports on the row itself.
+    private var readingTarget: ReadingTarget? {
+        let position = current.readingPosition
+            ?? chapters.first.map { .chapterStart($0.siteChapterId) }
+        return position.map { ReadingTarget(book: current, position: $0) }
+    }
+
     var body: some View {
         List {
             Section { header }
@@ -54,8 +68,12 @@ struct BookDetailView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(filtered) { chapter in
-                        NavigationLink(value: ReadingTarget(book: current, position: .chapterStart(chapter.index))) {
-                            ChapterRow(chapter: chapter, book: current)
+                        NavigationLink(
+                            value: ReadingTarget(
+                                book: current, position: .chapterStart(chapter.siteChapterId)
+                            )
+                        ) {
+                            ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex)
                         }
                     }
                 }
@@ -139,9 +157,7 @@ struct BookDetailView: View {
     private var actions: some View {
         // Continuing lands on the stored anchor, not merely in the right chapter:
         // that is the whole point of recording a paragraph.
-        NavigationLink(
-            value: ReadingTarget(book: current, position: current.readingPosition ?? .chapterStart(0))
-        ) {
+        NavigationLink(value: readingTarget) {
             Label(
                 current.readingPosition == nil ? "book.startReading" : "book.continueReading",
                 systemImage: "book"
@@ -353,11 +369,13 @@ struct ReadingTarget: Hashable {
 
 struct ChapterRow: View {
     let chapter: Chapter
-    /// The owning book, which is what makes "new" answerable — the flag depends
-    /// on the reading position, which lives on the book. Passed explicitly, with
-    /// no default: three screens draw this row, and a default would let one of
-    /// them silently stop showing the marker.
-    let book: Book
+    /// How far the reader got, in reading order, which is what makes "new" answerable —
+    /// the flag is a comparison against their position. Resolved by the caller from the
+    /// book and its catalog (`Book.lastReadIndex(in:)`), because the position names a
+    /// chapter and only the catalog can say what number that is. Passed explicitly, with
+    /// no default: three screens draw this row, and a default would let one of them
+    /// silently stop showing the marker.
+    let lastReadIndex: Int?
 
     var body: some View {
         HStack {
@@ -367,7 +385,7 @@ struct ChapterRow: View {
             Spacer()
             // Deliberately the same weight as the downloaded arrow next to it:
             // this is a hint about one row, not a call to action.
-            if chapter.isNew(in: book) {
+            if chapter.isNew(lastReadIndex: lastReadIndex) {
                 Text("chapter.new")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.red)

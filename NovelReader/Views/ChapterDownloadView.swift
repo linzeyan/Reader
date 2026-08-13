@@ -68,7 +68,7 @@ struct ChapterDownloadView: View {
 
             Section {
                 ForEach(filtered) { chapter in
-                    ChapterRow(chapter: chapter, book: book)
+                    ChapterRow(chapter: chapter, lastReadIndex: book.lastReadIndex(in: chapters))
                         .tag(chapter.id)
                 }
             } header: {

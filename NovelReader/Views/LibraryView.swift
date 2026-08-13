@@ -210,7 +210,11 @@ struct LibraryView: View {
     private func rows(_ books: [Book]) -> some View {
         ForEach(books) { book in
             NavigationLink(value: book) {
-                BookRow(book: book, newChapterCount: env.newChapterCounts[book.id] ?? 0)
+                BookRow(
+                    book: book,
+                    newChapterCount: env.newChapterCounts[book.id] ?? 0,
+                    lastReadIndex: env.lastReadChapterIndexes[book.id]
+                )
             }
             .accessibilityIdentifier("library.book")
             .swipeActions(edge: .trailing) {
@@ -282,6 +286,13 @@ struct BookRow: View {
     /// `LibraryRepo.newChapterCounts`), where a per-row count would be one query
     /// per bookmark every time the shelf is drawn.
     let newChapterCount: Int
+    /// How far the reader got, in reading order. Handed in for the same reason the count
+    /// is: the book stores which chapter it left off in, and turning that into a number
+    /// takes its catalog — one query for the whole shelf (see
+    /// `LibraryRepo.lastReadChapterIndexes`), not one per row. Nil for a book nobody has
+    /// opened, and for one whose chapter the site has dropped: there is no number left
+    /// to show, and inventing one is what this whole identity change is against.
+    let lastReadIndex: Int?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -293,8 +304,8 @@ struct BookRow: View {
                     Text(author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 HStack(spacing: 6) {
-                    if let index = book.lastReadChapterIndex {
-                        Text("library.progress \(index + 1)")
+                    if let lastReadIndex {
+                        Text("library.progress \(lastReadIndex + 1)")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }

@@ -129,7 +129,7 @@ struct ReaderView: View {
                 settings: settings,
                 landing: openAtLastPage == current.chapter.id
                     ? .lastPage : .anchor(model.currentAnchor),
-                highlights: model.highlights(inChapter: current.chapter.index),
+                highlights: model.highlights(inChapter: current.chapter.siteChapterId),
                 onAnchorChange: { anchor in
                     openAtLastPage = nil
                     // Any page that does turn answers the question the notice asked.
@@ -139,7 +139,9 @@ struct ReaderView: View {
                 onTapCenter: { showControls.toggle() },
                 onTurnPast: { edge in turnChapter(past: edge, model: model) },
                 onHighlight: { selection in
-                    model.addHighlight(chapterIndex: current.chapter.index, selection: selection)
+                    model.addHighlight(
+                        siteChapterId: current.chapter.siteChapterId, selection: selection
+                    )
                 },
                 onRemoveHighlight: { model.removeHighlight($0) }
             )
@@ -163,7 +165,13 @@ struct ReaderView: View {
         } else if let error = model.error {
             VStack(spacing: 10) {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
-                Button("reader.retry") { Task { await model.jump(to: model.currentPosition) } }
+                Button("reader.retry") {
+                    Task {
+                        await model.jump(
+                            toChapterAt: model.currentChapterIndex, anchor: model.currentAnchor
+                        )
+                    }
+                }
                     .buttonStyle(.bordered)
             }
         } else {
@@ -184,11 +192,11 @@ struct ReaderView: View {
         }
         reachedEndOfBook = false
         openAtLastPage = edge == .start ? model.chapters[target].id : nil
-        Task { await model.jump(to: .chapterStart(target)) }
+        Task { await model.jump(toChapterAt: target) }
     }
 
     private func chapterBlock(_ item: ReaderModel.LoadedChapter, model: ReaderModel) -> some View {
-        let highlights = model.highlights(inChapter: item.chapter.index)
+        let highlights = model.highlights(inChapter: item.chapter.siteChapterId)
         return VStack(alignment: .leading, spacing: settings.paragraphSpacing) {
             Text(item.chapter.title)
                 .font(.system(size: settings.fontSize + 4, weight: .semibold))
@@ -281,11 +289,11 @@ struct ReaderView: View {
             }
             .accessibilityIdentifier("reader.bookmark")
             control("arrow.up.to.line", label: "reader.previousChapter") {
-                Task { await model.jump(to: .chapterStart(model.currentChapterIndex - 1)) }
+                Task { await model.jump(toChapterAt: model.currentChapterIndex - 1) }
             }
             .disabled(model.currentChapterIndex <= 0)
             control("arrow.down.to.line", label: "reader.nextChapter") {
-                Task { await model.jump(to: .chapterStart(model.currentChapterIndex + 1)) }
+                Task { await model.jump(toChapterAt: model.currentChapterIndex + 1) }
             }
             .disabled(model.currentChapterIndex >= model.chapters.count - 1)
             control("textformat.size", label: "reader.settings") { showSettings = true }
@@ -316,10 +324,16 @@ struct ReaderView: View {
             List(model?.chapters ?? []) { chapter in
                 Button {
                     showCatalog = false
-                    Task { await model?.jump(to: .chapterStart(chapter.index)) }
+                    Task { await model?.jump(toChapterAt: chapter.index) }
                 } label: {
                     HStack {
-                        ChapterRow(chapter: chapter, book: book)
+                        // Against the position the book was opened with, deliberately —
+                        // see `Chapter.isNew`, which explains why chapters read in this
+                        // session keep their marker until the reader leaves.
+                        ChapterRow(
+                            chapter: chapter,
+                            lastReadIndex: book.lastReadIndex(in: model?.chapters ?? [])
+                        )
                         if chapter.index == model?.currentChapterIndex {
                             Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tint)
                         }
@@ -361,10 +375,10 @@ final class ReaderModel {
     /// every scroll: `note` fires per paragraph.
     private(set) var bookmarkedIDs: Set<String> = []
     /// This book's highlights, grouped the way both renderers ask for them: one
-    /// chapter at a time. Grouped once on open rather than queried per chapter because
-    /// the scrolling reader can have several chapters on screen and re-draws every
-    /// paragraph of them as it scrolls.
-    private(set) var highlightsByChapter: [Int: [TextHighlight]] = [:]
+    /// chapter at a time, keyed by the chapter's own id. Grouped once on open rather
+    /// than queried per chapter because the scrolling reader can have several chapters
+    /// on screen and re-draws every paragraph of them as it scrolls.
+    private(set) var highlightsByChapter: [String: [TextHighlight]] = [:]
     /// Set when the view should scroll somewhere; cleared by the view once done.
     var scrollTarget: String?
 
@@ -380,12 +394,27 @@ final class ReaderModel {
         loaded.first { $0.chapter.index == currentChapterIndex }
     }
 
-    var currentPosition: ReadingPosition {
-        ReadingPosition(chapterIndex: currentChapterIndex, anchor: currentAnchor)
+    /// What would be stored for where the reader is now.
+    ///
+    /// This is the boundary the two ways of naming a chapter meet at: inside a session
+    /// the reader moves by reading order, because that is what "next chapter" means and
+    /// the catalog cannot change under an open reader; anything that is *written down*
+    /// names the chapter by its site id, which outlives the catalog being renumbered.
+    ///
+    /// Nil until a chapter is on screen — a position names a chapter, and before the
+    /// catalog is loaded there is none to name.
+    var currentPosition: ReadingPosition? {
+        guard chapters.indices.contains(currentChapterIndex) else { return nil }
+        return ReadingPosition(
+            siteChapterId: chapters[currentChapterIndex].siteChapterId, anchor: currentAnchor
+        )
     }
 
     var isCurrentPositionBookmarked: Bool {
-        bookmarkedIDs.contains(ReadingBookmark.makeId(bookId: book.id, position: currentPosition))
+        guard let currentPosition else { return false }
+        return bookmarkedIDs.contains(
+            ReadingBookmark.makeId(bookId: book.id, position: currentPosition)
+        )
     }
 
     private let book: Book
@@ -410,32 +439,44 @@ final class ReaderModel {
         chapters = (try? env.repo.chapters(bookId: book.id)) ?? []
         bookmarkedIDs = Set((try? env.repo.readingBookmarks(bookId: book.id))?.map(\.id) ?? [])
         highlightsByChapter = Dictionary(
-            grouping: (try? env.repo.highlights(bookId: book.id)) ?? [], by: \.chapterIndex
+            grouping: (try? env.repo.highlights(bookId: book.id)) ?? [], by: \.siteChapterId
         )
         guard !chapters.isEmpty else { return }
-        let index = min(max(position.chapterIndex, 0), chapters.count - 1)
-        await jump(to: ReadingPosition(chapterIndex: index, anchor: position.anchor))
+        // The one place a stored chapter id is resolved against reading order, so that
+        // everything after it can work in the order the reader's controls mean.
+        //
+        // A position naming a chapter the site has dropped opens the book at its start:
+        // the reader asked for this book, and its first chapter is the only place left
+        // that still exists. A *mark* is not treated this way — the marks list refuses
+        // to offer one as a destination at all, because landing near a passage is not
+        // the same kind of answer as landing near a reading position.
+        let index = chapters.firstIndex { $0.siteChapterId == position.siteChapterId } ?? 0
+        await jump(toChapterAt: index, anchor: position.anchor)
     }
 
-    /// Replaces what is on screen with a single chapter, landing on `position`.
+    /// Replaces what is on screen with a single chapter, landing on `anchor`.
     /// Everything before it is dropped rather than kept: an unbounded scroll history
     /// is the fastest way to make a long novel run the app out of memory.
-    func jump(to position: ReadingPosition) async {
-        guard chapters.indices.contains(position.chapterIndex) else { return }
+    ///
+    /// Addressed by reading order rather than by chapter id: every caller is *moving*
+    /// through the book — the next chapter, the previous one, a row of the catalog — and
+    /// the loaded array is the order they mean.
+    func jump(toChapterAt index: Int, anchor: TextAnchor = .start) async {
+        guard chapters.indices.contains(index) else { return }
         persistProgress()
         // Whatever was read ahead belonged to the old position.
         readAheadTask?.cancel()
         readAhead = nil
         loaded = []
-        currentChapterIndex = position.chapterIndex
-        currentAnchor = position.anchor
-        await append(chapters[position.chapterIndex])
-        let landing = landingAnchor(for: position.anchor)
+        currentChapterIndex = index
+        currentAnchor = anchor
+        await append(chapters[index])
+        let landing = landingAnchor(for: anchor)
         currentAnchor = landing
         // Only worth guarding when there is text above the landing paragraph for the
         // scroll to travel through.
         restoring = landing.paragraph > 0 ? landing : nil
-        scrollTarget = landing.scrollID(chapterId: chapters[position.chapterIndex].id)
+        scrollTarget = landing.scrollID(chapterId: chapters[index].id)
     }
 
     /// A stored anchor can outlive the text it named: a chapter re-fetched from the
@@ -585,13 +626,13 @@ final class ReaderModel {
     /// Written on chapter change and on leaving the reader rather than on every
     /// paragraph: the position only matters when reading stops.
     func persistProgress() {
-        guard !loaded.isEmpty else { return }
+        guard !loaded.isEmpty, let position = currentPosition else { return }
         // Compared against the start of the chapter rather than against paragraph 0:
         // the paginated reader can move within the first paragraph, and that is still
         // a position worth keeping.
         guard persistedIndex != currentChapterIndex || currentAnchor != .start else { return }
         persistedIndex = currentChapterIndex
-        env.recordProgress(book: book, position: currentPosition)
+        env.recordProgress(book: book, position: position)
     }
 
     // MARK: Saved positions
@@ -604,7 +645,7 @@ final class ReaderModel {
     /// that destroys text it cannot fetch again (`LibraryView`), and the sentence a
     /// bookmark points at stays exactly where it was.
     func toggleBookmark() {
-        let position = currentPosition
+        guard let position = currentPosition else { return }
         let id = ReadingBookmark.makeId(bookId: book.id, position: position)
         if bookmarkedIDs.contains(id) {
             try? env.repo.removeReadingBookmark(id: id)
@@ -627,27 +668,27 @@ final class ReaderModel {
 
     // MARK: Highlights
 
-    func highlights(inChapter index: Int) -> [TextHighlight] {
-        highlightsByChapter[index] ?? []
+    func highlights(inChapter siteChapterId: String) -> [TextHighlight] {
+        highlightsByChapter[siteChapterId] ?? []
     }
 
     /// No confirmation and no undo prompt, matching the bookmark button: the mark is
     /// visible the instant it is made, and the way to undo it is to tap it.
-    func addHighlight(chapterIndex: Int, selection: TextSelection) {
+    func addHighlight(siteChapterId: String, selection: TextSelection) {
         guard let stored = try? env.repo.addHighlight(
-            bookId: book.id, chapterIndex: chapterIndex, selection: selection
+            bookId: book.id, siteChapterId: siteChapterId, selection: selection
         ) else { return }
-        var marks = highlightsByChapter[chapterIndex] ?? []
+        var marks = highlightsByChapter[siteChapterId] ?? []
         // The repository is idempotent on the span, so re-marking a passage returns the
         // row that is already on screen; appending it again would paint it twice.
         guard !marks.contains(where: { $0.id == stored.id }) else { return }
         marks.append(stored)
-        highlightsByChapter[chapterIndex] = marks
+        highlightsByChapter[siteChapterId] = marks
     }
 
     func removeHighlight(_ highlight: TextHighlight) {
         try? env.repo.removeHighlight(id: highlight.id)
-        highlightsByChapter[highlight.chapterIndex]?.removeAll { $0.id == highlight.id }
+        highlightsByChapter[highlight.siteChapterId]?.removeAll { $0.id == highlight.id }
     }
 }
 

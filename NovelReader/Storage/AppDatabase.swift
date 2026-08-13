@@ -174,6 +174,158 @@ final class AppDatabase {
             }
         }
 
+        // Everything that points at a chapter names it the way the site does.
+        //
+        // `chapterIndex` was the chapter's place in the catalog, which
+        // `LibraryRepo.replaceCatalog` recomputes on every refresh — so the site
+        // inserting a chapter mid-book slid every mark after it onto the following
+        // chapter's text: bookmarks jumped a chapter late, highlights painted the wrong
+        // sentence, and the reading position moved a chapter back. `siteChapterId` is
+        // what the site itself calls the chapter and survives the renumbering.
+        //
+        // The number is not kept alongside it. Reading order lives in `chapter."index"`,
+        // one row per chapter, and the handful of queries that need to compare positions
+        // join for it (`newChapterCounts`, `lastReadChapterIndexes`, and the ordering of
+        // both mark lists). A cached copy next to every mark is precisely the arrangement
+        // being deleted here, and it would have to be re-synced by every future writer of
+        // the catalog — one missed sync and the marks drift again.
+        //
+        // Backfilled through the catalog as it stands: the index a mark holds names a
+        // chapter *today*, and that chapter's id is the only honest reading of it.
+        //
+        // A mark whose index names no chapter — the catalog shrank, or the book has none
+        // — is dropped. It never had a stable identity to convert, so there is nothing
+        // to carry across, and a row that can never resolve would be dead weight in
+        // every query that touches the table. This is not the same case as a chapter the
+        // site removes *later*: such a row keeps a perfectly good id, stays, and starts
+        // resolving again if the site puts the chapter back (see `ReadingMarksView`).
+        // The book's own position is nullable, so it simply becomes null and the book
+        // reads as unopened, the way v3 and v4 left what they could not derive.
+        migrator.registerMigration("v6.stableChapterIdentity") { db in
+            try db.alter(table: Book.databaseTableName) { t in
+                t.add(column: "lastReadSiteChapterId", .text)
+            }
+            try db.execute(sql: """
+                UPDATE "book" SET "lastReadSiteChapterId" = (
+                    SELECT "siteChapterId" FROM "chapter"
+                    WHERE "chapter"."bookId" = "book"."id"
+                      AND "chapter"."index" = "book"."lastReadChapterIndex"
+                )
+                """)
+            // No chapter to name means no position at all: a paragraph hanging under a
+            // null chapter is a half-position that every later reader of this schema
+            // would have to work out the meaning of.
+            try db.execute(sql: """
+                UPDATE "book"
+                SET "lastReadParagraph" = NULL, "lastReadCharacterOffset" = NULL
+                WHERE "lastReadSiteChapterId" IS NULL
+                """)
+            try db.alter(table: Book.databaseTableName) { t in
+                t.drop(column: "lastReadChapterIndex")
+            }
+
+            // The two mark tables are rebuilt rather than altered in place. Chapter
+            // identity is part of the row id (`ReadingBookmark.makeId`), so every id has
+            // to be rewritten with the column — and rewriting a unique key in place can
+            // fail halfway: the new id of a mark in chapter 5 is the old id of a mark in
+            // chapter 6 at the same anchor, and SQLite checks uniqueness row by row.
+            // Building the new table beside the old one has no such ordering problem,
+            // and it gets `siteChapterId` the `NOT NULL` that `ALTER TABLE ADD COLUMN`
+            // cannot give without inventing a default chapter id.
+            //
+            // The `JOIN` is what drops the marks that cannot be converted: no chapter at
+            // that index means nothing to name.
+            //
+            // The id format is spelled out in SQL rather than taken from the model on
+            // purpose. A migration has to keep converting to the shape it converted to
+            // the day it shipped; calling `makeId` would silently rewrite this backfill
+            // the next time that format changes.
+            try db.create(table: "readingBookmark_v6") { t in
+                t.primaryKey("id", .text)
+                t.column("bookId", .text)
+                    .notNull()
+                    .references(Book.databaseTableName, onDelete: .cascade)
+                t.column("siteChapterId", .text).notNull()
+                t.column("paragraph", .integer).notNull()
+                t.column("characterOffset", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("excerpt", .text)
+            }
+            try db.execute(sql: """
+                INSERT INTO "readingBookmark_v6"
+                    ("id", "bookId", "siteChapterId", "paragraph", "characterOffset",
+                     "createdAt", "excerpt")
+                SELECT "readingBookmark"."bookId" || '|' || "chapter"."siteChapterId" || '|'
+                           || "readingBookmark"."paragraph" || '|'
+                           || "readingBookmark"."characterOffset",
+                       "readingBookmark"."bookId", "chapter"."siteChapterId",
+                       "readingBookmark"."paragraph", "readingBookmark"."characterOffset",
+                       "readingBookmark"."createdAt", "readingBookmark"."excerpt"
+                FROM "readingBookmark"
+                JOIN "chapter" ON "chapter"."bookId" = "readingBookmark"."bookId"
+                              AND "chapter"."index" = "readingBookmark"."chapterIndex"
+                """)
+            try db.drop(table: ReadingBookmark.databaseTableName)
+            try db.rename(table: "readingBookmark_v6", to: ReadingBookmark.databaseTableName)
+            // Named explicitly, and created after the rename, so the schema an upgrade
+            // ends up with is the one a fresh install gets — an index carried over from
+            // the table's temporary name would differ between the two.
+            try db.create(
+                index: "readingBookmark_book",
+                on: ReadingBookmark.databaseTableName,
+                columns: ["bookId"]
+            )
+
+            try db.create(table: "textHighlight_v6") { t in
+                t.primaryKey("id", .text)
+                t.column("bookId", .text)
+                    .notNull()
+                    .references(Book.databaseTableName, onDelete: .cascade)
+                t.column("siteChapterId", .text).notNull()
+                t.column("startParagraph", .integer).notNull()
+                t.column("startCharacterOffset", .integer).notNull()
+                t.column("endParagraph", .integer).notNull()
+                t.column("endCharacterOffset", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("excerpt", .text).notNull()
+            }
+            try db.execute(sql: """
+                INSERT INTO "textHighlight_v6"
+                    ("id", "bookId", "siteChapterId", "startParagraph", "startCharacterOffset",
+                     "endParagraph", "endCharacterOffset", "createdAt", "excerpt")
+                SELECT "textHighlight"."bookId" || '|' || "chapter"."siteChapterId" || '|'
+                           || "textHighlight"."startParagraph" || '|'
+                           || "textHighlight"."startCharacterOffset" || '|'
+                           || "textHighlight"."endParagraph" || '|'
+                           || "textHighlight"."endCharacterOffset",
+                       "textHighlight"."bookId", "chapter"."siteChapterId",
+                       "textHighlight"."startParagraph", "textHighlight"."startCharacterOffset",
+                       "textHighlight"."endParagraph", "textHighlight"."endCharacterOffset",
+                       "textHighlight"."createdAt", "textHighlight"."excerpt"
+                FROM "textHighlight"
+                JOIN "chapter" ON "chapter"."bookId" = "textHighlight"."bookId"
+                              AND "chapter"."index" = "textHighlight"."chapterIndex"
+                """)
+            try db.drop(table: TextHighlight.databaseTableName)
+            try db.rename(table: "textHighlight_v6", to: TextHighlight.databaseTableName)
+            try db.create(
+                index: "textHighlight_book",
+                on: TextHighlight.databaseTableName,
+                columns: ["bookId"]
+            )
+
+            // Every stored position now resolves through this pair — once per book for
+            // the shelf, once per mark for the two lists — where the existing index on
+            // `("bookId", "index")` answers the opposite question. Unique because it
+            // already is: `Chapter.id` is built out of exactly these two columns.
+            try db.create(
+                index: "chapter_book_siteChapterId",
+                on: Chapter.databaseTableName,
+                columns: ["bookId", "siteChapterId"],
+                unique: true
+            )
+        }
+
         return migrator
     }
 }
