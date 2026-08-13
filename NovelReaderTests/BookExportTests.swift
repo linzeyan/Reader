@@ -249,6 +249,41 @@ final class BookExportTests: XCTestCase {
         XCTAssertFalse(opf.contains("cover-image"))
     }
 
+    /// An author that is there and blank has to be written as no author at all.
+    ///
+    /// EPUB 3 requires `dc:creator` to hold at least one character, and epubcheck
+    /// rejects an empty one as RSC-005 — a single error that makes the whole file
+    /// invalid for a reading system that checks. The shape is reachable: a site
+    /// whose author element exists with nothing in it stores `""`, because
+    /// `ExtractorScript.readField` cleans the text without folding empty to nil.
+    ///
+    /// Both halves are asserted. The title page always dropped a blank byline, so
+    /// only the package document was wrong, and a fix applied to one of them and
+    /// not the other is exactly the state this catches.
+    func testABlankAuthorIsWrittenAsNoAuthor() async throws {
+        for author in ["", "   "] {
+            let (book, catalog) = try makeBook(author: author)
+
+            let export = try await exporter.export(
+                book: book, chapters: catalog, format: .epub
+            ) { _ in }
+
+            let archive = try ZipArchive(data: try bytes(of: export))
+            let opf = String(
+                decoding: try XCTUnwrap(try archive.data(named: "OEBPS/content.opf")), as: UTF8.self
+            )
+            XCTAssertFalse(
+                opf.contains("dc:creator"),
+                "an empty dc:creator is invalid EPUB, so a blank author gets no element"
+            )
+            let page = String(
+                decoding: try XCTUnwrap(try archive.data(named: "OEBPS/titlepage.xhtml")),
+                as: UTF8.self
+            )
+            XCTAssertFalse(page.contains("class=\"author\""), "and no byline to sit under the title")
+        }
+    }
+
     // MARK: - Plain text
 
     func testExportedTextFileIsReadBackByTheTextParser() async throws {
@@ -450,10 +485,11 @@ final class BookExportTests: XCTestCase {
     private func makeBook(
         _ chapters: [ImportedChapter] = sampleChapters,
         downloading: Int? = nil,
-        cover: String? = nil
+        cover: String? = nil,
+        author: String? = "中島敦"
     ) throws -> (book: Book, catalog: [Chapter]) {
         let book = try repo.bookmark(
-            siteId: "alpha", siteBookId: "1", title: "山月記", author: "中島敦", coverURL: cover
+            siteId: "alpha", siteBookId: "1", title: "山月記", author: author, coverURL: cover
         )
         try repo.replaceCatalog(
             bookId: book.id,

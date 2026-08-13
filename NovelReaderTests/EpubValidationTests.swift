@@ -30,12 +30,13 @@ import XCTest
 ///
 /// - both present, every chapter on the device — the whole shape;
 /// - both absent — and exported partial, see below;
-/// - an author that is present and *empty*, which writes `<dc:creator></dc:creator>`.
+/// - an author that is present and *empty*.
 ///
-/// The last one is here to ask a question rather than to confirm a belief. It is
-/// reachable: `ExtractorScript.readField` returns `clean(…)` for an element that
-/// exists with nothing in it, so a site with an empty author node stores `""`, and
-/// the package document does not fold that to nil the way the title page does.
+/// The last one was written to ask a question, and it got an answer: epubcheck
+/// rejected the `<dc:creator></dc:creator>` it used to produce (RSC-005 — the
+/// element must hold at least one character). `BookExporter.author(of:)` is the
+/// fix, `BookExportTests.testABlankAuthorIsWrittenAsNoAuthor` is the pin, and this
+/// file stays in the set because it is the shape that found it.
 ///
 /// A partial export needs no file of its own — chapter documents are numbered by
 /// how many have been *written*, so a book with gaps produces the same structure as

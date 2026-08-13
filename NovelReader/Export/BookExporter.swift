@@ -242,17 +242,18 @@ struct BookExporter {
         guard !titles.isEmpty else { return 0 }
 
         let cover = Self.cover(of: book)
+        let author = Self.author(of: book)
         if let cover {
             try zip.append(ZipBuilder.Entry(name: "OEBPS/\(cover.href)", data: cover.data))
         }
         try zip.append(ZipBuilder.Entry(name: "OEBPS/\(Self.titlePageHref)", text: Self.titlePage(
-            title: book.shownName, author: book.author, cover: cover
+            title: book.shownName, author: author, cover: cover
         )))
         try zip.append(ZipBuilder.Entry(name: "OEBPS/\(Self.navHref)", text: Self.navigation(
             title: book.shownName, chapters: titles
         )))
         try zip.append(ZipBuilder.Entry(name: Self.opfPath, text: Self.package(
-            title: book.shownName, author: book.author, identifier: book.id,
+            title: book.shownName, author: author, identifier: book.id,
             modified: book.addedAt, chapters: titles, cover: cover
         )))
         try zip.finish()
@@ -340,6 +341,22 @@ struct BookExporter {
 
     // MARK: - Title page
 
+    /// The author to write, or nil for a book that has one in name only.
+    ///
+    /// A blank author is not an absent one until it is made so here, and the
+    /// difference is a broken file: EPUB 3 requires `dc:creator` to carry at least
+    /// one character, and epubcheck rejects an empty one outright (RSC-005 — found
+    /// by handing it exactly this shape, see `EpubValidationTests`).
+    ///
+    /// It is reachable. `ExtractorScript.readField` cleans the text it finds but
+    /// does not fold empty to nil, so a site whose author element exists with
+    /// nothing inside it stores `""` — and every screen that shows an author
+    /// already checks for that, which is why nobody noticed until a validator did.
+    private static func author(of book: Book) -> String? {
+        let trimmed = book.author?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == true ? nil : trimmed
+    }
+
     /// The cover's bytes, if this device already has them.
     ///
     /// `URLCache` is where `AsyncImage` left the cover it drew on the library
@@ -390,8 +407,7 @@ struct BookExporter {
         let image = cover.map {
             "    <img src=\"\($0.href)\" alt=\"\(escaped(title))\"/>\n"
         } ?? ""
-        let byline = author.flatMap { $0.isEmpty ? nil : $0 }
-            .map { "\n    <p class=\"author\">\(escaped($0))</p>" } ?? ""
+        let byline = author.map { "\n    <p class=\"author\">\(escaped($0))</p>" } ?? ""
         return """
         <?xml version="1.0" encoding="UTF-8"?>
         <html xmlns="http://www.w3.org/1999/xhtml" \
@@ -425,6 +441,8 @@ struct BookExporter {
         title: String, author: String?, identifier: String, modified: Date,
         chapters: [String], cover: Cover?
     ) -> String {
+        // Taken to be non-empty: `author(of:)` is what turns a blank author into an
+        // absent one, and an empty `dc:creator` makes the whole file invalid.
         let creator = author.map { "\n    <dc:creator>\(escaped($0))</dc:creator>" } ?? ""
         // `properties="cover-image"` is how EPUB 3 names the picture a reading
         // system puts on its shelf; without it the file is just an image nobody
