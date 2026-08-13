@@ -114,6 +114,7 @@ private struct BackgroundDownloadsSection: View {
         case .blockedByPolicy: return "settings.background.outcome.blockedByPolicy"
         case .nothingToDo: return "settings.background.outcome.nothingToDo"
         case .queueLost: return "settings.background.outcome.queueLost"
+        case .deferredToLaunch: return "settings.background.outcome.deferredToLaunch"
         }
     }
 

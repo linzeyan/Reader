@@ -23,9 +23,14 @@ struct BackgroundDownloadRun: Codable, Equatable {
         /// Woken with nothing left to do, because the download had already been
         /// finished in the foreground.
         case nothingToDo
-        /// Woken after iOS had terminated the app. The paused queue lived in that
-        /// process and did not outlive it.
+        /// The saved queue could not be read back, so it was thrown away. The user
+        /// has to ask for the download again; nothing else here can go wrong
+        /// silently enough to be worth reporting more urgently.
         case queueLost
+        /// Woken after iOS had terminated the app, into a process with no scene and
+        /// therefore no object graph to run a queue with. The queue itself is safe
+        /// on disk — this window simply could not reach it, and the next launch can.
+        case deferredToLaunch
     }
 
     var startedAt: Date
@@ -78,11 +83,13 @@ extension BGTask: BackgroundTaskHandle {}
 /// Continues a paused chapter download while the app is not on screen.
 ///
 /// Deliberately narrow: it resumes the queue `AppEnvironment.enterBackground`
-/// paused, and does not reconstruct one. The fetching is done by the single
-/// WKWebView in `WebFetcher`, which is warm and already past whatever challenge
-/// the host set — a queue rebuilt in a freshly launched process would have to
-/// clear that challenge again with nobody there to help. So a window that
-/// arrives after iOS terminated the app records `queueLost` instead of guessing.
+/// paused, and does not build the object graph needed to run one. The fetching is
+/// done by the single WKWebView in `WebFetcher`, which needs a window to finish
+/// layout-dependent work at all and is warm and already past whatever challenge
+/// the host set. A background launch has no scene, so it has neither — which is
+/// why a window arriving into one records `deferredToLaunch` and hands the time
+/// straight back. The queue is on disk either way (see `DownloadQueueStore`), so
+/// what it loses is one wake-up, not the download.
 @MainActor
 @Observable
 final class BackgroundDownloads {
@@ -270,14 +277,28 @@ final class BackgroundDownloads {
     ///
     /// Static because there is no object graph to reach: a background launch
     /// connects no scene, so no view has ever built an `AppEnvironment`. Saying so
-    /// is the point — this is the evidence that would justify keeping the queue on
-    /// disk, and until it shows up in the field there is no reason to build that.
-    static func recordQueueLost(defaults: UserDefaults = .standard, now: Date = Date()) {
+    /// is the point — otherwise this case is indistinguishable from the window
+    /// never having been granted, and the two call for opposite reactions.
+    static func recordDeferredToLaunch(defaults: UserDefaults = .standard, now: Date = Date()) {
         store(
             BackgroundDownloadRun(
-                startedAt: now, connection: .unknown, chapters: 0, outcome: .queueLost
+                startedAt: now, connection: .unknown, chapters: 0, outcome: .deferredToLaunch
             ),
             in: defaults
+        )
+    }
+
+    /// Records a saved queue that could not be read back and was dropped.
+    ///
+    /// Reported through the background record rather than a channel of its own:
+    /// this is the same question that section of settings already answers — why did
+    /// the download I asked for not happen — and a second place to look would mean
+    /// the answer is in whichever one the user does not check.
+    func recordQueueLost(now: Date = Date()) {
+        store(
+            run: BackgroundDownloadRun(
+                startedAt: now, connection: connection(), chapters: 0, outcome: .queueLost
+            )
         )
     }
 

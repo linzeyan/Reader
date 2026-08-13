@@ -2,13 +2,24 @@ import Foundation
 
 /// Downloads chapters in the background, one at a time, politely.
 ///
-/// Three constraints shape this:
+/// Four constraints shape this:
 /// 1. The fetcher owns a single WKWebView, so concurrency is impossible anyway.
 /// 2. These hosts sit behind Cloudflare. Hammering a challenged host is exactly
 ///    what gets an IP blocked, so fetches go through the shared `RequestPacer`
 ///    and the queue *stops* on a challenge rather than retrying.
 /// 3. A paused queue must keep its remaining work, because the user resolving a
 ///    challenge and tapping resume is the normal path, not an error path.
+/// 4. That work has to outlive the process. An 800-chapter book takes far longer
+///    than iOS leaves a backgrounded app alive, so a queue that only existed in
+///    memory was a download the user watched start and never saw again.
+///
+/// Hence the queue file, and hence *when* it is written: whenever the queue gains
+/// work, and whenever it comes to rest. Deliberately not once per chapter. The
+/// chapters `DownloadStore` has already written are the truth for what is
+/// finished, so the file only has to be a *superset* of what is left — a stale
+/// one costs nothing, because the restore drops what has since arrived. Writing
+/// per chapter would put a synchronous file write inside the fetch loop to record
+/// something the restore recomputes anyway.
 @MainActor
 @Observable
 final class DownloadManager {
@@ -42,10 +53,12 @@ final class DownloadManager {
     /// Shared with the reader's read-ahead, so the two together still look like
     /// one person turning pages rather than two processes taking turns.
     private let pacer: RequestPacer
+    private let queueStore: DownloadQueueStore
     private var task: Task<Void, Never>?
 
-    /// Work not yet done. Survives a pause so `resume()` picks up where it left off.
-    private var remaining: [Chapter] = []
+    /// Work not yet done, in order. Survives a pause so `resume()` picks up where
+    /// it left off, and a process death so the next launch can.
+    private(set) var remaining: [Chapter] = []
     private var context: (book: Book, rule: SiteRule)?
     /// Set while the queue is meant to stop after the chapter on the wire.
     private(set) var isDraining = false
@@ -61,10 +74,16 @@ final class DownloadManager {
     /// rest before the first chapter had even been requested.
     private var runToken = 0
 
-    init(service: BookService, downloads: DownloadStore, pacer: RequestPacer) {
+    init(
+        service: BookService,
+        downloads: DownloadStore,
+        pacer: RequestPacer,
+        queueStore: DownloadQueueStore
+    ) {
         self.service = service
         self.downloads = downloads
         self.pacer = pacer
+        self.queueStore = queueStore
     }
 
     var isBusy: Bool { status == .running }
@@ -90,7 +109,31 @@ final class DownloadManager {
         progress = Progress(
             bookId: book.id, bookTitle: book.shownName, completed: 0, total: pending.count
         )
+        persistQueue()
         run()
+    }
+
+    /// Installs a queue read back from disk, paused.
+    ///
+    /// Paused rather than running, and that is the whole contract with the caller:
+    /// the network policy has to be cleared again before a single request goes out,
+    /// because permission to spend cellular data did not survive the process it was
+    /// given to. See `DownloadQueueRestorer`.
+    ///
+    /// Only ever called at launch, on an idle queue — which is why it does not
+    /// tear down a running one first, and must not start doing so: `cancel()`
+    /// would erase the very file this was read from.
+    func restore(book: Book, rule: SiteRule, chapters: [Chapter]) {
+        guard !chapters.isEmpty, status == .idle else { return }
+        context = (book, rule)
+        remaining = chapters
+        progress = Progress(
+            bookId: book.id, bookTitle: book.shownName, completed: 0, total: chapters.count
+        )
+        status = .paused
+        // Not written back. What is on disk is already a superset of this — the
+        // restore only ever drops entries — and the next time the queue comes to
+        // rest it writes the pruned version anyway.
     }
 
     /// - Parameter reason: shown where download failures are shown. Set when
@@ -103,6 +146,7 @@ final class DownloadManager {
         if !remaining.isEmpty { status = .paused }
         if let reason { lastError = reason }
         clearDrain()
+        persistQueue()
     }
 
     /// Stops the queue after the chapter already on the wire, rather than
@@ -155,6 +199,7 @@ final class DownloadManager {
         status = .idle
         pacer.reset()
         clearDrain()
+        persistQueue()
     }
 
     // MARK: - Queue
@@ -194,6 +239,7 @@ final class DownloadManager {
                     self.pendingChallenge = url
                     self.lastError = WebFetcher.FetchError.challengePresented(url).localizedDescription
                     self.status = .paused
+                    self.persistQueue()
                     return
                 } catch {
                     // A single unreadable chapter must not strand the rest of the
@@ -224,6 +270,7 @@ final class DownloadManager {
         status = .finished
         progress = nil
         pacer.reset()
+        persistQueue()
     }
 
     /// Brings a draining queue to rest. Returns true when the caller must stop.
@@ -240,9 +287,25 @@ final class DownloadManager {
             status = .paused
             lastError = drainReason
             pacer.reset()
+            persistQueue()
         }
         clearDrain()
         return true
+    }
+
+    /// Mirrors the queue to disk, or removes the file when there is no queue left
+    /// to mirror.
+    ///
+    /// Called where the queue gains work and at every point it comes to rest —
+    /// never per chapter; see the type comment for why that is enough. An
+    /// 800-chapter queue is a few kilobytes of short strings, so doing it on the
+    /// main actor costs less than the layout pass that follows the status change.
+    private func persistQueue() {
+        guard let context, !remaining.isEmpty else {
+            queueStore.clear()
+            return
+        }
+        queueStore.save(bookId: context.book.id, siteChapterIds: remaining.map(\.siteChapterId))
     }
 
     private func clearDrain() {

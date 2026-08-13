@@ -112,7 +112,10 @@ final class DownloadNetworkPolicyTests: XCTestCase {
         let manager = DownloadManager(
             service: BookService(fetcher: WebFetcher(), repo: LibraryRepo(database: database)),
             downloads: DownloadStore(database: database, files: files),
-            pacer: RequestPacer()
+            pacer: RequestPacer(),
+            queueStore: DownloadQueueStore(
+                url: URL.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+            )
         )
         let book = Book(
             id: "book", siteId: "demo", siteBookId: "1", title: "t", displayName: nil,

@@ -4754,25 +4754,25 @@
       }
     },
     "settings.background.outcome.queueLost": {
-      "comment": "Background download outcome: iOS had terminated the app, so the paused queue no longer existed.",
+      "comment": "Background download outcome: the saved queue could not be read back, so it was discarded.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "App had been terminated; queue was gone"
+            "value": "Saved queue was unreadable; please download again"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "App 曾被系统结束，队列不在了"
+            "value": "保存的队列读不回来，已丢弃，请重新下载"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "App 曾被系統結束，佇列不在了"
+            "value": "儲存的佇列讀不回來，已丟棄，請重新下載"
           }
         }
       }
@@ -5301,6 +5301,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在匯出…"
+          }
+        }
+      }
+    },
+    "settings.background.outcome.deferredToLaunch": {
+      "comment": "Background download outcome: iOS woke the app after terminating it, so the window had no app to run the queue with; the saved queue continues at the next launch.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App had been terminated; continues next time you open it"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App 曾被系统结束，下次打开时继续"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App 曾被系統結束，下次開啟時繼續"
           }
         }
       }

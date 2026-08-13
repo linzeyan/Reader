@@ -32,10 +32,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let env = AppEnvironment.live else {
                     // A background launch connects no scene, so no view has built
-                    // the object graph and the paused queue died with the previous
-                    // process. Recorded rather than silently skipped: this is the
-                    // one observation that would justify keeping the queue on disk.
-                    BackgroundDownloads.recordQueueLost()
+                    // the object graph — and the WKWebView the fetching goes
+                    // through needs a window. The queue survives on disk and the
+                    // next launch picks it up; recorded rather than silently
+                    // skipped, because "iOS woke us and we could not use it" and
+                    // "iOS never woke us" are different problems.
+                    BackgroundDownloads.recordDeferredToLaunch()
                     task.setTaskCompleted(success: false)
                     return
                 }
