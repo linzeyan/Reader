@@ -5089,50 +5089,26 @@
         }
       }
     },
-    "reader.page %lld %lld": {
-      "comment": "Accessibility label for the page counter in the paginated reader: current page of a known total.",
+    "reader.progress %@": {
+      "comment": "Accessibility label for the paginated reader's progress figure. The placeholder is an already-formatted percentage.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Page %1$lld of %2$lld"
+            "value": "%@ through this chapter"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "第 %1$lld 页，共 %2$lld 页"
+            "value": "本章已读 %@"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "第 %1$lld 頁，共 %2$lld 頁"
-          }
-        }
-      }
-    },
-    "reader.page.partial %lld %lld": {
-      "comment": "Accessibility label for the page counter while the rest of the chapter is still being laid out, so the total is a lower bound.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Page %1$lld of at least %2$lld"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "第 %1$lld 页，至少共 %2$lld 页"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "第 %1$lld 頁，至少共 %2$lld 頁"
+            "value": "本章已讀 %@"
           }
         }
       }

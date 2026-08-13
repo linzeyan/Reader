@@ -40,18 +40,15 @@ struct PaginatedChapterView: View {
     let onHighlight: (TextSelection) -> Void
     let onRemoveHighlight: (TextHighlight) -> Void
 
-    /// Not `@State`-observed: `ChapterPaginator` is a plain class, so the counters the
-    /// page label reads are mirrored into state explicitly. Making it observable would
-    /// re-render the page on every measured chunk, which is exactly the work the
-    /// progressive measuring exists to keep off the screen.
+    /// Not `@State`-observed: `ChapterPaginator` is a plain class, so measuring further
+    /// into the chapter does not redraw anything. That is the point — the page in front
+    /// of the reader is measured before it is shown, and nothing on screen depends on
+    /// how much of the tail has been laid out.
     @State private var paginator: ChapterPaginator?
     @State private var renderedKey: String?
     @State private var pageIndex = 0
-    @State private var pageCount = 0
-    @State private var isComplete = false
     @State private var turningForward = true
     @State private var dragOffset: CGFloat = 0
-    @State private var completion: Task<Void, Never>?
     /// The composed-string range the reader is picking out, held as a range rather than
     /// as anchors because it is redrawn on every movement of the finger and only has to
     /// become a storable pair once, at the moment it is committed.
@@ -91,7 +88,6 @@ struct PaginatedChapterView: View {
         .padding(.horizontal, 20)
         .padding(.top, 8)
         .padding(.bottom, 2)
-        .onDisappear { completion?.cancel() }
     }
 
     private func page(in size: CGSize) -> some View {
@@ -259,24 +255,40 @@ struct PaginatedChapterView: View {
         }
     }
 
-    /// The only progress indicator a page has. A scroll bar cannot exist here, so the
-    /// page counter is what tells the reader how much of the chapter is left.
+    /// The only progress indicator a page has: a scroll bar cannot exist here, and this
+    /// is what tells the reader how much of the chapter is left.
     ///
-    /// Digits are not translated, so the pair is drawn verbatim; the accessibility
-    /// label carries the sentence. The trailing `+` is honest rather than tidy: the
-    /// rest of the chapter has not been measured yet, and a total invented before the
-    /// text was laid out would be a guess that changes under the reader.
+    /// A share of the chapter's text rather than "page 7 of 42". A page total is a
+    /// property of the current type size, line spacing and window, not of the book, so
+    /// the same chapter would be 42 pages to one reader and 90 to another and would
+    /// renumber itself under anyone who nudged the size slider. It also cannot be stated
+    /// at all until the whole chapter has been laid out, which is why it used to be
+    /// shown as a lower bound that crept upwards while the reader watched. A share of
+    /// the text is exact on the first page and means the same thing at every size.
+    ///
+    /// Formatted by the locale and drawn verbatim, with the accessibility label
+    /// carrying the sentence around it.
     private var pageLabel: some View {
-        Text(verbatim: isComplete ? "\(pageIndex + 1) / \(pageCount)" : "\(pageIndex + 1) / \(pageCount)+")
+        let figure = fractionRead.formatted(.percent.precision(.fractionLength(0)))
+        return Text(verbatim: figure)
             .font(.caption2)
             .monospacedDigit()
             .foregroundStyle(settings.theme.foreground.opacity(0.45))
             .accessibilityIdentifier("reader.pageNumber")
-            .accessibilityLabel(
-                isComplete
-                    ? Text("reader.page \(pageIndex + 1) \(pageCount)")
-                    : Text("reader.page.partial \(pageIndex + 1) \(pageCount)")
-            )
+            .accessibilityLabel(Text("reader.progress \(figure)"))
+    }
+
+    /// How far the end of the current page is through the chapter.
+    ///
+    /// Measured to the end of the page rather than its start, so the last page reads as
+    /// the whole chapter instead of stopping short of it. Rounded down, because "100%"
+    /// with text still to come would be the one number the reader could catch out.
+    private var fractionRead: Double {
+        guard let paginator, paginator.pages.indices.contains(pageIndex) else { return 0 }
+        let total = paginator.text.attributed.length
+        guard total > 0 else { return 0 }
+        let read = Double(NSMaxRange(paginator.pages[pageIndex].range)) / Double(total)
+        return min(1, (read * 100).rounded(.down) / 100)
     }
 
     // MARK: - Paging
@@ -292,8 +304,6 @@ struct PaginatedChapterView: View {
             return
         }
         paginator.paginate(through: target)
-        pageCount = paginator.pages.count
-        isComplete = paginator.isComplete
         guard target < paginator.pages.count else {
             // Past the end of a fully measured chapter is the next chapter. Past the
             // end of one still being measured is nothing at all: the page simply is
@@ -327,7 +337,6 @@ struct PaginatedChapterView: View {
     /// the old layout has nothing to do with page 7 of the new one.
     private func rebuild(size: CGSize) {
         guard size.width > 1, size.height > 1 else { return }
-        completion?.cancel()
         // Offsets into the old composed text mean nothing in the new one.
         clearSelection()
         let fresh = renderedKey != chapterKey
@@ -350,25 +359,7 @@ struct PaginatedChapterView: View {
             next.paginateAll()
             pageIndex = max(0, next.pages.count - 1)
         }
-        pageCount = next.pages.count
-        isComplete = next.isComplete
         onAnchorChange(next.anchor(at: pageIndex))
-        measureRest(next)
-    }
-
-    /// Finishes measuring the chapter one chunk per runloop turn, so the page count
-    /// fills in without the first page waiting on the last one.
-    private func measureRest(_ paginator: ChapterPaginator) {
-        guard !paginator.isComplete else { return }
-        completion = Task { @MainActor in
-            while !paginator.isComplete {
-                guard !Task.isCancelled else { return }
-                paginator.paginateNextChunk()
-                pageCount = paginator.pages.count
-                isComplete = paginator.isComplete
-                await Task.yield()
-            }
-        }
     }
 }
 

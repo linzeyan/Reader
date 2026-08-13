@@ -291,8 +291,9 @@ final class ChapterPaginator {
     let text: ChapterText
     let pageSize: CGSize
     private(set) var pages: [Page] = []
-    /// False while the tail of the chapter has not been measured yet, which is what
-    /// makes the page count a lower bound rather than a total.
+    /// False while the tail of the chapter has not been measured yet. What it answers for
+    /// the reader is whether turning past the last known page is the end of the chapter
+    /// or merely the end of what has been laid out so far.
     private(set) var isComplete = false
 
     private let contentStorage = NSTextContentStorage()
@@ -342,17 +343,18 @@ final class ChapterPaginator {
         while !isComplete && pages.count <= index { paginateNextChunk() }
     }
 
-    /// Measures the whole chapter. Callers that need a total — the page counter, and
-    /// a backwards chapter turn that has to land on the last page — pay for it here.
+    /// Measures the whole chapter. The one caller that cannot avoid paying for it is a
+    /// backwards chapter turn, which has to land on the last page.
     func paginateAll() {
         while !isComplete { paginateNextChunk() }
     }
 
     /// Measures the next few pages' worth of lines and re-derives the page breaks.
     ///
-    /// Split out so a view can spend one chunk per runloop turn: the page in front of
-    /// the reader has to be on screen in the first frame, and counting the remaining
-    /// pages of a long chapter is not worth a dropped one.
+    /// A chunk at a time rather than the chapter at once: the page in front of the
+    /// reader has to be on screen in the first frame, and laying out the remaining
+    /// eighty pages of a long chapter is not worth a dropped one when nothing on screen
+    /// is waiting for them.
     func paginateNextChunk() {
         guard !scannedAll, let from = resume else {
             scannedAll = true
