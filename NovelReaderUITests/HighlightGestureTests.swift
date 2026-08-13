@@ -37,10 +37,17 @@ final class HighlightGestureTests: XCTestCase {
         let page = app.descendants(matching: .any).matching(identifier: "reader.page").firstMatch
         XCTAssertTrue(page.waitForExistence(timeout: 20), "the paginated renderer should be showing")
 
-        // Press and slide along a line. Held well past the press recognizer's delay,
-        // and far enough that the page-turn drag would happily claim it.
-        let line = { (x: CGFloat) in page.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.45)) }
-        line(0.25).press(forDuration: 0.8, thenDragTo: line(0.75))
+        // Press and slide across several lines. Held well past the press recognizer's
+        // delay, and far enough that the page-turn drag would happily claim it.
+        //
+        // Down the page as well as across it, so the passage is a band rather than one
+        // line. A single line is not a target this walk can hit afterwards: the point it
+        // starts from may be the gap between two paragraphs, where there are no glyphs and
+        // so no ink, and the mark then begins on the line below the finger.
+        let at = { (x: CGFloat, y: CGFloat) in
+            page.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y))
+        }
+        at(0.25, 0.45).press(forDuration: 0.8, thenDragTo: at(0.75, 0.6))
 
         let action = app.buttons["reader.highlight.action"]
         XCTAssertTrue(
@@ -53,7 +60,12 @@ final class HighlightGestureTests: XCTestCase {
         // A plain tap on the passage now has to bring a bar back. Nothing else on the
         // page does that — the middle of the page toggles the controls — so this is the
         // highlight itself being stored, drawn and hit-testable.
-        line(0.5).tap()
+        //
+        // Tapped on the line the slide *ended* on. Sentence snapping only ever widens a
+        // passage, so that line is inside the mark whatever the text is; the line it began
+        // on is not, because a press can start in the gap between two paragraphs and the
+        // mark then starts below it.
+        at(0.5, 0.6).tap()
         XCTAssertTrue(
             action.waitForExistence(timeout: 5),
             "tapping a marked passage should offer to remove it"

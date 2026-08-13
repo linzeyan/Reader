@@ -72,7 +72,12 @@ final class CrossPageSelectionGestureTests: XCTestCase {
         XCTAssertEqual(
             progress(), opened, "the left edge turns back to the page the selection started on"
         )
-        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+        // Tapped in the middle of what the mark covers here, not back at the point the
+        // press began: the passage runs from there to the bottom of this page, and that
+        // starting point can easily be the gap between two paragraphs — a place with no
+        // glyphs, so no ink is painted there and nothing is under the finger. The middle
+        // of the marked half is text by construction.
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).tap()
         XCTAssertTrue(
             action.waitForExistence(timeout: 5),
             "the half of the mark left behind on the first page has to be there to be tapped"

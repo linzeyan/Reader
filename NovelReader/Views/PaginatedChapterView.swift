@@ -441,12 +441,27 @@ struct PaginatedChapterView: View {
     /// The stored highlight under a point, if any. Checked before the page-turn zones
     /// so a mark answers the tap that lands on it — the reader put it there, and a
     /// highlight that ignores being touched has no way to be undone from the page.
+    ///
+    /// Hit against the bands the mark is *drawn* in rather than against the character
+    /// under the finger. Those two disagree exactly where a reader cannot tell them
+    /// apart: in the gap between two paragraphs, and past the end of a short line, a point
+    /// has no character of its own, so the offset it resolves to is the start or the end of
+    /// a neighbouring line — one side of the mark's first character or the other. Asking
+    /// "did this land on the ink" is both the reader's own question and a stable answer.
+    /// The bands are grown by half the space between lines, so the leading counts as part
+    /// of the line it sits under: ink is painted behind glyphs only, and a reader aiming at
+    /// a marked line lands as often in the air above it as on it. Half, so two marked lines
+    /// meet in the middle and a long passage answers everywhere inside it, while the line
+    /// above an unmarked one still belongs to nobody.
     private func highlight(at point: CGPoint) -> TextHighlight? {
-        guard !highlights.isEmpty, let paginator,
-              let offset = paginator.offset(at: point, onPage: pageIndex)
-        else { return nil }
+        guard !highlights.isEmpty, let paginator else { return nil }
+        let slack = (settings.lineSpacing + settings.paragraphSpacing) / 2
         return highlights.first { highlight in
-            paginator.text.ranges(of: highlight).contains { NSLocationInRange(offset, $0) }
+            paginator.text.ranges(of: highlight).contains { range in
+                paginator.rects(for: range, onPage: pageIndex).contains {
+                    $0.insetBy(dx: 0, dy: -slack).contains(point)
+                }
+            }
         }
     }
 

@@ -218,6 +218,37 @@ final class CrossPageSelectionTests: XCTestCase {
         )
     }
 
+    /// Whatever point it is handed, `offset(at:onPage:)` answers with a position on that
+    /// page or with nothing at all.
+    ///
+    /// An invariant sweep, and honestly not the reproducer for the crash that prompted it.
+    /// The two UTF-16 lookups this method adds together both answer `NSNotFound` for a
+    /// point or a location they cannot place, `NSNotFound` is `Int.max`, and the addition
+    /// trapped the process — a finger dragged off the bottom of a page found that point on
+    /// the first try. `CrossPageSelectionGestureTests` is where it happened and is what
+    /// pins it; no geometry tried here reproduces it, so this pins the property that was
+    /// violated rather than pretending to pin the case.
+    func testNoPointOnOrOffAPageCanTrapTheOffsetLookup() throws {
+        let paginator = paginator(paragraphs: (0..<40).flatMap { index in
+            ["「走吧。」他說。", "「等一下。」她忽然說。",
+             "第\(index)段。他推開門，看見渡口的燈在雪裡亮著，像一句沒有說完的話。"]
+        })
+        let xs: [CGFloat] = [-40, 4, pageSize.width / 2, pageSize.width + 40]
+        for page in paginator.pages.indices {
+            let range = paginator.pages[page].range
+            for x in xs {
+                for step in -50...Int(pageSize.height + 100) {
+                    let point = CGPoint(x: x, y: CGFloat(step))
+                    guard let offset = paginator.offset(at: point, onPage: page) else { continue }
+                    XCTAssertTrue(
+                        offset >= range.location && offset <= NSMaxRange(range),
+                        "(\(x), \(step)) on page \(page) answered \(offset), outside \(range)"
+                    )
+                }
+            }
+        }
+    }
+
     /// The gesture the whole change is: an anchor pressed on one page, the finger carried
     /// on to the next, one range out of the two. The anchor is held as an offset rather
     /// than as the point the press began at, because that point stops meaning the same

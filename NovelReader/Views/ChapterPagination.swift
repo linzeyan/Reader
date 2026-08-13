@@ -499,9 +499,29 @@ final class ChapterPaginator {
         }) ?? fragment.textLineFragments.first else { return nil }
         let bounds = line.typographicBounds
         let inLine = CGPoint(x: local.x - bounds.minX, y: local.y - bounds.minY)
-        let offset = offset(of: fragment.rangeInElement.location)
-            + line.characterRange.location
-            + line.characterIndex(for: inLine)
+        // Both of these answer `NSNotFound` for a point or a location they cannot place,
+        // and `NSNotFound` is `Int.max`: adding anything to it overflows and traps the
+        // process. A finger dragged past the bottom of a page is such a point, which is
+        // how the cross-page selection walk brought the app down. Neither sentinel is a
+        // failure worth reporting to the reader — the answer they want is the nearest real
+        // character — so an unplaceable point falls back to the start of the line it landed
+        // in, and the clamp below turns that into a position on this page.
+        let fragmentStart = offset(of: fragment.rangeInElement.location)
+        guard fragmentStart != NSNotFound else { return page.range.location }
+        let inLineIndex = line.characterIndex(for: inLine)
+        // An unplaceable point takes the end of the line it is past and the start of the
+        // one it is short of, rather than one fixed end: the finger is somewhere with no
+        // character of its own, and the nearest real position is the one that keeps a drag
+        // moving in the direction the hand is moving.
+        let withinLine: Int
+        if inLineIndex != NSNotFound {
+            withinLine = inLineIndex
+        } else if inLine.y < 0 || inLine.x < 0 {
+            withinLine = 0
+        } else {
+            withinLine = line.characterRange.length
+        }
+        let offset = fragmentStart + line.characterRange.location + withinLine
         return min(max(offset, page.range.location), NSMaxRange(page.range))
     }
 
