@@ -86,6 +86,39 @@ struct TextSelection: Equatable {
     }
 }
 
+extension TextSelection {
+    /// The whole of one paragraph — the finest span the scrolling reader can name.
+    ///
+    /// A lazy stack of `Text` knows which paragraph came into view and nothing about
+    /// where a character sits inside it; that is the same limit that keeps a scrolled
+    /// position's `characterOffset` at 0. So a mark made while scrolling covers the
+    /// paragraph the reader pressed, end to end, rather than a run of characters nobody
+    /// measured. Paged reading snaps to sentences instead, because there the layout can
+    /// say where each glyph is — `ChapterText.sentenceRange(from:to:)`.
+    ///
+    /// The index is the chapter's own paragraph index, the one a `TextAnchor` stores, so
+    /// a mark made here lands on the same characters when the same chapter is composed
+    /// for a page — where a chapter heading sits in front of paragraph 0 and belongs to
+    /// no paragraph at all.
+    ///
+    /// Nil for an index the chapter does not have, and for a paragraph holding nothing
+    /// but space: the excerpt is all the marks list can show, and a row quoting nothing
+    /// is a row the reader cannot place.
+    static func wholeParagraph(at index: Int, in paragraphs: [String]) -> TextSelection? {
+        guard paragraphs.indices.contains(index) else { return nil }
+        let text = paragraphs[index]
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return TextSelection(
+            start: TextAnchor(paragraph: index, characterOffset: 0),
+            // The paragraph's full UTF-16 length: `range(inParagraph:length:)` clamps
+            // against whatever text it is handed, so this end covers the paragraph
+            // whole in both renderers and runs past it in neither.
+            end: TextAnchor(paragraph: index, characterOffset: (text as NSString).length),
+            text: text
+        )
+    }
+}
+
 /// A place in a book: which chapter, and where inside it.
 struct ReadingPosition: Codable, Hashable {
     /// The chapter, by the id the site gave it — never by its place in the catalog.

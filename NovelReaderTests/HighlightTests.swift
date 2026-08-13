@@ -61,6 +61,17 @@ final class HighlightTests: XCTestCase {
         )
     }
 
+    /// A highlight over a whole paragraph, which is the only shape the scrolling reader
+    /// can make: it knows which paragraph the finger is on and nothing finer.
+    private func markParagraph(
+        _ index: Int, in paragraphs: [String], siteChapterId: String = "1"
+    ) throws -> TextHighlight {
+        let selection = try XCTUnwrap(TextSelection.wholeParagraph(at: index, in: paragraphs))
+        return TextHighlight(
+            bookId: "demo|1", siteChapterId: siteChapterId, selection: selection, createdAt: Date()
+        )
+    }
+
     /// The characters the paginated renderer would paint bands behind.
     private func paintedOnPages(_ highlight: TextHighlight, in text: ChapterText) -> [String] {
         let composed = text.attributed.string as NSString
@@ -350,6 +361,160 @@ final class HighlightTests: XCTestCase {
             ranges.contains { NSLocationInRange(touched, $0) },
             "a touch below the marked sentence must not count as touching it"
         )
+    }
+
+    // MARK: - Marks made while scrolling
+
+    /// The claim that lets the scrolling reader make marks at all: the span a pressed
+    /// paragraph names is *that paragraph*, end to end, and the paginated renderer paints
+    /// exactly those characters. The two renderers share no drawing code, so nothing but
+    /// this can promise that the paragraph a reader pressed while scrolling is the same
+    /// line of yellow after they switch to pages.
+    func testAParagraphMarkedWhileScrollingCoversThatParagraphInBothRenderers() throws {
+        let text = chapterText(prose)
+        let highlight = try markParagraph(1, in: prose)
+
+        XCTAssertEqual(
+            highlight.start, TextAnchor(paragraph: 1, characterOffset: 0),
+            "the mark starts where the paragraph starts"
+        )
+        XCTAssertEqual(
+            highlight.end, TextAnchor(paragraph: 1, characterOffset: (prose[1] as NSString).length),
+            "and ends where the paragraph ends"
+        )
+        XCTAssertEqual(paintedInScroll(highlight, in: prose), [prose[1]])
+        XCTAssertEqual(
+            paintedOnPages(highlight, in: text), paintedInScroll(highlight, in: prose),
+            "a paragraph marked while scrolling must be the same passage on a page"
+        )
+        XCTAssertEqual(
+            text.ranges(of: highlight), [text.paragraphRanges[1]],
+            "one paragraph is one band, and not the separator composed in front of it"
+        )
+    }
+
+    /// The index is the chapter's own paragraph index — the one a `TextAnchor` stores —
+    /// and a chapter's title is not one of its paragraphs: `ChapterText` composes the
+    /// heading in front of paragraph 0. An index counted off what is on screen instead
+    /// would move every mark in the chapter down by one paragraph.
+    func testAParagraphMarkIsIndexedFromTheChapterAndNotFromTheHeading() throws {
+        let text = chapterText(prose)
+        let highlight = try markParagraph(0, in: prose)
+
+        XCTAssertEqual(paintedOnPages(highlight, in: text), [prose[0]])
+        let range = try XCTUnwrap(text.ranges(of: highlight).first)
+        XCTAssertEqual(range, text.paragraphRanges[0])
+        XCTAssertGreaterThan(
+            range.location, 0,
+            "the heading is composed before the first paragraph, and is never part of a mark"
+        )
+    }
+
+    /// The predicate the scrolling reader asks a tap with: a mark answers for the
+    /// paragraph it covers and for no other, or every tap in the chapter would offer to
+    /// delete something.
+    func testAParagraphMarkAnswersOnlyForItsOwnParagraph() throws {
+        let highlight = try markParagraph(1, in: prose)
+
+        for index in prose.indices {
+            XCTAssertEqual(
+                highlight.range(inParagraph: index, length: (prose[index] as NSString).length) != nil,
+                index == 1,
+                "paragraph \(index)"
+            )
+        }
+    }
+
+    /// What a paragraph press has to refuse. A blank paragraph is a real thing in text
+    /// pulled off a site — a spacer between scenes — and marking one would store a row
+    /// that paints nothing, quotes nothing, and cannot be tapped to get rid of.
+    func testAParagraphWithNothingInItCannotBeMarked() {
+        let paragraphs = ["", "   \n ", "有字"]
+
+        XCTAssertNil(TextSelection.wholeParagraph(at: 0, in: paragraphs), "an empty paragraph")
+        XCTAssertNil(TextSelection.wholeParagraph(at: 1, in: paragraphs), "and one holding only space")
+        XCTAssertNotNil(TextSelection.wholeParagraph(at: 2, in: paragraphs))
+        XCTAssertNil(TextSelection.wholeParagraph(at: 3, in: paragraphs), "past the last paragraph")
+        XCTAssertNil(TextSelection.wholeParagraph(at: -1, in: paragraphs))
+        XCTAssertNil(TextSelection.wholeParagraph(at: 0, in: []), "a chapter with no text at all")
+    }
+
+    /// Both ends of a chapter: the single paragraph of a one-paragraph chapter, and the
+    /// last of several. These are where an off-by-one stops being invisible — it marks the
+    /// wrong paragraph, or nothing.
+    func testTheOnlyParagraphAndTheLastParagraphAreMarkedWhole() throws {
+        let single = ["整章只有這一段。"]
+        let only = try markParagraph(0, in: single)
+        XCTAssertEqual(paintedOnPages(only, in: chapterText(single)), single)
+        XCTAssertEqual(paintedInScroll(only, in: single), single)
+
+        let text = chapterText(prose)
+        let lastIndex = prose.count - 1
+        let last = try markParagraph(lastIndex, in: prose)
+        XCTAssertEqual(paintedOnPages(last, in: text), [prose[lastIndex]])
+        XCTAssertEqual(text.ranges(of: last), [text.paragraphRanges[lastIndex]])
+        XCTAssertNil(
+            last.range(inParagraph: lastIndex + 1, length: 10),
+            "a mark on the last paragraph may not reach into a paragraph the chapter has not got"
+        )
+    }
+
+    /// The excerpt goes through the same cap a sentence mark's does. A paragraph is the
+    /// largest thing one gesture can mark in this app, so a second truncation rule here
+    /// would be the one that puts a chapter in the database.
+    func testAParagraphMarkQuotesItselfUnderTheSharedCap() throws {
+        let long = String(repeating: "字", count: 400)
+        let selection = try XCTUnwrap(TextSelection.wholeParagraph(at: 0, in: [long]))
+        let highlight = try markParagraph(0, in: [long])
+
+        XCTAssertEqual(highlight.excerpt, selection.excerpt, "the shared rule, not a second one")
+        XCTAssertLessThan(highlight.excerpt.count, long.count)
+        XCTAssertTrue(highlight.excerpt.hasSuffix("…"), "a cut has to be visible in the list")
+        XCTAssertEqual(
+            highlight.end.characterOffset, (long as NSString).length,
+            "the cap is on what the list quotes, never on what was marked"
+        )
+    }
+
+    /// A mark made while scrolling has to be drawn and touchable on the page, or a reader
+    /// who switches renderers is left with a mark they cannot remove from where they are.
+    func testAMarkMadeWhileScrollingIsDrawnAndHitTestableOnThePage() throws {
+        let paragraphs = longChapter()
+        let highlight = try markParagraph(40, in: paragraphs)
+        let paginator = ChapterPaginator(text: chapterText(paragraphs), pageSize: pageSize)
+        paginator.paginateAll()
+
+        let page = paginator.pageIndex(for: highlight.start)
+        let ranges = paginator.text.ranges(of: highlight)
+        let rect = try XCTUnwrap(
+            paginator.rects(for: try XCTUnwrap(ranges.first), onPage: page).first
+        )
+        let touched = try XCTUnwrap(
+            paginator.offset(at: CGPoint(x: rect.midX, y: rect.midY), onPage: page)
+        )
+        XCTAssertTrue(
+            ranges.contains { NSLocationInRange(touched, $0) },
+            "a touch on the band must find the mark that drew it"
+        )
+    }
+
+    /// Pressing the same paragraph twice is a gesture a reader will make by accident.
+    /// Identity is the span, so it collapses onto the row already on screen — the same
+    /// promise a sentence mark makes, now over a span nothing measured character by
+    /// character.
+    func testPressingTheSameParagraphTwiceKeepsOneHighlight() throws {
+        let repo = LibraryRepo(database: try AppDatabase.makeInMemory())
+        let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
+        let selection = try XCTUnwrap(TextSelection.wholeParagraph(at: 1, in: prose))
+
+        let first = try repo.addHighlight(bookId: book.id, siteChapterId: "1", selection: selection)
+        let second = try repo.addHighlight(bookId: book.id, siteChapterId: "1", selection: selection)
+
+        XCTAssertEqual(first.id, second.id)
+        XCTAssertEqual(try repo.highlights(bookId: book.id).count, 1)
+        let stored = try XCTUnwrap(repo.highlights(bookId: book.id).first)
+        XCTAssertEqual(stored.start, selection.start, "both ends survive the round trip")
+        XCTAssertEqual(stored.end, selection.end)
     }
 
     // MARK: - Storage

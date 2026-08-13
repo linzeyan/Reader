@@ -477,9 +477,9 @@ final class ChapterPaginator {
     /// The character under a point on a page, in the page's own coordinates.
     ///
     /// The one thing only the paginated renderer can answer, and therefore the reason
-    /// highlights are made here and nowhere else: a scroll view of SwiftUI `Text`
-    /// knows which paragraph is on screen, this knows which character is under a
-    /// finger.
+    /// only a page can mark a *sentence*: a scroll view of SwiftUI `Text` knows which
+    /// paragraph is on screen — so it marks one whole — while this knows which character
+    /// is under a finger.
     ///
     /// Clamped into the page rather than allowed to run off it, so a finger dragged
     /// past the bottom edge selects to the end of what the reader can see instead of

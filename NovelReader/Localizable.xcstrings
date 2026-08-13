@@ -5162,25 +5162,25 @@
       }
     },
     "highlights.empty.hint": {
-      "comment": "Tells the reader how a highlight is made, including that only the paginated renderer can create one.",
+      "comment": "Tells the reader how a highlight is made, and that each reading mode marks a different amount of text.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "In Pages mode, press and hold a sentence and drag to highlight it. Scrolling mode shows highlights too, but cannot create them."
+            "value": "Press and hold the text in a book to highlight it: Scroll marks the whole paragraph, Pages marks the sentences you drag across. Both modes show what you have marked."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在分页模式下长按书中的句子并拖动，就能划线。滚动模式一样看得到划线，但不能新增。"
+            "value": "长按书里的文字就能划线：滚动模式划下整段，分页模式长按拖动可以划到句子。两种模式都看得到已有的划线。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "在分頁模式下長按書中的句子並拖曳，就能劃線。捲動模式一樣看得到劃線，但不能新增。"
+            "value": "長按書裡的文字就能劃線：捲動模式劃下整段，分頁模式長按拖曳可以劃到句子。兩種模式都看得到已有的劃線。"
           }
         }
       }
@@ -5234,25 +5234,25 @@
       }
     },
     "reader.settings.mode.footer": {
-      "comment": "Explains what choosing the paginated reading mode also buys: the ability to create highlights.",
+      "comment": "Explains how much text each reading mode can mark: a whole paragraph while scrolling, a sentence on a page.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Highlights can only be created in Pages mode, the only layout that knows where each character sits. Both modes show the highlights you already have."
+            "value": "Both modes make highlights and both show the ones you have. Scroll marks a whole paragraph on a long press; Pages marks sentences as you drag, since only a page knows where each character sits."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "划线只能在分页模式下建立——只有分页排版知道每个字在画面上的位置。两种模式都会显示已有的划线。"
+            "value": "两种模式都能划线，也都会显示已有的划线。滚动模式长按一段，划下整段；分页模式长按拖动，划到句子——只有分页排版知道每个字在画面上的位置。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "劃線只能在分頁模式下建立——只有分頁排版知道每個字在畫面上的位置。兩種模式都會顯示已有的劃線。"
+            "value": "兩種模式都能劃線，也都會顯示已有的劃線。捲動模式長按一段，劃下整段；分頁模式長按拖曳，劃到句子——只有分頁排版知道每個字在畫面上的位置。"
           }
         }
       }

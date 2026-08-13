@@ -31,6 +31,10 @@ struct ReaderView: View {
     /// the same thing at the foot of the last chapter; a page that simply refuses to
     /// turn, with nothing on screen, reads as a gesture the app missed.
     @State private var reachedEndOfBook = false
+    /// What the scrolling reader's bar is asking about, if anything. The paginated
+    /// renderer holds the same two questions itself, because the selection they are
+    /// about is a range in text only it has laid out.
+    @State private var markChoice: ScrollMarkChoice?
 
     var body: some View {
         ZStack {
@@ -69,6 +73,9 @@ struct ReaderView: View {
         // at the top of whatever is loaded. Re-aiming it happens on the next runloop
         // turn, once that scroll view exists to receive the target.
         .onChange(of: settings.mode) { _, mode in
+            // A question about a passage belongs to the renderer that asked it: the
+            // paginated one is about to ask its own, over text it has laid out itself.
+            markChoice = nil
             guard mode == .scroll else { return }
             Task { model?.retarget() }
         }
@@ -101,7 +108,12 @@ struct ReaderView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 80)
                 .contentShape(.rect)
-                .onTapGesture { showControls.toggle() }
+                // A tap that reached no paragraph: the chrome, unless a bar is waiting
+                // for an answer — then this is the way to say no, which is what the
+                // paginated renderer's transparent catcher is for.
+                .onTapGesture {
+                    if markChoice != nil { markChoice = nil } else { showControls.toggle() }
+                }
                 .accessibilityIdentifier("reader.text")
             }
             .scrollDismissesKeyboard(.immediately)
@@ -112,6 +124,8 @@ struct ReaderView: View {
                 proxy.scrollTo(target, anchor: .top)
                 model.scrollTarget = nil
             }
+            .overlay(alignment: .bottom) { markBar(model) }
+            .animation(.snappy(duration: 0.18), value: markChoice)
         }
     }
 
@@ -197,6 +211,7 @@ struct ReaderView: View {
 
     private func chapterBlock(_ item: ReaderModel.LoadedChapter, model: ReaderModel) -> some View {
         let highlights = model.highlights(inChapter: item.chapter.siteChapterId)
+        let marking = markChoice?.paragraphBeingMarked(inChapter: item.chapter.siteChapterId)
         return VStack(alignment: .leading, spacing: settings.paragraphSpacing) {
             Text(item.chapter.title)
                 .font(.system(size: settings.fontSize + 4, weight: .semibold))
@@ -205,17 +220,33 @@ struct ReaderView: View {
                 .id(item.id)
 
             ForEach(Array(item.paragraphs.enumerated()), id: \.offset) { offset, paragraph in
-                paragraphText(paragraph, highlights: highlights, paragraph: offset)
+                paragraphText(
+                    paragraph, highlights: highlights, paragraph: offset, isBeingMarked: marking == offset
+                )
                     .font(settings.font)
                     .lineSpacing(settings.lineSpacing)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // The whole row rather than the glyphs alone, so a press lands on the
+                    // paragraph the reader aimed at even beside a short last line.
+                    .contentShape(.rect)
                     // Every paragraph is a scroll destination, which is what makes a
                     // stored anchor something the reader can actually land on.
                     .id(TextAnchor.paragraphID(chapterId: item.chapter.id, paragraph: offset))
+                    // The unit this renderer can act on, named so the gesture test can
+                    // press one — a coordinate inside the column would be a guess about
+                    // where a paragraph happens to have been laid out.
+                    .accessibilityIdentifier("reader.paragraph")
                     // Progress is recorded from whatever scrolls into view; there
                     // is no cheaper way to know the reading position in a lazy
                     // stack on iOS 17.
                     .onAppear { model.note(chapterIndex: item.chapter.index, paragraph: offset) }
+                    .onTapGesture { tap(paragraph: offset, in: item, highlights: highlights) }
+                    // A SwiftUI long press rather than the UIKit recogniser the page
+                    // needs: there the press has to say *where* it landed, here the
+                    // paragraph it landed on is the whole answer. It also fails once the
+                    // finger travels past `maximumDistance`, which is what leaves a press
+                    // that turns into a scroll a scroll and nothing else.
+                    .onLongPressGesture(minimumDuration: 0.4) { mark(paragraph: offset, in: item) }
             }
         }
         .foregroundStyle(settings.theme.foreground)
@@ -225,22 +256,124 @@ struct ReaderView: View {
     ///
     /// The scrolling renderer is left as it was — a plain `Text` per paragraph with the
     /// same modifiers — and only the *string* becomes attributed, and only when a
-    /// highlight actually reaches this paragraph. Highlights are shown in both modes
-    /// because a mark the reader made has to still be there when they switch; they are
-    /// *made* only in paged mode, because nothing here knows where a character sits.
+    /// highlight reaches this paragraph or the reader is being asked about it. Both modes
+    /// show highlights and both make them; what differs is how finely they can aim. Here
+    /// a mark is a whole paragraph, because nothing in a lazy stack of `Text` knows where
+    /// a character sits — see `TextSelection.wholeParagraph(at:in:)`.
     private func paragraphText(
-        _ text: String, highlights: [TextHighlight], paragraph: Int
+        _ text: String, highlights: [TextHighlight], paragraph: Int, isBeingMarked: Bool
     ) -> Text {
-        guard !highlights.isEmpty else { return Text(text) }
+        guard isBeingMarked || !highlights.isEmpty else { return Text(text) }
         let length = (text as NSString).length
         let ranges = highlights.compactMap { $0.range(inParagraph: paragraph, length: length) }
-        guard !ranges.isEmpty else { return Text(text) }
+        guard isBeingMarked || !ranges.isEmpty else { return Text(text) }
         var attributed = AttributedString(text)
+        // Neutral while the question is open, yellow once the reader answers it: the two
+        // colours the page uses, in the same order, so committing a mark looks like the
+        // same event in both renderers.
+        if isBeingMarked { attributed.backgroundColor = settings.theme.selection }
         for range in ranges {
             guard let bounds = Range(range, in: attributed) else { continue }
             attributed[bounds].backgroundColor = settings.theme.highlight
         }
         return Text(attributed)
+    }
+
+    // MARK: - Marks while scrolling
+
+    /// What the scrolling reader's bar is asking about.
+    ///
+    /// One value with two cases rather than two optionals: the bar can only ever ask one
+    /// question, and a pair of states that must never both be set is a state machine
+    /// spelled wrong.
+    private enum ScrollMarkChoice: Equatable {
+        /// A long press picked out a whole paragraph, which is waiting to become a mark.
+        case mark(siteChapterId: String, paragraph: Int, selection: TextSelection)
+        /// A tap landed on a stored mark, which is waiting to be removed.
+        case remove(TextHighlight)
+
+        var siteChapterId: String {
+            switch self {
+            case .mark(let siteChapterId, _, _): return siteChapterId
+            case .remove(let highlight): return highlight.siteChapterId
+            }
+        }
+
+        /// The paragraph to draw as picked out, when the open question is about marking
+        /// one in this chapter.
+        func paragraphBeingMarked(inChapter siteChapterId: String) -> Int? {
+            guard case .mark(let chapter, let paragraph, _) = self, chapter == siteChapterId else {
+                return nil
+            }
+            return paragraph
+        }
+    }
+
+    /// A long press picks out the paragraph under the finger.
+    private func mark(paragraph: Int, in chapter: ReaderModel.LoadedChapter) {
+        guard let selection = TextSelection.wholeParagraph(at: paragraph, in: chapter.paragraphs)
+        else { return }
+        markChoice = .mark(
+            siteChapterId: chapter.chapter.siteChapterId, paragraph: paragraph, selection: selection
+        )
+    }
+
+    /// A tap on a paragraph: offer to remove the mark on it, or do what a tap has always
+    /// done here and show the controls.
+    ///
+    /// A marked paragraph answers the tap that lands on it, the same way a marked passage
+    /// answers one on the page: the reader put the mark there, and a mark that ignores
+    /// being touched can only be undone from another screen.
+    private func tap(
+        paragraph: Int, in chapter: ReaderModel.LoadedChapter, highlights: [TextHighlight]
+    ) {
+        // The lift of the finger that started the press arrives here as a tap, so the
+        // paragraph being asked about must not dismiss its own question.
+        if case .some(.mark(let asked, let askedParagraph, _)) = markChoice,
+           asked == chapter.chapter.siteChapterId, askedParagraph == paragraph {
+            return
+        }
+        guard markChoice == nil else {
+            markChoice = nil
+            return
+        }
+        let length = (chapter.paragraphs[paragraph] as NSString).length
+        // The first mark reaching this paragraph, in reading order. Paragraph granularity
+        // is all this renderer has: a mark made on a page can cover a single sentence of
+        // it, and a tap here cannot tell which sentence was touched.
+        guard let hit = highlights.first(where: {
+            $0.range(inParagraph: paragraph, length: length) != nil
+        }) else {
+            showControls.toggle()
+            return
+        }
+        markChoice = .remove(hit)
+    }
+
+    /// The bar that asks about the paragraph, drawn only while the chapter it belongs to
+    /// is still on screen: a jump from the catalog replaces what is loaded, and a bar
+    /// left over from the chapter before would offer to mark text nobody can see.
+    @ViewBuilder
+    private func markBar(_ model: ReaderModel) -> some View {
+        if let choice = markChoice,
+           model.loaded.contains(where: { $0.chapter.siteChapterId == choice.siteChapterId }) {
+            switch choice {
+            case .mark(let siteChapterId, _, let selection):
+                MarkActionBar(title: "reader.highlight.add", icon: "highlighter") {
+                    model.addHighlight(siteChapterId: siteChapterId, selection: selection)
+                    markChoice = nil
+                } cancel: {
+                    markChoice = nil
+                }
+            case .remove(let highlight):
+                MarkActionBar(title: "reader.highlight.remove", icon: "trash") {
+                    model.removeHighlight(highlight)
+                    markChoice = nil
+                } cancel: {
+                    markChoice = nil
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -349,6 +482,43 @@ struct ReaderView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Mark action bar
+
+/// The bar that asks about one passage: what to do with it, and a way out.
+///
+/// The only control the highlight feature has, in either renderer, and it exists only
+/// once there is something to act on: marking a passage has to say *which* passage, so
+/// the gesture comes first and a permanent button in the control bar could report
+/// nothing but "pick something first".
+struct MarkActionBar: View {
+    let title: LocalizedStringKey
+    let icon: String
+    let confirm: () -> Void
+    let cancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: confirm) {
+                Label(title, systemImage: icon).font(.footnote.weight(.medium))
+            }
+            .accessibilityIdentifier("reader.highlight.action")
+            Divider().frame(height: 18)
+            Button("common.cancel", action: cancel)
+                .font(.footnote)
+                .tint(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar, in: .capsule)
+        // Clear of the reader's own control bar, which may well be up when a passage is
+        // marked: two bars stacked on each other at the bottom of the screen is the one
+        // way to make a confirm button unhittable. Lands where the end-of-book notice
+        // lands, and for the same reason.
+        .padding(.bottom, 60)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 }
 

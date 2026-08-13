@@ -14,8 +14,8 @@ import SwiftUI
 /// a book with two hundred highlights would bury the bookmarks underneath them, so
 /// sections would not do either. The switch also gives the empty highlight state
 /// somewhere to sit next to the bookmarks the reader already understands, which is the
-/// only place in the app that can explain that highlights are drawn in both reading
-/// modes but can only be *made* on a page.
+/// only place in the app that can explain how a highlight is made at all — and that how
+/// much of the text one covers depends on which reader made it.
 struct ReadingMarksView: View {
     let book: Book
 
@@ -176,9 +176,8 @@ struct ReadingMarksView: View {
     }
 
     /// Says where marks come from. Someone reaching an empty list has not found the way
-    /// to make one yet, and this is the only screen that can point at it — including the
-    /// part about highlights needing paged mode, which is a rule the reader cannot
-    /// discover by trying.
+    /// to make one yet, and this is the only screen that can point at it — including how
+    /// much each reader marks, which is a difference nobody discovers by trying.
     @ViewBuilder
     private var emptyState: some View {
         switch kind {

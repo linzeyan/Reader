@@ -30,9 +30,9 @@ struct PaginatedChapterView: View {
     let chapterKey: String
     let settings: ReaderSettings
     let landing: PageLanding
-    /// This chapter's stored highlights. Painted here and created here — see
-    /// `ChapterPaginator.offset(at:onPage:)` for why creation cannot live in the
-    /// scrolling renderer.
+    /// This chapter's stored highlights. Painted here, and created here to sentence
+    /// precision — see `ChapterPaginator.offset(at:onPage:)` for why the scrolling
+    /// renderer can only mark a paragraph whole.
     let highlights: [TextHighlight]
     let onAnchorChange: (TextAnchor) -> Void
     let onTapCenter: () -> Void
