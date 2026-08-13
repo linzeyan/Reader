@@ -113,18 +113,55 @@ enum TextBookParser {
         return found
     }
 
+    /// Roman numerals spelled out in full (1–3999) rather than approximated as
+    /// "letters drawn from IVXLCDM", which also spells ordinary words — `civil`,
+    /// `mild` — and would promote a sentence into a chapter break. The assertions
+    /// on either side force the whole run of numeral letters to be consumed, which
+    /// is what stops the numeral matching *nothing* and letting `Part Ay` through.
+    private static let romanNumeral =
+        "(?=[ivxlcdm])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})(?![ivxlcdm])"
+
+    /// `Chapter One`, `Chapter Twenty-One`. Listed out for the same reason the
+    /// Chinese numerals are, and safe to list because English cardinals are a
+    /// closed set: this is a lexicon, not a rule that will need maintaining.
+    /// Ninety-nine is the ceiling — past that these books use digits.
+    private static let englishNumber = """
+        (?:\
+        (?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\
+        (?:[ -](?:one|two|three|four|five|six|seven|eight|nine))?\
+        |ten|eleven|twelve|(?:thir|four|fif|six|seven|eigh|nine)teen\
+        |one|two|three|four|five|six|seven|eight|nine\
+        )
+        """
+
     /// Headings as these files actually write them: `第十七章`, `第3卷`, `第一回`,
-    /// `第５話`, `第二節`, plus the handful of unnumbered section names that are
-    /// just as common in Chinese web novels as the numbered ones.
+    /// `第５話`, `第二節`, `第 3 部分`, plus the handful of unnumbered section names
+    /// that are just as common in Chinese web novels as the numbered ones — and
+    /// the Latin-script equivalents, which arrive both in books the user already
+    /// owns and back out of this app's own `.txt` export.
     ///
     /// Chinese numerals are listed explicitly rather than matched as "any
     /// characters": `第一章` and `第三部分の話` differ only in what sits between
     /// `第` and the unit, and a permissive class there promotes ordinary
-    /// sentences into chapter breaks.
+    /// sentences into chapter breaks. The unit is a prefix match, so `第三部分`
+    /// already came through as `第三部`; the space in `第 3 部分` did not, and
+    /// people write it both ways.
+    ///
+    /// The Latin branches carry a guard the Chinese ones cannot: after the number
+    /// the line must end, or continue with something that is not a lower-case
+    /// letter. Headings go on in Title Case or CAPS ("Chapter 12: The Long Road"),
+    /// sentences go on in lower case ("Chapter 12 was the one he remembered"), and
+    /// unlike Chinese — which runs straight on from the heading with no space —
+    /// English gives us that signal for free. It is needed because the length cap
+    /// below counts *characters*, which is a far weaker filter in a script that
+    /// spends five or six of them per word.
     private static let headingPattern = """
         ^(?:\
-        第[0-9０-９〇零一二三四五六七八九十百千萬万兩两廿]{1,12}[章卷回話话節节篇集部]\
+        第\\s*[0-9０-９〇零一二三四五六七八九十百千萬万兩两廿]{1,12}\\s*[章卷回話话節节篇集部]\
         |序章|序言|楔子|引子|前言|後記|后记|終章|终章|尾聲|尾声|番外\
+        |(?i:(?:chapter|part|book)\\s+(?:[0-9０-９]+|\(romanNumeral)|\(englishNumber)))\
+        \\b(?![\\s\\p{P}]*[a-z])\
+        |(?i:prologue|epilogue|foreword|afterword)(?!\\p{L})\
         )
         """
 
@@ -133,10 +170,12 @@ enum TextBookParser {
     /// Punctuation is allowed to appear anywhere, including at the end: real
     /// headings carry it ("第一章 上京：雪夜"), and rejecting a trailing 。／！ to
     /// protect against a paragraph *opening* with "第三章的內容其實是……" bought that
-    /// protection by silently dropping headings people actually write. The length
-    /// cap alone draws the line: a 30-character ceiling is roomy for a title and
-    /// short for prose. The cost is accepted and stated — a body line that begins
-    /// with a chapter reference and stays under the cap becomes a chapter break.
+    /// protection by silently dropping headings people actually write. For Chinese
+    /// the length cap is the only line drawn: a 30-character ceiling is roomy for a
+    /// title and short for prose. The cost is accepted and stated — a body line
+    /// that begins with a chapter reference and stays under the cap becomes a
+    /// chapter break. The Latin branches of `headingPattern` add a second guard of
+    /// their own, because 30 characters of English is only a handful of words.
     ///
     /// Lines are what the splitter iterates over, so "single line" is structural
     /// rather than checked: a heading cannot span a newline because a newline is
