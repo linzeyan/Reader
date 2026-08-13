@@ -108,6 +108,119 @@ final class TextBookParserTests: XCTestCase {
         XCTAssertEqual(chapters.first?.paragraphs, ["雪停了。"])
     }
 
+    /// `第 3 部分` and `第三部分` are the same heading and both turn up — the space is a
+    /// typesetting habit, not a different shape. The unspaced form already came
+    /// through on the `部` prefix; the spaced one was read as prose.
+    func testAChineseHeadingToleratesSpacesAroundItsNumber() {
+        let chapters = TextBookParser.chapters(from: """
+        第 3 部分
+        雪停了。
+        第三部分
+        風也停了。
+        第 一 章
+        他沒有回頭。
+        """)
+
+        XCTAssertEqual(chapters.map(\.title), ["第 3 部分", "第三部分", "第 一 章"])
+        XCTAssertEqual(chapters.map(\.paragraphs), [["雪停了。"], ["風也停了。"], ["他沒有回頭。"]])
+    }
+
+    /// The books on someone's disk are not all Chinese, and this app's own `.txt`
+    /// export writes each title as a plain line — so a heading shape the parser
+    /// cannot read back is a chapter title lost on every round trip through it.
+    func testEnglishHeadingsBecomeChapters() {
+        let chapters = TextBookParser.chapters(from: """
+        Chapter 12
+        He went down the mountain.
+        CHAPTER XIII — THE CITY
+        The gate closed at dusk.
+        Chapter Twenty-One
+        He did not look back.
+        Part 3
+        Snow, again.
+        Book II
+        Then spring.
+        """)
+
+        XCTAssertEqual(chapters.map(\.title), [
+            "Chapter 12", "CHAPTER XIII — THE CITY", "Chapter Twenty-One", "Part 3", "Book II",
+        ])
+        XCTAssertEqual(chapters[0].paragraphs, ["He went down the mountain."])
+        XCTAssertEqual(chapters[4].paragraphs, ["Then spring."])
+    }
+
+    /// Unnumbered names, which is how the front and back matter of a translated
+    /// book is titled.
+    func testUnnumberedEnglishSectionNamesBecomeChapters() {
+        let chapters = TextBookParser.chapters(from: """
+        Prologue
+        Before all of it.
+        FOREWORD
+        A note from the translator.
+        Epilogue: Ten Years Later
+        After all of it.
+        Afterword
+        A second note.
+        """)
+
+        XCTAssertEqual(
+            chapters.map(\.title),
+            ["Prologue", "FOREWORD", "Epilogue: Ten Years Later", "Afterword"]
+        )
+    }
+
+    /// Case, digit width and stray whitespace are all things a real file varies,
+    /// and none of them changes what the line is.
+    func testEnglishHeadingsSurviveCaseDigitWidthAndStrayWhitespace() {
+        let chapters = TextBookParser.chapters(
+            from: "  chapter 4 \t\nRain.\n\u{3000}Chapter １２\u{3000}\nSnow.\nepilogue\nDone."
+        )
+
+        XCTAssertEqual(chapters.map(\.title), ["chapter 4", "Chapter １２", "epilogue"])
+        XCTAssertEqual(chapters.map(\.paragraphs), [["Rain."], ["Snow."], ["Done."]])
+    }
+
+    /// The counterweight to reading English headings at all. "Chapter 12 was…" is an
+    /// ordinary sentence, and the 30-character cap counts characters, which is only
+    /// five or six English words — so the cap catches the first line here and none
+    /// of the rest. What stops those is the guard that a heading does not continue
+    /// in lower case; without it every one of them would cut the book in half.
+    func testEnglishProseThatOpensLikeAHeadingStaysProse() {
+        let prose = [
+            "Chapter 12 was the one he remembered for years afterwards.",
+            "Chapter 12 was his favourite.",
+            "Chapter 12 — the end of it",
+            "Book two of the series.",
+            "Part 3 of the plan failed.",
+            "Prologues are rarely read.",
+        ]
+        XCTAssertTrue(
+            prose.dropFirst().allSatisfy { $0.count <= 30 },
+            "the length cap alone would not stop these"
+        )
+
+        let chapters = TextBookParser.chapters(from: (["Chapter 1"] + prose).joined(separator: "\n"))
+
+        XCTAssertEqual(chapters.map(\.title), ["Chapter 1"])
+        XCTAssertEqual(chapters[0].paragraphs, prose)
+    }
+
+    /// A line that is only a number is deliberately not a heading. Years, list
+    /// items and page numbers left behind by an OCR pass are indistinguishable from
+    /// it, and at three characters the length cap offers no protection whatsoever —
+    /// so reading `12.` as a title would shred the books it was meant to help.
+    func testBareNumberLinesStayProse() {
+        let chapters = TextBookParser.chapters(from: """
+        Chapter 1
+        12.
+        1995
+        He was born that year.
+        """)
+
+        XCTAssertEqual(chapters.map(\.title), ["Chapter 1"])
+        XCTAssertEqual(chapters[0].paragraphs, ["12.", "1995", "He was born that year."])
+    }
+
     /// A file whose headings we cannot find must not become one enormous chapter:
     /// the reader lays a whole chapter out as one stack of text views, so a 2 MB
     /// single chapter is unscrollable as well as expensive.
