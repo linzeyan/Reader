@@ -4945,30 +4945,6 @@
         }
       }
     },
-    "bookmarks.chapter %lld": {
-      "comment": "Names a bookmarked chapter when the stored catalog no longer has its title.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chapter %lld"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "第 %lld 章"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "第 %lld 章"
-          }
-        }
-      }
-    },
     "bookmarks.empty": {
       "comment": "Shown when a book has no saved positions yet.",
       "extractionState": "manual",
@@ -5301,6 +5277,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在匯出…"
+          }
+        }
+      }
+    },
+    "marks.chapter.missing": {
+      "comment": "Names the chapter of a bookmark or highlight whose chapter the site has removed from the catalog. Such a row cannot be opened, only read and deleted.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chapter no longer in the catalog"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "章节已不在目录中"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "章節已不在目錄中"
           }
         }
       }

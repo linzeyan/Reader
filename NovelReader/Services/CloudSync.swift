@@ -41,14 +41,20 @@ final class CloudSync {
         /// fields, so the wire format cannot describe a position the app's own model
         /// cannot hold.
         ///
-        /// This replaced a flat `lastReadChapterIndex` / `lastReadOffset` pair, and
-        /// no compatibility path was kept: a payload written by an older build simply
-        /// decodes with `position == nil`, which reads as "this record carries no
-        /// position" — true, since the field it did carry was named for something
-        /// else. Nothing is lost by it. Every record in this store is a mirror of a
-        /// local row, so the device that owns the position re-publishes it in the new
+        /// No compatibility path is kept for older shapes of it, and there have been
+        /// two: a flat `lastReadChapterIndex` / `lastReadOffset` pair, and an anchor
+        /// whose chapter was a catalog index rather than the site's chapter id. A
+        /// payload in either shape no longer decodes — the second one fails the whole
+        /// record, since a position that is present but unreadable is not a record this
+        /// app can apply — so it is skipped, and the book it described is learned about
+        /// when its own device next publishes.
+        ///
+        /// Nothing is lost by that. Every record in this store is a mirror of a local
+        /// row, so the device that owns the position re-publishes it in the current
         /// shape on its next page turn, and the merge is last-writer-wins on
-        /// `updatedAt`, which a mirror of an unchanged row cannot win.
+        /// `updatedAt`, which a mirror of an unchanged row cannot win. Guessing a
+        /// chapter id from a stale index would be worse than waiting: the guess would
+        /// be resolved against a catalog this device fetched at a different time.
         var position: ReadingPosition?
     }
 

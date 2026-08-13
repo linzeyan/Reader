@@ -52,12 +52,12 @@ final class HighlightTests: XCTestCase {
     /// A highlight over whatever a press-and-drag between two character positions picks
     /// out, which is the only way the app itself can make one.
     private func mark(
-        _ text: ChapterText, from: Int, to: Int, chapterIndex: Int = 0
+        _ text: ChapterText, from: Int, to: Int, siteChapterId: String = "1"
     ) throws -> TextHighlight {
         let range = try XCTUnwrap(text.sentenceRange(from: from, to: to))
         let selection = try XCTUnwrap(text.selection(for: range))
         return TextHighlight(
-            bookId: "demo|1", chapterIndex: chapterIndex, selection: selection, createdAt: Date()
+            bookId: "demo|1", siteChapterId: siteChapterId, selection: selection, createdAt: Date()
         )
     }
 
@@ -363,14 +363,14 @@ final class HighlightTests: XCTestCase {
         ))
         let selection = try XCTUnwrap(text.selection(for: range))
 
-        try repo.addHighlight(bookId: book.id, chapterIndex: 7, selection: selection)
+        try repo.addHighlight(bookId: book.id, siteChapterId: "7", selection: selection)
         let stored = try XCTUnwrap(repo.highlights(bookId: book.id).first)
 
         XCTAssertEqual(stored.start, selection.start, "both ends have to come back")
         XCTAssertEqual(stored.end, selection.end)
         XCTAssertNotEqual(stored.start, stored.end, "a highlight is a span, not a point")
         XCTAssertEqual(stored.excerpt, selection.excerpt, "the list has to be able to quote it")
-        XCTAssertEqual(stored.position, ReadingPosition(chapterIndex: 7, anchor: selection.start))
+        XCTAssertEqual(stored.position, ReadingPosition(siteChapterId: "7", anchor: selection.start))
     }
 
     /// Marking the same passage twice is a gesture a reader will make by accident, and it
@@ -386,11 +386,11 @@ final class HighlightTests: XCTestCase {
         let selection = try XCTUnwrap(text.selection(for: range))
 
         let first = try repo.addHighlight(
-            bookId: book.id, chapterIndex: 0, selection: selection,
+            bookId: book.id, siteChapterId: "1", selection: selection,
             now: Date(timeIntervalSince1970: 0)
         )
         let second = try repo.addHighlight(
-            bookId: book.id, chapterIndex: 0, selection: selection,
+            bookId: book.id, siteChapterId: "1", selection: selection,
             now: Date(timeIntervalSince1970: 9_000)
         )
 
@@ -407,22 +407,30 @@ final class HighlightTests: XCTestCase {
     func testHighlightsComeBackInReadingOrder() throws {
         let repo = LibraryRepo(database: try AppDatabase.makeInMemory())
         let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
+        // The order is the catalog's, so the catalog has to exist — and its ids are
+        // deliberately not in the order the chapters are read, which is the whole reason
+        // the list cannot sort on them.
+        try repo.replaceCatalog(bookId: book.id, entries: [
+            (siteChapterId: "z", title: "第一章", url: "https://demo.test/1/z"),
+            (siteChapterId: "m", title: "第二章", url: "https://demo.test/1/m"),
+            (siteChapterId: "a", title: "第三章", url: "https://demo.test/1/a"),
+        ])
         let text = chapterText(prose)
         let spans = [
-            (chapter: 3, from: start(ofParagraph: 2, in: text)),
-            (chapter: 1, from: start(ofParagraph: 0, in: text)),
-            (chapter: 3, from: start(ofParagraph: 0, in: text)),
+            (chapter: "a", from: start(ofParagraph: 2, in: text)),
+            (chapter: "z", from: start(ofParagraph: 0, in: text)),
+            (chapter: "a", from: start(ofParagraph: 0, in: text)),
         ]
         for span in spans {
             let range = try XCTUnwrap(text.sentenceRange(from: span.from, to: span.from))
             try repo.addHighlight(
-                bookId: book.id, chapterIndex: span.chapter,
+                bookId: book.id, siteChapterId: span.chapter,
                 selection: try XCTUnwrap(text.selection(for: range))
             )
         }
 
         let ordered = try repo.highlights(bookId: book.id)
-        XCTAssertEqual(ordered.map(\.chapterIndex), [1, 3, 3])
+        XCTAssertEqual(ordered.map(\.siteChapterId), ["z", "a", "a"])
         XCTAssertEqual(ordered.map(\.startParagraph), [0, 0, 2])
     }
 
@@ -437,7 +445,7 @@ final class HighlightTests: XCTestCase {
             from: start(ofParagraph: 0, in: text), to: start(ofParagraph: 0, in: text)
         ))
         try repo.addHighlight(
-            bookId: book.id, chapterIndex: 0, selection: try XCTUnwrap(text.selection(for: range))
+            bookId: book.id, siteChapterId: "1", selection: try XCTUnwrap(text.selection(for: range))
         )
         XCTAssertEqual(try repo.highlights(bookId: book.id).count, 1)
 
@@ -470,6 +478,13 @@ final class HighlightTests: XCTestCase {
                 INSERT INTO "book" ("id", "siteId", "siteBookId", "title", "addedAt", "updatedAt")
                 VALUES ('demo|1', 'demo', '1', 't', '2024-01-01', '2024-01-01')
                 """)
+            // The catalog the bookmark's index points into. v6 needs it to convert the
+            // index to a chapter id; `ChapterIdentityTests` covers what happens when it
+            // cannot.
+            try db.execute(sql: """
+                INSERT INTO "chapter" ("id", "bookId", "siteChapterId", "index", "title", "url")
+                VALUES ('demo|1|c4', 'demo|1', 'c4', 4, '第五章', 'https://demo.test/1/5')
+                """)
             try db.execute(sql: """
                 INSERT INTO "readingBookmark"
                 ("id", "bookId", "chapterIndex", "paragraph", "characterOffset", "createdAt", "excerpt")
@@ -484,7 +499,7 @@ final class HighlightTests: XCTestCase {
         let bookmark = try XCTUnwrap(repo.readingBookmarks(bookId: "demo|1").first)
         XCTAssertEqual(
             bookmark.position,
-            ReadingPosition(chapterIndex: 4, anchor: TextAnchor(paragraph: 17, characterOffset: 23)),
+            ReadingPosition(siteChapterId: "c4", anchor: TextAnchor(paragraph: 17, characterOffset: 23)),
             "the positions the reader already saved have to come through untouched"
         )
         XCTAssertTrue(
@@ -497,7 +512,7 @@ final class HighlightTests: XCTestCase {
             from: start(ofParagraph: 0, in: text), to: start(ofParagraph: 0, in: text)
         ))
         try repo.addHighlight(
-            bookId: "demo|1", chapterIndex: 0, selection: try XCTUnwrap(text.selection(for: range))
+            bookId: "demo|1", siteChapterId: "1", selection: try XCTUnwrap(text.selection(for: range))
         )
         XCTAssertEqual(try repo.highlights(bookId: "demo|1").count, 1, "the new table is usable")
     }

@@ -88,13 +88,22 @@ struct TextSelection: Equatable {
 
 /// A place in a book: which chapter, and where inside it.
 struct ReadingPosition: Codable, Hashable {
-    var chapterIndex: Int
+    /// The chapter, by the id the site gave it — never by its place in the catalog.
+    ///
+    /// A position is stored for weeks and read back against a catalog that has been
+    /// refetched many times since; `Chapter.index` is recomputed on every one of those
+    /// refreshes, so a stored index quietly starts naming the chapter *after* the one
+    /// it was written for the first time the site inserts one. Turning the id back into
+    /// a place in reading order is `Book.lastReadIndex(in:)`, and it needs a catalog to
+    /// do it, which is the point: nothing can hold a reading-order number without
+    /// holding the thing that defines it.
+    var siteChapterId: String
     var anchor: TextAnchor
 
     /// Opening a chapter from the catalog, where the reader has expressed no
     /// opinion about a position within it.
-    static func chapterStart(_ index: Int) -> ReadingPosition {
-        ReadingPosition(chapterIndex: index, anchor: .start)
+    static func chapterStart(_ siteChapterId: String) -> ReadingPosition {
+        ReadingPosition(siteChapterId: siteChapterId, anchor: .start)
     }
 }
 
@@ -111,7 +120,10 @@ struct ReadingBookmark: Codable, Identifiable, Hashable, FetchableRecord, Persis
     /// Derived from the position, not from insert order — see `makeId`.
     var id: String
     var bookId: String
-    var chapterIndex: Int
+    /// Which chapter, by the site's own id. See `ReadingPosition.siteChapterId` for why
+    /// this is not the chapter's number: a bookmark that slid onto the next chapter's
+    /// text because the site published one is a bookmark that lies.
+    var siteChapterId: String
     var paragraph: Int
     var characterOffset: Int
     var createdAt: Date
@@ -123,7 +135,7 @@ struct ReadingBookmark: Codable, Identifiable, Hashable, FetchableRecord, Persis
 
     var position: ReadingPosition {
         ReadingPosition(
-            chapterIndex: chapterIndex,
+            siteChapterId: siteChapterId,
             anchor: TextAnchor(paragraph: paragraph, characterOffset: characterOffset)
         )
     }
@@ -134,13 +146,13 @@ struct ReadingBookmark: Codable, Identifiable, Hashable, FetchableRecord, Persis
     /// would stack up rows that all jump to the same place, and the storage layer
     /// could not tell that they were duplicates.
     static func makeId(bookId: String, position: ReadingPosition) -> String {
-        "\(bookId)|\(position.chapterIndex)|\(position.anchor.paragraph)|\(position.anchor.characterOffset)"
+        "\(bookId)|\(position.siteChapterId)|\(position.anchor.paragraph)|\(position.anchor.characterOffset)"
     }
 
     init(bookId: String, position: ReadingPosition, createdAt: Date, excerpt: String?) {
         self.id = Self.makeId(bookId: bookId, position: position)
         self.bookId = bookId
-        self.chapterIndex = position.chapterIndex
+        self.siteChapterId = position.siteChapterId
         self.paragraph = position.anchor.paragraph
         self.characterOffset = position.anchor.characterOffset
         self.createdAt = createdAt
@@ -165,7 +177,10 @@ struct TextHighlight: Codable, Identifiable, Hashable, FetchableRecord, Persista
     /// Derived from the span, not from insert order — see `makeId`.
     var id: String
     var bookId: String
-    var chapterIndex: Int
+    /// Which chapter, by the site's own id — see `ReadingBookmark.siteChapterId`. A
+    /// highlight is drawn *over* text rather than pointed at it, so an identity that
+    /// drifts does not merely jump to the wrong place: it paints the wrong sentence.
+    var siteChapterId: String
     var startParagraph: Int
     var startCharacterOffset: Int
     var endParagraph: Int
@@ -187,24 +202,24 @@ struct TextHighlight: Codable, Identifiable, Hashable, FetchableRecord, Persista
     /// Where a jump from the marks list lands: the start of the passage, which is the
     /// only end of it the reader is looking for.
     var position: ReadingPosition {
-        ReadingPosition(chapterIndex: chapterIndex, anchor: start)
+        ReadingPosition(siteChapterId: siteChapterId, anchor: start)
     }
 
     /// Identity is the span, the same way `ReadingBookmark`'s is its position: drawing
     /// a line under the same sentence twice has to collapse onto one row, or the
     /// second tap would stack an invisible duplicate that takes two deletes to remove.
-    static func makeId(bookId: String, chapterIndex: Int, selection: TextSelection) -> String {
+    static func makeId(bookId: String, siteChapterId: String, selection: TextSelection) -> String {
         [
-            bookId, String(chapterIndex),
+            bookId, siteChapterId,
             String(selection.start.paragraph), String(selection.start.characterOffset),
             String(selection.end.paragraph), String(selection.end.characterOffset),
         ].joined(separator: "|")
     }
 
-    init(bookId: String, chapterIndex: Int, selection: TextSelection, createdAt: Date) {
-        self.id = Self.makeId(bookId: bookId, chapterIndex: chapterIndex, selection: selection)
+    init(bookId: String, siteChapterId: String, selection: TextSelection, createdAt: Date) {
+        self.id = Self.makeId(bookId: bookId, siteChapterId: siteChapterId, selection: selection)
         self.bookId = bookId
-        self.chapterIndex = chapterIndex
+        self.siteChapterId = siteChapterId
         self.startParagraph = selection.start.paragraph
         self.startCharacterOffset = selection.start.characterOffset
         self.endParagraph = selection.end.paragraph

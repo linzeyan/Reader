@@ -41,6 +41,11 @@ final class AppEnvironment {
     /// How many chapters each book has gained since the reader left off, so the
     /// library can badge a row without querying per book while it scrolls.
     private(set) var newChapterCounts: [String: Int] = [:]
+    /// Which chapter each book's stored position lands on in reading order, so a shelf
+    /// row can say how far the reader got. Resolved in SQL and cached here for the same
+    /// reason the counts are: the position names a chapter, turning that into a number
+    /// needs the book's catalog, and the shelf holds no catalogs.
+    private(set) var lastReadChapterIndexes: [String: Int] = [:]
     /// Set when a site demands an interactive challenge; drives the sheet that
     /// hands the web view to the user.
     var challenge: ChallengeRequest?
@@ -146,6 +151,7 @@ final class AppEnvironment {
         // separately refreshed count would show a badge next to a book that has
         // already been removed.
         newChapterCounts = (try? repo.newChapterCounts()) ?? [:]
+        lastReadChapterIndexes = (try? repo.lastReadChapterIndexes()) ?? [:]
     }
 
     /// Books grouped by source, in the rule order the settings screen shows.

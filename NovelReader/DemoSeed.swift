@@ -93,7 +93,10 @@ enum DemoSeed {
             )
         }
         if let chapter = demo.readingChapter {
-            try? env.repo.updateProgress(bookId: book.id, position: .chapterStart(chapter))
+            // The field is a place in reading order; the ids seeded above run from 1.
+            try? env.repo.updateProgress(
+                bookId: book.id, position: .chapterStart("\(chapter + 1)")
+            )
         }
     }
 

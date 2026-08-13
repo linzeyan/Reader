@@ -78,7 +78,7 @@ final class ReadingPositionTests: XCTestCase {
         XCTAssertNil(book.readingPosition, "a book nobody has opened has no position")
 
         let position = ReadingPosition(
-            chapterIndex: 4, anchor: TextAnchor(paragraph: 17, characterOffset: 23)
+            siteChapterId: "c4", anchor: TextAnchor(paragraph: 17, characterOffset: 23)
         )
         try repo.updateProgress(bookId: book.id, position: position)
 
@@ -99,8 +99,49 @@ final class ReadingPositionTests: XCTestCase {
         XCTAssertEqual(book.lastReadParagraph, 42)
         XCTAssertEqual(
             book.readingPosition,
-            ReadingPosition(chapterIndex: 7, anchor: TextAnchor(paragraph: 42, characterOffset: 0))
+            ReadingPosition(siteChapterId: "c7", anchor: TextAnchor(paragraph: 42, characterOffset: 0))
         )
+    }
+
+    /// v6's backfill for the reading position: the index it held named a chapter in the
+    /// catalog as it stood, and that chapter's own id is the only honest conversion of
+    /// it. The number itself cannot be carried over — it is exactly what the site's next
+    /// insertion invalidates, which is why it is going.
+    func testMigrationConvertsTheStoredIndexToTheChapterItNamed() throws {
+        let queue = try storeAtV3(lastReadChapterIndex: 7, lastReadOffset: 42)
+        try AppDatabase.migrator.migrate(queue)
+
+        let book = try XCTUnwrap(LibraryRepo(database: try AppDatabase(queue)).book(id: "demo|1"))
+        XCTAssertEqual(
+            book.lastReadSiteChapterId, "c7",
+            "the id of the chapter that was at index 7, not the number 7"
+        )
+    }
+
+    /// A position whose index names no chapter cannot be converted at all: there is no
+    /// id to write, so the book comes out unopened rather than claiming whichever
+    /// chapter later lands on that number. The paragraph goes with it — a paragraph
+    /// under no chapter is half a position, and half a position is worse than none.
+    func testMigrationLeavesAPositionWithNoChapterToNameUnread() throws {
+        let queue = try storeAtV3(lastReadChapterIndex: 7, lastReadOffset: 42, chapters: 3)
+        try AppDatabase.migrator.migrate(queue)
+
+        let book = try XCTUnwrap(LibraryRepo(database: try AppDatabase(queue)).book(id: "demo|1"))
+        XCTAssertNil(book.lastReadSiteChapterId)
+        XCTAssertNil(book.readingPosition)
+        XCTAssertNil(book.lastReadParagraph)
+    }
+
+    /// The index column is dropped rather than kept beside the id, for the same reason
+    /// v4 dropped `lastReadOffset`: two answers to "which chapter" is how the two of them
+    /// come to disagree, and the number is the one that goes stale on its own.
+    func testTheChapterIndexColumnIsGone() throws {
+        let queue = try storeAtV3(lastReadChapterIndex: 7, lastReadOffset: 42)
+        try AppDatabase.migrator.migrate(queue)
+
+        let columns = try queue.read { db in try db.columns(in: "book").map(\.name) }
+        XCTAssertFalse(columns.contains("lastReadChapterIndex"))
+        XCTAssertTrue(columns.contains("lastReadSiteChapterId"))
     }
 
     /// Nothing ever recorded a character offset, so the migration invents none: the
@@ -116,15 +157,16 @@ final class ReadingPositionTests: XCTestCase {
         XCTAssertNil(stored, "no offset was ever measured, so none may be written")
     }
 
-    /// A book nobody had opened must not come out of the migration looking read:
-    /// `lastReadChapterIndex` is what the shelf's "new chapters" badge and its
-    /// recently-read sort both gate on.
+    /// A book nobody had opened must not come out of the migration looking read: the
+    /// stored position is what the shelf's "new chapters" badge and its recently-read
+    /// sort both gate on.
     func testMigrationLeavesAnUnreadBookUnread() throws {
         let queue = try storeAtV3(lastReadChapterIndex: nil, lastReadOffset: nil)
         try AppDatabase.migrator.migrate(queue)
 
         let book = try XCTUnwrap(LibraryRepo(database: try AppDatabase(queue)).book(id: "demo|1"))
         XCTAssertNil(book.readingPosition)
+        XCTAssertNil(book.lastReadSiteChapterId)
         XCTAssertNil(book.lastReadParagraph)
     }
 
@@ -143,7 +185,14 @@ final class ReadingPositionTests: XCTestCase {
     /// A database as it stood before v4, written through raw SQL: the point is to
     /// migrate rows shaped the way the shipped app shaped them, which the current
     /// `Book` type can no longer express.
-    private func storeAtV3(lastReadChapterIndex: Int?, lastReadOffset: Int?) throws -> DatabaseQueue {
+    ///
+    /// - Parameter chapters: how many chapters the book has indexed, with ids that are
+    ///   deliberately not the numbers they sit at. v6 resolves the stored index against
+    ///   them, so a fixture that stops short of it is a position that cannot be
+    ///   converted — a case worth writing on purpose rather than avoiding.
+    private func storeAtV3(
+        lastReadChapterIndex: Int?, lastReadOffset: Int?, chapters: Int = 10
+    ) throws -> DatabaseQueue {
         let queue = try DatabaseQueue()
         try AppDatabase.migrator.migrate(queue, upTo: "v3.chapterAddedAt")
         try queue.write { db in
@@ -156,6 +205,16 @@ final class ReadingPositionTests: XCTestCase {
                     """,
                 arguments: [lastReadChapterIndex, lastReadOffset]
             )
+            for index in 0..<chapters {
+                try db.execute(
+                    sql: """
+                        INSERT INTO "chapter"
+                        ("id", "bookId", "siteChapterId", "index", "title", "url")
+                        VALUES (?, 'demo|1', ?, ?, '第\(index + 1)章', 'https://demo.test/1/\(index)')
+                        """,
+                    arguments: ["demo|1|c\(index)", "c\(index)", index]
+                )
+            }
         }
         return queue
     }

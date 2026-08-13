@@ -83,7 +83,7 @@ final class LocalBookImportTests: XCTestCase {
         let importer = LocalBookImporter(repo: repo, downloads: downloads, fetcher: WebFetcher())
 
         let first = try await importer.importBook(from: file) { _ in }
-        try repo.updateProgress(bookId: first.id, position: .chapterStart(1))
+        try repo.updateProgress(bookId: first.id, position: .chapterStart("00001"))
         try downloads.delete(.book(first))
         XCTAssertEqual(try downloads.downloadedCount(bookId: first.id), 0)
 
@@ -91,7 +91,7 @@ final class LocalBookImportTests: XCTestCase {
 
         XCTAssertEqual(second.id, first.id)
         XCTAssertEqual(try repo.allBooks().count, 1, "a re-import must not duplicate the book")
-        XCTAssertEqual(second.lastReadChapterIndex, 1, "the reading position must survive")
+        XCTAssertEqual(second.lastReadSiteChapterId, "00001", "the reading position must survive")
         XCTAssertEqual(try downloads.downloadedCount(bookId: second.id), 2, "text restored")
     }
 
@@ -194,7 +194,7 @@ final class LocalBookImportTests: XCTestCase {
         let importer = LocalBookImporter(repo: repo, downloads: downloads, fetcher: WebFetcher())
         let first = try await importer.importBook(from: file) { _ in }
         let position = ReadingPosition(
-            chapterIndex: 7, anchor: TextAnchor(paragraph: 42, characterOffset: 0)
+            siteChapterId: "00007", anchor: TextAnchor(paragraph: 42, characterOffset: 0)
         )
         try repo.updateProgress(bookId: first.id, position: position)
 

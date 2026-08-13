@@ -254,7 +254,7 @@ final class PaginationTests: XCTestCase {
         let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
         let paginator = paginator(paragraphs: longChapter())
         let page = try XCTUnwrap(paginator.pages.indices.first { paginator.anchor(at: $0).characterOffset > 0 })
-        let position = ReadingPosition(chapterIndex: 3, anchor: paginator.anchor(at: page))
+        let position = ReadingPosition(siteChapterId: "3", anchor: paginator.anchor(at: page))
 
         _ = try repo.addReadingBookmark(bookId: book.id, position: position, excerpt: nil)
         let stored = try XCTUnwrap(repo.readingBookmarks(bookId: book.id).first)

@@ -39,10 +39,13 @@ struct ReadingMarksView: View {
     @State private var kind: Kind = .bookmarks
     @State private var bookmarks: [ReadingBookmark] = []
     @State private var highlights: [TextHighlight] = []
-    /// Chapter titles by index, so a row can name its chapter. Read from the stored
+    /// Chapter titles by chapter id, so a row can name its chapter. Read from the stored
     /// catalog rather than denormalised into the mark: a title the site has since
     /// corrected should read correctly here too.
-    @State private var chapterTitles: [Int: String] = [:]
+    ///
+    /// Doubles as the answer to "does this mark still point at anything" — a chapter the
+    /// site has dropped is absent from the catalog, so it is absent from here.
+    @State private var chapterTitles: [String: String] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -76,9 +79,9 @@ struct ReadingMarksView: View {
 
     private var bookmarkRows: some View {
         ForEach(bookmarks) { bookmark in
-            NavigationLink(value: ReadingTarget(book: book, position: bookmark.position)) {
+            NavigationLink(value: target(for: bookmark.position)) {
                 VStack(alignment: .leading, spacing: 4) {
-                    chapterName(bookmark.chapterIndex)
+                    chapterName(bookmark.siteChapterId)
                         .font(.subheadline)
                         .lineLimit(1)
                     // The excerpt is what makes the list readable without opening
@@ -113,7 +116,7 @@ struct ReadingMarksView: View {
 
     private var highlightRows: some View {
         ForEach(highlights) { highlight in
-            NavigationLink(value: ReadingTarget(book: book, position: highlight.position)) {
+            NavigationLink(value: target(for: highlight.position)) {
                 VStack(alignment: .leading, spacing: 4) {
                     // The marked text leads, and the chapter follows it. A highlight is
                     // remembered by what it says, not by where it was; a bookmark is
@@ -122,7 +125,7 @@ struct ReadingMarksView: View {
                     Text(highlight.excerpt)
                         .font(.subheadline)
                         .lineLimit(3)
-                    chapterName(highlight.chapterIndex)
+                    chapterName(highlight.siteChapterId)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     timestamp(highlight.createdAt)
@@ -143,14 +146,27 @@ struct ReadingMarksView: View {
 
     // MARK: - Shared parts
 
-    /// The chapter's own title when the catalog has one, and its number when it does
-    /// not — a mark can outlive a chapter that a catalog refresh dropped, and a row
-    /// with no name at all would be unreadable.
-    private func chapterName(_ index: Int) -> Text {
-        if let title = chapterTitles[index] {
+    /// The chapter's own title, or a note that it is gone — a mark can outlive a chapter
+    /// that a catalog refresh dropped, and a row with no name at all would be
+    /// unreadable. It cannot fall back to a chapter *number*: the number was never
+    /// stored, and the catalog that could work one out no longer has the chapter.
+    private func chapterName(_ siteChapterId: String) -> Text {
+        if let title = chapterTitles[siteChapterId] {
             return Text(title)
         }
-        return Text("bookmarks.chapter \(index + 1)")
+        return Text("marks.chapter.missing")
+    }
+
+    /// Where a row leads, or nil for a mark whose chapter the site has dropped.
+    ///
+    /// Such a mark is kept and shown — the excerpt is the part the reader wrote down,
+    /// and a chapter pulled from a catalog often comes back — but it is not offered as a
+    /// destination: opening it could only land somewhere it does not point at, which is
+    /// the exact failure that made these marks store a chapter id in the first place.
+    /// The swipe to delete stays, so a mark the reader has given up on can still go.
+    private func target(for position: ReadingPosition) -> ReadingTarget? {
+        guard chapterTitles[position.siteChapterId] != nil else { return nil }
+        return ReadingTarget(book: book, position: position)
     }
 
     private func timestamp(_ date: Date) -> some View {
@@ -188,7 +204,7 @@ struct ReadingMarksView: View {
         highlights = (try? env.repo.highlights(bookId: book.id)) ?? []
         chapterTitles = Dictionary(
             uniqueKeysWithValues: ((try? env.repo.chapters(bookId: book.id)) ?? [])
-                .map { ($0.index, $0.title) }
+                .map { ($0.siteChapterId, $0.title) }
         )
     }
 }

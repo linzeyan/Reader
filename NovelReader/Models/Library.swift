@@ -24,11 +24,16 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     var updatedAt: Date
     /// Reading position: which chapter, and where inside it.
     ///
+    /// The chapter is named by the id the site gave it, never by its place in the
+    /// catalog: `Chapter.index` is recomputed by every `replaceCatalog`, so a site
+    /// inserting a chapter mid-book would slide a stored index onto the following
+    /// chapter's text. Reading order is the catalog's to say — see `lastReadIndex(in:)`.
+    ///
     /// Three columns rather than one encoded anchor because SQL has to read the
-    /// chapter index directly — `LibraryRepo.newChapterCounts` compares it against
-    /// every chapter in one grouped query, which a blob would make impossible.
+    /// position directly — `LibraryRepo.newChapterCounts` joins it back to the catalog
+    /// for the whole library in one grouped query, which a blob would make impossible.
     /// `readingPosition` is the shape the rest of the app works in.
-    var lastReadChapterIndex: Int?
+    var lastReadSiteChapterId: String?
     var lastReadParagraph: Int?
     var lastReadCharacterOffset: Int?
     /// When the chapter index was last read from the site. `nil` means the
@@ -58,14 +63,28 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     /// existed knows its chapter and nothing finer, and the top of the right chapter
     /// is the honest answer to that.
     var readingPosition: ReadingPosition? {
-        guard let lastReadChapterIndex else { return nil }
+        guard let lastReadSiteChapterId else { return nil }
         return ReadingPosition(
-            chapterIndex: lastReadChapterIndex,
+            siteChapterId: lastReadSiteChapterId,
             anchor: TextAnchor(
                 paragraph: lastReadParagraph ?? 0,
                 characterOffset: lastReadCharacterOffset ?? 0
             )
         )
+    }
+
+    /// Where the stored position sits in reading order, resolved against a catalog.
+    ///
+    /// The position names a chapter; only the catalog knows what number that chapter
+    /// currently is, which is exactly why the number is not stored. Nil covers both
+    /// "never opened" and "the site dropped the chapter they were in" — neither places
+    /// the reader in the order, and everything that asks treats the two alike.
+    ///
+    /// `LibraryRepo.newChapterCounts` resolves the same thing in SQL, with a join it
+    /// cannot avoid; `NewChapterTests` pins the two answers together.
+    func lastReadIndex(in chapters: [Chapter]) -> Int? {
+        guard let lastReadSiteChapterId else { return nil }
+        return chapters.first { $0.siteChapterId == lastReadSiteChapterId }?.index
     }
 
     static func makeId(siteId: String, siteBookId: String) -> String {
@@ -127,10 +146,15 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     /// reader leaves. More fundamentally, "new" is a claim about recency: a chapter the
     /// site published last month is not news the reader is missing, it is simply a
     /// chapter they have not reached, which their position already tells them.
-    func isNew(in book: Book, now: Date = .now) -> Bool {
+    ///
+    /// - Parameter lastReadIndex: reading order of the chapter the reader left off in,
+    ///   as `Book.lastReadIndex(in:)` resolves it. Nil means they have no place in this
+    ///   catalog — never opened, or the site dropped the chapter they were in — and
+    ///   then every recently added chapter is ahead of them.
+    func isNew(lastReadIndex: Int?, now: Date = .now) -> Bool {
         guard let addedAt, now.timeIntervalSince(addedAt) < Self.newWindow else { return false }
-        guard let lastRead = book.lastReadChapterIndex else { return true }
-        return index > lastRead
+        guard let lastReadIndex else { return true }
+        return index > lastReadIndex
     }
 
     /// How long a chapter stays marked. Shared with the shelf's counting query so the

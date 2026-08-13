@@ -127,14 +127,19 @@ extension LibrarySort {
     /// not "last read", and on its own it would promote a book the reader only
     /// renamed above the one they read last night.
     ///
-    /// The gate is `lastReadChapterIndex`: a book with no stored position has
+    /// The gate is `lastReadSiteChapterId`: a book with no stored position has
     /// never been read, has nothing to be recent about, and drops below every book
     /// that has been — in the shelf's default order, which is the honest fallback.
     /// Storing a true `lastReadAt` would be the precise answer and needs a column;
     /// this is the accurate half of the question answered with what is already
     /// written on every page turn.
+    ///
+    /// The stored chapter id, deliberately, and not whether it still resolves to a
+    /// chapter: a reader whose chapter the site has since dropped has still read this
+    /// book, and only the exact place in it is lost. Resolving would also need a catalog
+    /// per book, which this pure function has no business fetching.
     private func readMoreRecently(_ lhs: Book, _ rhs: Book) -> Bool {
-        switch (lhs.lastReadChapterIndex, rhs.lastReadChapterIndex) {
+        switch (lhs.lastReadSiteChapterId, rhs.lastReadSiteChapterId) {
         case (.some, .none): return true
         case (.none, .some): return false
         case (.some, .some): return (lhs.updatedAt, lhs.id) > (rhs.updatedAt, rhs.id)

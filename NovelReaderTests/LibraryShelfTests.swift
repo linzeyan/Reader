@@ -47,7 +47,7 @@ final class LibraryShelfTests: XCTestCase {
     /// bumped by a rename and by a catalog refresh too, so an untouched-but-renamed
     /// book would sit above the novel the reader was in last night.
     func testRecentlyReadKeepsUnreadBooksBelowReadOnes() {
-        let read = read(book(id: "read", title: "讀過", updatedAt: day(1)), atChapter: 3)
+        let read = read(book(id: "read", title: "讀過", updatedAt: day(1)), atChapter: "3")
         // Renamed a moment ago and never opened: the most recently *touched* book,
         // and the one that must not be at the top.
         let neverOpened = book(id: "unread", title: "沒讀過", updatedAt: day(9))
@@ -58,8 +58,8 @@ final class LibraryShelfTests: XCTestCase {
     }
 
     func testRecentlyReadOrdersReadBooksByWhenProgressWasRecorded() {
-        let older = read(book(id: "older", title: "舊", updatedAt: day(2)), atChapter: 1)
-        let newer = read(book(id: "newer", title: "新", updatedAt: day(7)), atChapter: 1)
+        let older = read(book(id: "older", title: "舊", updatedAt: day(2)), atChapter: "1")
+        let newer = read(book(id: "newer", title: "新", updatedAt: day(7)), atChapter: "1")
 
         let sorted = LibrarySort.recentlyRead.applied(to: [older, newer]).map(\.id)
 
@@ -207,7 +207,7 @@ final class LibraryShelfTests: XCTestCase {
         Book(
             id: id, siteId: "alpha", siteBookId: id, title: title, displayName: nil,
             author: nil, coverURL: nil, addedAt: addedAt, updatedAt: updatedAt,
-            lastReadChapterIndex: nil, lastReadParagraph: nil,
+            lastReadSiteChapterId: nil, lastReadParagraph: nil,
             lastReadCharacterOffset: nil, catalogUpdatedAt: nil
         )
     }
@@ -215,9 +215,13 @@ final class LibraryShelfTests: XCTestCase {
     /// Mirrors what `LibraryRepo.updateProgress` writes: a position *and* a bumped
     /// `updatedAt`. Both halves matter — the position is what the sort gates on and
     /// the timestamp is what it then orders by.
-    private func read(_ book: Book, atChapter index: Int) -> Book {
+    ///
+    /// A chapter id rather than a number, because that is what a stored position is: the
+    /// shelf's gate is "has this book been read at all", which needs no catalog to
+    /// answer and must keep working for a book whose chapter the site has dropped.
+    private func read(_ book: Book, atChapter siteChapterId: String) -> Book {
         var read = book
-        read.lastReadChapterIndex = index
+        read.lastReadSiteChapterId = siteChapterId
         read.lastReadParagraph = 0
         read.lastReadCharacterOffset = 0
         return read
