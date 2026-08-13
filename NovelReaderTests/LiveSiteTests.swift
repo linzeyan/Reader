@@ -101,7 +101,10 @@ final class LiveSiteTests: XCTestCase {
         let manager = DownloadManager(
             service: service,
             downloads: DownloadStore(database: database, files: files),
-            pacer: RequestPacer(gap: 0.2...0.4)
+            pacer: RequestPacer(gap: 0.2...0.4),
+            queueStore: DownloadQueueStore(
+                url: URL.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+            )
         )
 
         let discovered = try await discoverBookId(rule: rule, fetcher: fetcher)

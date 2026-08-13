@@ -27,12 +27,15 @@ final class AppEnvironment {
     let librarySettings: LibrarySettings
     let localImporter: LocalBookImporter
     let backgroundDownloads: BackgroundDownloads
+    /// Owned but not exposed: nothing on screen asks about a queue read back from
+    /// disk, it simply appears as the paused download it was when the app died.
+    private let queueRestorer: DownloadQueueRestorer
 
     /// The environment the running app is using, for the one caller that cannot be
     /// handed it: `BGTaskScheduler`'s launch handler is registered before any view
     /// exists and can fire without one ever existing. Weak on purpose — a
-    /// background launch with no scene must report a lost queue rather than build
-    /// a second object graph nobody owns.
+    /// background launch with no scene must hand the window back rather than build
+    /// a second object graph nobody owns, on top of a database the real one holds.
     private(set) static weak var live: AppEnvironment?
 
     /// The library, kept here so every screen sees the same list without each one
@@ -71,7 +74,8 @@ final class AppEnvironment {
     init(
         database: AppDatabase,
         files: ChapterFileStore,
-        sites: SiteStore
+        sites: SiteStore,
+        queueStore: DownloadQueueStore
     ) {
         self.database = database
         self.files = files
@@ -87,7 +91,7 @@ final class AppEnvironment {
         let pacer = RequestPacer()
         self.pacer = pacer
         let downloader = DownloadManager(
-            service: bookService, downloads: self.downloads, pacer: pacer
+            service: bookService, downloads: self.downloads, pacer: pacer, queueStore: queueStore
         )
         self.downloader = downloader
         self.localImporter = LocalBookImporter(
@@ -99,14 +103,27 @@ final class AppEnvironment {
         let downloadSettings = DownloadSettings()
         self.downloadSettings = downloadSettings
         self.librarySettings = LibrarySettings()
-        self.backgroundDownloads = BackgroundDownloads(
+        let backgroundDownloads = BackgroundDownloads(
             downloader: downloader,
             settings: downloadSettings,
             connection: { monitor.connection }
         )
+        self.backgroundDownloads = backgroundDownloads
+        self.queueRestorer = DownloadQueueRestorer(
+            store: queueStore,
+            downloader: downloader,
+            repo: repo,
+            settings: downloadSettings,
+            record: backgroundDownloads,
+            rule: { sites.rule(id: $0) },
+            connection: { monitor.connection }
+        )
         self.cloud.onRemoteChange = { [weak self] in self?.reloadLibrary() }
-        monitor.onChange = { [weak self] _ in self?.enforceNetworkPolicy() }
+        monitor.onChange = { [weak self] _ in self?.networkChanged() }
         reloadLibrary()
+        // Last, because a queue read back from disk points into the library and may
+        // start fetching straight away: everything it touches has to exist first.
+        queueRestorer.restore()
     }
 
     static func makeShared() -> AppEnvironment {
@@ -130,13 +147,21 @@ final class AppEnvironment {
             return AppEnvironment(
                 database: try AppDatabase.makeShared(),
                 files: try ChapterFileStore.makeShared(),
-                sites: try SiteStore.makeShared()
+                sites: try SiteStore.makeShared(),
+                queueStore: try DownloadQueueStore.makeShared()
             )
         } catch {
+            // The queue file goes to the temporary directory along with everything
+            // else here. A real saved queue points into the real library, and this
+            // fallback has an empty in-memory one — restoring into it would drop
+            // the queue for "the book no longer exists" and lose it for good.
             let fallback = AppEnvironment(
                 database: try! AppDatabase.makeInMemory(),
                 files: ChapterFileStore(root: URL.temporaryDirectory.appendingPathComponent("Chapters")),
-                sites: SiteStore(directory: URL.temporaryDirectory.appendingPathComponent("Rules"))
+                sites: SiteStore(directory: URL.temporaryDirectory.appendingPathComponent("Rules")),
+                queueStore: DownloadQueueStore(
+                    url: URL.temporaryDirectory.appendingPathComponent("DownloadQueue.json")
+                )
             )
             fallback.banner = error.localizedDescription
             return fallback
@@ -396,6 +421,17 @@ final class AppEnvironment {
         guard backgroundAssertion != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundAssertion)
         backgroundAssertion = .invalid
+    }
+
+    /// One entry point for a path report, because two separate things wait on it.
+    ///
+    /// The restored queue goes first: at launch there is no report yet, so the
+    /// decision about whether a queue read off disk may run is still outstanding,
+    /// and it is the one this call can settle. The policy check that follows only
+    /// ever *stops* a queue, so it cannot be starved by going second.
+    private func networkChanged() {
+        queueRestorer.connectionChanged()
+        enforceNetworkPolicy()
     }
 
     /// Walking out of the house mid-download must not keep spending data under a

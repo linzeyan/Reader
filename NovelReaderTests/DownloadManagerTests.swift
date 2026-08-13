@@ -12,7 +12,14 @@ final class DownloadManagerTests: XCTestCase {
         return DownloadManager(
             service: BookService(fetcher: WebFetcher(), repo: LibraryRepo(database: database)),
             downloads: DownloadStore(database: database, files: files),
-            pacer: RequestPacer()
+            pacer: RequestPacer(),
+            // Its own file per manager: these cases mutate a queue that now writes
+            // itself to disk, and a shared path would let one case's queue be read
+            // back by the next. What that file is *for* is pinned in
+            // `DownloadQueuePersistenceTests`.
+            queueStore: DownloadQueueStore(
+                url: URL.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+            )
         )
     }
 

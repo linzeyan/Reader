@@ -212,16 +212,17 @@ final class BackgroundDownloadTests: XCTestCase {
         XCTAssertEqual(reloaded.lastRun?.outcome, .blockedByPolicy)
     }
 
-    /// A window that arrives after iOS has terminated the app finds no queue,
-    /// because the queue lived in that process. Recording it is the whole point:
-    /// it is the observation that would justify keeping the queue on disk, and
-    /// without it the case is indistinguishable from "the window never came".
+    /// A window that arrives after iOS has terminated the app lands in a process
+    /// with no scene, and so with no object graph and no windowed web view to fetch
+    /// through. The queue itself survives on disk, so what has to be recorded is
+    /// that the window was unusable — otherwise this is indistinguishable from "the
+    /// window never came", and those call for opposite reactions.
     func testAWindowThatOutlivesTheProcessSaysSoRatherThanNothing() throws {
-        BackgroundDownloads.recordQueueLost(defaults: defaults)
+        BackgroundDownloads.recordDeferredToLaunch(defaults: defaults)
 
         let harness = try makeHarness(policy: .wifiOnly, connection: .wifi)
 
-        XCTAssertEqual(harness.background.lastRun?.outcome, .queueLost)
+        XCTAssertEqual(harness.background.lastRun?.outcome, .deferredToLaunch)
     }
 
     // MARK: - Harness
@@ -243,7 +244,10 @@ final class BackgroundDownloadTests: XCTestCase {
         let downloader = DownloadManager(
             service: BookService(fetcher: WebFetcher(), repo: LibraryRepo(database: database)),
             downloads: DownloadStore(database: database, files: files),
-            pacer: RequestPacer()
+            pacer: RequestPacer(),
+            queueStore: DownloadQueueStore(
+                url: URL.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+            )
         )
         let settings = DownloadSettings(defaults: defaults)
         settings.network = policy
