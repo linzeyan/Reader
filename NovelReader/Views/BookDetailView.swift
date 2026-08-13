@@ -10,7 +10,13 @@ struct BookDetailView: View {
     @State private var chapters: [Chapter] = []
     @State private var isRefreshing = false
     @State private var query = ""
-    @State private var isExporting = false
+    /// 0…1 while an export runs, nil otherwise — so it doubles as "busy", the
+    /// same way the library's import banner works.
+    @State private var exportProgress: Double?
+    /// The export in flight, held so the banner's cancel button has something to
+    /// pull. At most one: the menu that starts an export is replaced by its own
+    /// progress indicator while one is running.
+    @State private var exportTask: Task<Void, Never>?
     /// The format waiting for the user to accept that the file will be
     /// incomplete. Non-nil only while that question is on screen.
     @State private var partialFormat: BookExporter.Format?
@@ -98,7 +104,7 @@ struct BookDetailView: View {
             // not depend on whether that happens first.
             presenting: partialFormat
         ) { format in
-            Button("book.export.partial.confirm") { Task { await runExport(format) } }
+            Button("book.export.partial.confirm") { startExport(format) }
             Button("common.cancel", role: .cancel) {}
         }
         .fileExporter(
@@ -108,8 +114,14 @@ struct BookDetailView: View {
             defaultFilename: pendingExport?.filename
         ) { result in
             if case .failure(let error) = result { env.report(error) }
+            // The book was written to a temporary file so it never had to sit in
+            // memory; the save sheet has taken its own copy by now, so the
+            // temporary one is only wasted space from here on.
+            if let url = pendingExport?.url { try? FileManager.default.removeItem(at: url) }
             pendingExport = nil
         }
+        .overlay(alignment: .top) { exportBanner }
+        .animation(.snappy, value: exportProgress == nil)
         .task { await loadChapters() }
     }
 
@@ -188,7 +200,7 @@ struct BookDetailView: View {
     /// moment rescuing the text that is still on the device matters most.
     @ViewBuilder
     private var exportMenu: some View {
-        if isExporting {
+        if exportProgress != nil {
             ProgressView()
         } else {
             Menu {
@@ -219,6 +231,26 @@ struct BookDetailView: View {
 
     private var exportBinding: Binding<Bool> {
         Binding(get: { pendingExport != nil }, set: { if !$0 { pendingExport = nil } })
+    }
+
+    /// The same banner an import gets, for the same reason: writing out a
+    /// thirteen-hundred-chapter novel is a minute of the app doing one thing, so
+    /// it has to say how far along it is and it has to offer a way out.
+    @ViewBuilder
+    private var exportBanner: some View {
+        if let exportProgress {
+            HStack(spacing: 14) {
+                ProgressView(value: exportProgress) { Text("book.export.working") }
+                Button("common.cancel") { exportTask?.cancel() }
+                    .accessibilityIdentifier("book.export.cancel")
+            }
+            .font(.footnote)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.bar, in: .rect(cornerRadius: 12))
+            .padding(.horizontal)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
     }
 
     @ViewBuilder
@@ -258,19 +290,35 @@ struct BookDetailView: View {
         if downloadedCount < chapters.count {
             partialFormat = format
         } else {
-            Task { await runExport(format) }
+            startExport(format)
         }
     }
 
+    /// Wrapped in a task rather than awaited straight from the button so the
+    /// banner's cancel button has a handle to pull — the same shape
+    /// `AppEnvironment.importLocalBook` uses for the import.
+    private func startExport(_ format: BookExporter.Format) {
+        exportTask = Task { await runExport(format) }
+    }
+
     /// `BookExporter` is not main-actor bound, so the reads and the deflate pass
-    /// leave this actor on their own; only the state around them is set here.
+    /// leave this actor on their own; only the state around them is set here —
+    /// explicitly, because the progress callback comes back to this actor from
+    /// wherever the export happens to be running.
+    @MainActor
     private func runExport(_ format: BookExporter.Format) async {
         partialFormat = nil
-        isExporting = true
-        defer { isExporting = false }
+        exportProgress = 0
+        defer {
+            exportProgress = nil
+            exportTask = nil
+        }
         do {
             pendingExport = try await BookExporter(downloads: env.downloads)
-                .export(book: current, chapters: chapters, format: format)
+                .export(book: current, chapters: chapters, format: format) { exportProgress = $0 }
+        } catch is CancellationError {
+            // Stopping was the user's own decision, and the banner going away is
+            // the answer. An error banner would read as the export having broken.
         } catch {
             env.report(error)
         }
@@ -317,7 +365,7 @@ struct BookDetailView: View {
     }
 }
 
-/// The bytes an export produced, in the shape `fileExporter` wants.
+/// The file an export produced, in the shape `fileExporter` wants.
 ///
 /// `fileExporter` rather than a `ShareLink`: a share link needs its file to exist
 /// when the button is *drawn*, which would mean writing out a whole novel every
@@ -325,21 +373,57 @@ struct BookDetailView: View {
 /// presents can still hand the file to another app, and it is what "export" means
 /// here — a file the user files away, not a message they send.
 ///
+/// Carries a URL rather than the bytes. A novel is megabytes, the save sheet can
+/// stay open for a while, and there is nothing for those bytes to do in the
+/// meantime.
+///
 /// Write-only. The app already reads these files, through `LocalBookImporter`, and
 /// a second way in would be a second thing to keep correct.
 struct BookExportDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.plainText, .epub] }
 
-    private let data: Data
+    private let url: URL
 
-    init(_ export: BookExporter.Export) { data = export.data }
+    init(_ export: BookExporter.Export) { url = export.url }
 
     init(configuration: ReadConfiguration) throws {
         throw CocoaError(.fileReadUnsupportedScheme)
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
+        try ExportedFileWrapper(copying: url)
+    }
+}
+
+/// A file wrapper that puts the export where it is asked to by copying the file.
+///
+/// `FileWrapper`'s own `write` reads the whole file into memory to write it out
+/// again, which is exactly what streaming the export to disk was meant to avoid.
+/// A filesystem copy is a clone on APFS and a streamed copy anywhere else.
+///
+/// Backed by the URL rather than by data, so that a caller which ignores this
+/// override still writes the right bytes — just the slow way.
+private final class ExportedFileWrapper: FileWrapper {
+    private let source: URL
+
+    init(copying source: URL) throws {
+        self.source = source
+        try super.init(url: source, options: [])
+    }
+
+    required init?(coder: NSCoder) {
+        // Never archived: this wrapper exists only between building the file and
+        // the save sheet writing it out.
+        return nil
+    }
+
+    override func write(
+        to url: URL, options: FileWrapper.WritingOptions = [], originalContentsURL: URL?
+    ) throws {
+        // `copyItem` refuses to overwrite, and the save sheet has already created
+        // the destination by the time it asks for the contents.
+        try? FileManager.default.removeItem(at: url)
+        try FileManager.default.copyItem(at: source, to: url)
     }
 }
 

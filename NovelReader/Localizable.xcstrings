@@ -5304,6 +5304,30 @@
           }
         }
       }
+    },
+    "book.export.working": {
+      "comment": "Shown while a book is being written out as a file.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exporting…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在导出…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在匯出…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
