@@ -156,10 +156,12 @@ struct BookExporter {
     /// what makes the file readable in anything else.
     ///
     /// One limitation is inherent and deliberate: a chapter title the parser's
-    /// heading pattern does not recognise (a part number, an English chapter name)
-    /// comes back as the first line of the body rather than as a title. The only
-    /// fix would be a marker of our own invention, which would make the file worse
-    /// for every reader that is not this app.
+    /// heading pattern does not recognise comes back as the first line of the body
+    /// rather than as a title. The shapes it knows have grown — numbered Chinese
+    /// units, English chapter and part numbers, the unnumbered names — but a site
+    /// is free to title a chapter anything at all, and the only complete fix would
+    /// be a marker of our own invention, which would make the file worse for every
+    /// reader that is not this app.
     private func writeText(
         to url: URL, book: Book, chapters: [Chapter], progress: @escaping ProgressHandler
     ) async throws -> Int {
