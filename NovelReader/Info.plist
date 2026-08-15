@@ -62,6 +62,17 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Required once CFBundleDocumentTypes exists (ITMS-90737): a document app
+	     must say whether it can read the file where it lives. Yes, and not because
+	     it is the recommended answer — the import path was already written that
+	     way. LocalBookImporter takes security-scoped access before reading, and
+	     RootView deletes only copies inside our own Documents/Inbox, so a file
+	     opened in place is read once and left alone. The alternative would have
+	     iOS duplicate a whole novel into that inbox for us to delete afterwards.
+	     UISupportsDocumentBrowser stays absent: there is no
+	     UIDocumentBrowserViewController here, only "open with 書房". -->
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<!-- User-supplied sources are arbitrary third-party sites, some of which are
 	     still HTTP-only. The exception is scoped to WebView content: the app makes
 	     no direct URLSession calls to those hosts. -->
