@@ -1297,6 +1297,30 @@
         }
       }
     },
+    "library.copyLink": {
+      "comment": "Shelf row context menu: copy the URL the book came from.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Link"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制原始网址"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製原始網址"
+          }
+        }
+      }
+    },
     "library.empty.books": {
       "comment": "Empty library, but sources exist.",
       "extractionState": "manual",

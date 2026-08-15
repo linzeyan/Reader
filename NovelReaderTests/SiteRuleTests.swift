@@ -86,6 +86,40 @@ final class SiteRuleTests: XCTestCase {
         XCTAssertFalse(rule.matches(URL(string: "https://example.com/book/1.htm")!))
     }
 
+    /// The shelf offers "copy link" so a reader can open the book where it lives
+    /// or send it to someone. What it copies has to be the same page the app
+    /// itself fetches, and it has to be absent — not wrong — where no page exists.
+    @MainActor
+    func testSourceURLIsOfferedOnlyWhereThereIsOne() throws {
+        let store = SiteStore(
+            directory: URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("NovelReaderTests-\(UUID().uuidString)")
+        )
+        try store.importRule(data: Data(Self.sampleJSON.utf8))
+
+        let bookmarked = makeBook(siteId: "69shuba", siteBookId: "90442")
+        XCTAssertEqual(
+            store.sourceURL(of: bookmarked),
+            URL(string: "https://www.69shuba.com/book/90442.htm")
+        )
+
+        // An imported file was never on the web, and a bookmark whose rule has
+        // been removed has no template left to rebuild from. Inventing an address
+        // for either is worse than offering nothing.
+        XCTAssertNil(store.sourceURL(of: makeBook(siteId: Book.localSiteId, siteBookId: "sha512")))
+        XCTAssertNil(store.sourceURL(of: makeBook(siteId: "uninstalled", siteBookId: "1")))
+    }
+
+    private func makeBook(siteId: String, siteBookId: String) -> Book {
+        Book(
+            id: Book.makeId(siteId: siteId, siteBookId: siteBookId),
+            siteId: siteId, siteBookId: siteBookId, title: "t", displayName: nil,
+            author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
+            lastReadSiteChapterId: nil, lastReadParagraph: nil,
+            lastReadCharacterOffset: nil, catalogUpdatedAt: nil
+        )
+    }
+
     /// The generated script is what actually runs in the page, so a rule whose
     /// selectors never reach the JS would fail silently at runtime.
     func testGeneratedScriptsCarryTheRuleSelectors() throws {

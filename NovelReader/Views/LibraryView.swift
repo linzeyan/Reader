@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// Requirement 3: bookmarks, grouped per source.
@@ -209,36 +210,68 @@ struct LibraryView: View {
     @ViewBuilder
     private func rows(_ books: [Book]) -> some View {
         ForEach(books) { book in
-            NavigationLink(value: book) {
-                BookRow(
-                    book: book,
-                    newChapterCount: env.newChapterCounts[book.id] ?? 0,
-                    lastReadIndex: env.lastReadChapterIndexes[book.id]
-                )
-            }
-            .accessibilityIdentifier("library.book")
-            .swipeActions(edge: .trailing) {
-                Button(role: .destructive) {
-                    // A bookmark can be recreated and its chapters downloaded
-                    // again; an imported file cannot. The ask is only for the
-                    // case that is unrecoverable.
-                    if book.isLocal {
-                        confirmingLocalDelete = book
-                    } else {
-                        env.removeBookmark(book)
-                    }
-                } label: {
-                    Label("common.delete", systemImage: "trash")
-                }
-                Button {
-                    draftName = book.displayName ?? ""
-                    renaming = book
-                } label: {
-                    Label("library.rename", systemImage: "pencil")
-                }
-                .tint(.indigo)
+            // The menu is attached only where it would have something in it. A
+            // `contextMenu` whose body evaluates to nothing still opens on a long
+            // press — as an empty grey card — and that is the answer an imported
+            // book, or one whose source has been removed, would give.
+            if let source = env.sites.sourceURL(of: book) {
+                row(book).contextMenu { copyLinkButton(source) }
+            } else {
+                row(book)
             }
         }
+    }
+
+    private func row(_ book: Book) -> some View {
+        NavigationLink(value: book) {
+            BookRow(
+                book: book,
+                newChapterCount: env.newChapterCounts[book.id] ?? 0,
+                lastReadIndex: env.lastReadChapterIndexes[book.id]
+            )
+        }
+        .accessibilityIdentifier("library.book")
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                // A bookmark can be recreated and its chapters downloaded
+                // again; an imported file cannot. The ask is only for the
+                // case that is unrecoverable.
+                if book.isLocal {
+                    confirmingLocalDelete = book
+                } else {
+                    env.removeBookmark(book)
+                }
+            } label: {
+                Label("common.delete", systemImage: "trash")
+            }
+            Button {
+                draftName = book.displayName ?? ""
+                renaming = book
+            } label: {
+                Label("library.rename", systemImage: "pencil")
+            }
+            .tint(.indigo)
+        }
+    }
+
+    /// Hands back the address the book came from, for pasting into a browser or
+    /// sending to someone.
+    ///
+    /// A long press rather than a third swipe action: the two already there are
+    /// the ones that change the shelf, and a row on a narrow phone has no room
+    /// for a button nobody presses in a hurry. Copied as a plain string, because
+    /// the places it is going — an address bar, a message — read text.
+    ///
+    /// No confirmation is shown. The only banner this app has is the red error
+    /// one, and copying is the system-wide gesture whose result the user can see
+    /// by pasting.
+    private func copyLinkButton(_ url: URL) -> some View {
+        Button {
+            UIPasteboard.general.string = url.absoluteString
+        } label: {
+            Label("library.copyLink", systemImage: "link")
+        }
+        .accessibilityIdentifier("library.copyLink")
     }
 
     private var emptyState: some View {

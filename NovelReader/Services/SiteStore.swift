@@ -70,6 +70,19 @@ final class SiteStore {
     /// Which installed rule can read this URL — the entry point for "paste a link".
     func rule(matching url: URL) -> SiteRule? { rules.first { $0.matches(url) } }
 
+    /// The page a bookmarked book was read from.
+    ///
+    /// Rebuilt from the rule's template rather than stored on the book: a book
+    /// only ever knew its source id and the id that source gave it, and the
+    /// template is the one place that says how those become a URL. So the two
+    /// books that cannot answer are the two that have no template — one imported
+    /// from a file, which was never on the web, and one whose rule the user has
+    /// removed. Both get nil rather than a guessed address.
+    func sourceURL(of book: Book) -> URL? {
+        guard !book.isLocal else { return nil }
+        return rule(id: book.siteId)?.bookURL(bookId: book.siteBookId)
+    }
+
     /// What to call a source on screen.
     ///
     /// `Book.localSiteId` is named here because it has no rule file and never
