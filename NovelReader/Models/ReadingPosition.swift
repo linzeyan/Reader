@@ -48,6 +48,31 @@ extension TextAnchor {
         paragraph <= 0 ? chapterId : Self.paragraphID(chapterId: chapterId, paragraph: paragraph)
     }
 
+    /// How far into a chapter this anchor sits, as a share of its text.
+    ///
+    /// Measured in UTF-16 units over the paragraphs themselves — the unit the offset is
+    /// already stored in — so it means the same thing at every type size, which neither a
+    /// scroll distance nor a page number does. Separators between paragraphs are not
+    /// counted: how the text is joined is a property of the renderer, not of the chapter.
+    ///
+    /// Computed while the chapter is on screen and then stored, because the screens that
+    /// want it hold no text: turning a paragraph index into a share needs the chapter,
+    /// and the shelf has only the book row.
+    ///
+    /// Clamped rather than trusted, for the same reason `landingAnchor` clamps: a chapter
+    /// refetched from the site can come back shorter than when the position was recorded,
+    /// and an anchor past its end has read all of it.
+    func fraction(in paragraphs: [String]) -> Double {
+        let lengths = paragraphs.map { ($0 as NSString).length }
+        let total = lengths.reduce(0, +)
+        guard total > 0 else { return 0 }
+        let before = lengths.prefix(max(0, paragraph)).reduce(0, +)
+        let inside = lengths.indices.contains(paragraph)
+            ? min(max(characterOffset, 0), lengths[paragraph])
+            : 0
+        return min(1, Double(before + inside) / Double(total))
+    }
+
     /// A short lead-in from the anchored paragraph, for a list that has to say
     /// *where* a saved position points without opening the chapter.
     ///

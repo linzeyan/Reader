@@ -57,7 +57,7 @@ final class DownloadManagerTests: XCTestCase {
             id: "book", siteId: "demo", siteBookId: "1", title: "t", displayName: nil,
             author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
-            lastReadCharacterOffset: nil, catalogUpdatedAt: nil
+            lastReadCharacterOffset: nil, lastReadFraction: nil, catalogUpdatedAt: nil
         )
     }
 

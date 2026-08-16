@@ -208,7 +208,7 @@ final class LibraryShelfTests: XCTestCase {
             id: id, siteId: "alpha", siteBookId: id, title: title, displayName: nil,
             author: nil, coverURL: nil, addedAt: addedAt, updatedAt: updatedAt,
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
-            lastReadCharacterOffset: nil, catalogUpdatedAt: nil
+            lastReadCharacterOffset: nil, lastReadFraction: nil, catalogUpdatedAt: nil
         )
     }
 

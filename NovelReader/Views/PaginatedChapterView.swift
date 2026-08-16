@@ -116,7 +116,10 @@ struct PaginatedChapterView: View {
     /// precision — see `ChapterPaginator.offset(at:onPage:)` for why the scrolling
     /// renderer can only mark a paragraph whole.
     let highlights: [TextHighlight]
-    let onAnchorChange: (TextAnchor) -> Void
+    /// Where the page begins, and how much of the chapter it ends on — the second is
+    /// handed over rather than recomputed by the caller because only this view knows
+    /// where its pages break. See `report(page:)`.
+    let onAnchorChange: (TextAnchor, Double) -> Void
     let onTapCenter: () -> Void
     let onTurnPast: (PageEdge) -> Void
     let onHighlight: (TextSelection) -> Void
@@ -419,7 +422,7 @@ struct PaginatedChapterView: View {
         edgeHold = EdgeHold(turn: turn, since: now)
         let page = turn == .forward ? pageIndex + 1 : pageIndex - 1
         pageIndex = page
-        onAnchorChange(paginator.anchor(at: page))
+        report(page: page)
         return page
     }
 
@@ -488,17 +491,31 @@ struct PaginatedChapterView: View {
             .accessibilityLabel(Text("reader.progress \(figure)"))
     }
 
-    /// How far the end of the current page is through the chapter.
+    private var fractionRead: Double { fraction(atPage: pageIndex) }
+
+    /// How far the end of a page is through the chapter.
     ///
     /// Measured to the end of the page rather than its start, so the last page reads as
     /// the whole chapter instead of stopping short of it. Rounded down, because "100%"
     /// with text still to come would be the one number the reader could catch out.
-    private var fractionRead: Double {
-        guard let paginator, paginator.pages.indices.contains(pageIndex) else { return 0 }
+    private func fraction(atPage page: Int) -> Double {
+        guard let paginator, paginator.pages.indices.contains(page) else { return 0 }
         let total = paginator.text.attributed.length
         guard total > 0 else { return 0 }
-        let read = Double(NSMaxRange(paginator.pages[pageIndex].range)) / Double(total)
+        let read = Double(NSMaxRange(paginator.pages[page].range)) / Double(total)
         return min(1, (read * 100).rounded(.down) / 100)
+    }
+
+    /// Tells the reader view where a page starts and how far it reaches.
+    ///
+    /// One call with both, because the anchor and the share answer different questions
+    /// about the same page: the anchor is where to come back to, the share is what the
+    /// reader was just looking at. Recomputing the share from the anchor upstream would
+    /// measure to the *start* of the page and store a couple of percent less than the
+    /// page displayed — a difference the shelf would show.
+    private func report(page: Int) {
+        guard let paginator else { return }
+        onAnchorChange(paginator.anchor(at: page), fraction(atPage: page))
     }
 
     // MARK: - Paging
@@ -529,7 +546,7 @@ struct PaginatedChapterView: View {
             pageTransition += 1
             pageIndex = target
         }
-        onAnchorChange(paginator.anchor(at: target))
+        report(page: target)
     }
 
     // MARK: - Measuring
@@ -575,7 +592,7 @@ struct PaginatedChapterView: View {
             next.paginateAll()
             pageIndex = max(0, next.pages.count - 1)
         }
-        onAnchorChange(next.anchor(at: pageIndex))
+        report(page: pageIndex)
     }
 }
 

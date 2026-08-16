@@ -36,6 +36,15 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     var lastReadSiteChapterId: String?
     var lastReadParagraph: Int?
     var lastReadCharacterOffset: Int?
+    /// How far into that chapter the position sits, 0…1, as `TextAnchor.fraction(in:)`
+    /// measured it when the chapter was on screen.
+    ///
+    /// Stored rather than derived because deriving it needs the chapter's text: the shelf
+    /// draws a row per book and holds none. Nil for a position recorded before this
+    /// existed, and for one restored from another device that has not been read here
+    /// since — both mean "which chapter, and nothing finer", which is what every screen
+    /// showed before the column existed.
+    var lastReadFraction: Double?
     /// When the chapter index was last read from the site. `nil` means the
     /// catalog has never been fetched — which is not the same as "it is stale",
     /// and the two lead to very different screens.

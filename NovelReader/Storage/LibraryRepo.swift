@@ -36,7 +36,7 @@ struct LibraryRepo {
                 displayName: nil, author: author, coverURL: coverURL,
                 addedAt: now, updatedAt: now,
                 lastReadSiteChapterId: nil, lastReadParagraph: nil,
-                lastReadCharacterOffset: nil, catalogUpdatedAt: nil
+                lastReadCharacterOffset: nil, lastReadFraction: nil, catalogUpdatedAt: nil
             )
             try book.insert(db)
             return book
@@ -77,12 +77,23 @@ struct LibraryRepo {
         try writer.read { db in try Book.fetchOne(db, key: id) }
     }
 
-    func updateProgress(bookId: String, position: ReadingPosition, now: Date = Date()) throws {
+    /// - Parameter fraction: how far into that chapter the anchor sits, when the caller
+    ///   had the text to measure it against. Nil writes nil rather than keeping the
+    ///   previous number: a share left over from the last chapter would be read as
+    ///   belonging to this one. The only caller with no text is an incoming iCloud
+    ///   record, and the device that owns the position re-publishes the share with it.
+    func updateProgress(
+        bookId: String,
+        position: ReadingPosition,
+        fraction: Double? = nil,
+        now: Date = Date()
+    ) throws {
         try writer.write { db in
             guard var book = try Book.fetchOne(db, key: bookId) else { return }
             book.lastReadSiteChapterId = position.siteChapterId
             book.lastReadParagraph = position.anchor.paragraph
             book.lastReadCharacterOffset = position.anchor.characterOffset
+            book.lastReadFraction = fraction
             book.updatedAt = now
             try book.update(db)
         }

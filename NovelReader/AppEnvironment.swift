@@ -308,8 +308,20 @@ final class AppEnvironment {
         reloadLibrary()
     }
 
-    func recordProgress(book: Book, position: ReadingPosition) {
-        try? repo.updateProgress(bookId: book.id, position: position)
+    /// - Parameters:
+    ///   - fraction: how far into the chapter, measured against the text the reader had
+    ///     on screen. See `Book.lastReadFraction`.
+    ///   - publish: whether the rest of the app hears about it as well. The row is always
+    ///     written; refreshing the shelf and pushing to iCloud are what a reader mid-page
+    ///     does not need, and doing both every few seconds would re-query every book and
+    ///     its new-chapter counts behind a screen nobody is looking at. The writes that
+    ///     end a reading session — a chapter change, leaving, going to the background —
+    ///     publish, and that is when the shelf is about to be looked at anyway.
+    func recordProgress(
+        book: Book, position: ReadingPosition, fraction: Double?, publish: Bool
+    ) {
+        try? repo.updateProgress(bookId: book.id, position: position, fraction: fraction)
+        guard publish else { return }
         reloadLibrary()
         if let updated = books.first(where: { $0.id == book.id }) { cloud.push(updated) }
     }

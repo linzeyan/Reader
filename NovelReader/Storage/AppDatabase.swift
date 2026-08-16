@@ -326,6 +326,24 @@ final class AppDatabase {
             )
         }
 
+        // How far into the chapter the stored position sits, as a share of its text.
+        //
+        // A column rather than something the shelf derives: turning a paragraph index
+        // into a share needs the chapter's text, and the shelf holds a row per book and
+        // no text at all. So the reader — the one place that has the chapter open —
+        // writes the number down alongside the anchor it belongs to.
+        //
+        // Nullable and deliberately not backfilled. The text of a chapter read online is
+        // held nowhere on the device, so for most existing positions there is no
+        // denominator to divide by, and a share guessed from the paragraph index alone
+        // would be a number with no chapter behind it. Null means what the shelf said
+        // before this column existed: which chapter, and nothing finer.
+        migrator.registerMigration("v7.readingShare") { db in
+            try db.alter(table: Book.databaseTableName) { t in
+                t.add(column: "lastReadFraction", .double)
+            }
+        }
+
         return migrator
     }
 }

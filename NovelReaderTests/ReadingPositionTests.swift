@@ -70,6 +70,38 @@ final class ReadingPositionTests: XCTestCase {
         XCTAssertEqual(excerpt, String(repeating: "字", count: 10) + "…")
     }
 
+    // MARK: - How far into the chapter
+
+    /// The share exists because "chapter 12" is not an answer to "how far in are you".
+    /// It is measured in the unit the offset is already stored in, so a reader who
+    /// changes type size mid-chapter does not watch their progress move.
+    func testTheShareCountsTheTextBeforeTheAnchor() {
+        // Ten UTF-16 units per paragraph, so the arithmetic is checkable by eye.
+        let paragraphs = [String(repeating: "字", count: 10), String(repeating: "字", count: 10)]
+        XCTAssertEqual(TextAnchor.start.fraction(in: paragraphs), 0)
+        XCTAssertEqual(TextAnchor(paragraph: 1, characterOffset: 0).fraction(in: paragraphs), 0.5)
+        XCTAssertEqual(TextAnchor(paragraph: 1, characterOffset: 5).fraction(in: paragraphs), 0.75)
+    }
+
+    /// A chapter with nothing in it divides by zero if this is got wrong, and a chapter
+    /// that failed to extract is exactly the case that reaches the reader.
+    func testAnEmptyChapterIsNoShareRatherThanACrash() {
+        XCTAssertEqual(TextAnchor.start.fraction(in: []), 0)
+        XCTAssertEqual(TextAnchor(paragraph: 3, characterOffset: 8).fraction(in: ["", ""]), 0)
+    }
+
+    /// The same case `landingAnchor` clamps for: a chapter refetched from the site can
+    /// come back shorter than when the position was written. An anchor past its end has
+    /// read all of it — the one thing it must not report is more than all of it.
+    func testAnAnchorPastTheEndOfTheChapterReadsAsAllOfIt() {
+        let paragraphs = ["一二三四五", "六七八九十"]
+        XCTAssertEqual(TextAnchor(paragraph: 9, characterOffset: 0).fraction(in: paragraphs), 1)
+        XCTAssertEqual(
+            TextAnchor(paragraph: 1, characterOffset: 999).fraction(in: paragraphs), 1,
+            "an offset past the paragraph is clamped to its end, not counted whole"
+        )
+    }
+
     // MARK: - Round trip
 
     func testAPositionSurvivesBeingStoredAndReadBack() throws {
@@ -80,9 +112,24 @@ final class ReadingPositionTests: XCTestCase {
         let position = ReadingPosition(
             siteChapterId: "c4", anchor: TextAnchor(paragraph: 17, characterOffset: 23)
         )
-        try repo.updateProgress(bookId: book.id, position: position)
+        try repo.updateProgress(bookId: book.id, position: position, fraction: 0.42)
 
-        XCTAssertEqual(try XCTUnwrap(repo.book(id: book.id)).readingPosition, position)
+        let stored = try XCTUnwrap(repo.book(id: book.id))
+        XCTAssertEqual(stored.readingPosition, position)
+        XCTAssertEqual(stored.lastReadFraction, 0.42)
+    }
+
+    /// The share belongs to the position it was measured with. A caller that has no text
+    /// to measure against — an incoming iCloud record from a device that read further —
+    /// must not leave the previous chapter's share sitting under the new chapter.
+    func testAPositionWrittenWithoutAShareClearsTheOldOne() throws {
+        let repo = LibraryRepo(database: try AppDatabase.makeInMemory())
+        let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
+        try repo.updateProgress(bookId: book.id, position: .chapterStart("c1"), fraction: 0.9)
+
+        try repo.updateProgress(bookId: book.id, position: .chapterStart("c2"))
+
+        XCTAssertNil(try XCTUnwrap(repo.book(id: book.id)).lastReadFraction)
     }
 
     // MARK: - Migration
@@ -180,6 +227,18 @@ final class ReadingPositionTests: XCTestCase {
         XCTAssertFalse(columns.contains("lastReadOffset"))
         XCTAssertTrue(columns.contains("lastReadParagraph"))
         XCTAssertTrue(columns.contains("lastReadCharacterOffset"))
+    }
+
+    /// v7 adds the share, and adds it empty. Working it out needs the chapter's text,
+    /// which for a book read online is on no device at all — so a number here would be
+    /// invented, and an invented one would be shown to the reader as fact.
+    func testMigrationInventsNoShareForPositionsItAlreadyHad() throws {
+        let queue = try storeAtV3(lastReadChapterIndex: 7, lastReadOffset: 42)
+        try AppDatabase.migrator.migrate(queue)
+
+        let book = try XCTUnwrap(LibraryRepo(database: try AppDatabase(queue)).book(id: "demo|1"))
+        XCTAssertEqual(book.lastReadParagraph, 42, "the position itself is still there")
+        XCTAssertNil(book.lastReadFraction, "and it says nothing it cannot know")
     }
 
     /// A database as it stood before v4, written through raw SQL: the point is to

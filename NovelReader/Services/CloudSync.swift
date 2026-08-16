@@ -56,6 +56,12 @@ final class CloudSync {
         /// chapter id from a stale index would be worse than waiting: the guess would
         /// be resolved against a catalog this device fetched at a different time.
         var position: ReadingPosition?
+        /// How far into that chapter the position sits. Travels with the position it was
+        /// measured against, because it cannot be recomputed on arrival: the receiving
+        /// device may never have fetched that chapter's text. Absent in records written
+        /// before this field existed, which decodes to nil and reads as "which chapter,
+        /// and nothing finer" — the same thing a fresh install shows.
+        var fraction: Double?
     }
 
     private(set) var lastSyncedAt: Date?
@@ -157,7 +163,7 @@ final class CloudSync {
             siteId: book.siteId, siteBookId: book.siteBookId, title: book.title,
             displayName: book.displayName, author: book.author, coverURL: book.coverURL,
             addedAt: book.addedAt, updatedAt: book.updatedAt,
-            position: book.readingPosition
+            position: book.readingPosition, fraction: book.lastReadFraction
         )
         guard let data = try? JSONEncoder().encode(record) else { return }
         store.set(data, forKey: Self.keyPrefix + book.id)
@@ -198,7 +204,9 @@ final class CloudSync {
         )
         try repo.rename(bookId: id, to: record.displayName, now: record.updatedAt)
         if let position = record.position {
-            try repo.updateProgress(bookId: id, position: position, now: record.updatedAt)
+            try repo.updateProgress(
+                bookId: id, position: position, fraction: record.fraction, now: record.updatedAt
+            )
         }
     }
 }

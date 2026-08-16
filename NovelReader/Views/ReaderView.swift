@@ -18,6 +18,7 @@ struct ReaderView: View {
 
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model: ReaderModel?
     @State private var showControls = false
     @State private var showCatalog = false
@@ -84,6 +85,15 @@ struct ReaderView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             model?.stopReading()
         }
+        // The position has to be on disk before the process can be taken away, and a
+        // suspended app is killed without being told. `.inactive` rather than
+        // `.background` alone: it is the phase that arrives while the app is still
+        // running, and writing a row is cheap enough to do for a pulled-down
+        // notification centre that turns out to be nothing.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase != .active else { return }
+            model?.persistProgress()
+        }
     }
 
     // MARK: - Text
@@ -144,11 +154,13 @@ struct ReaderView: View {
                 landing: openAtLastPage == current.chapter.id
                     ? .lastPage : .anchor(model.currentAnchor),
                 highlights: model.highlights(inChapter: current.chapter.siteChapterId),
-                onAnchorChange: { anchor in
+                onAnchorChange: { anchor, fraction in
                     openAtLastPage = nil
                     // Any page that does turn answers the question the notice asked.
                     reachedEndOfBook = false
-                    model.notePage(chapterIndex: current.chapter.index, anchor: anchor)
+                    model.notePage(
+                        chapterIndex: current.chapter.index, anchor: anchor, fraction: fraction
+                    )
                 },
                 onTapCenter: { showControls.toggle() },
                 onTurnPast: { edge in turnChapter(past: edge, model: model) },
@@ -592,7 +604,10 @@ final class ReaderModel {
     /// The anchor a jump asked for, held until the paragraph it names is actually on
     /// screen. See `note`.
     private var restoring: TextAnchor?
-    private var persistedIndex: Int?
+    /// What the paginated renderer said about its own page, held until something moves
+    /// that is not a page. Nil means the share is the anchor's own — see `currentFraction`.
+    private var reportedFraction: Double?
+    private var writeRule = ProgressWriteRule()
     /// The one chapter read ahead, held in memory only. Never more than one:
     /// this is here to hide a page load, not to become a second download queue.
     private var readAhead: (chapterId: String, paragraphs: [String])?
@@ -768,6 +783,10 @@ final class ReaderModel {
         // A scroll view can only say which paragraph appeared, so the offset within
         // it is honestly zero rather than guessed at. See `TextAnchor`.
         currentAnchor = TextAnchor(paragraph: paragraph, characterOffset: 0)
+        // The share is the scrolling reader's own: a paragraph boundary is the finest
+        // place it can name, so what it reports is where the text on screen begins.
+        reportedFraction = nil
+        persistProgress(.reading)
     }
 
     /// Records the page the paginated reader settled on.
@@ -776,10 +795,17 @@ final class ReaderModel {
     /// landed, once, so there is no cascade of appearing paragraphs to filter and the
     /// `restoring` guard would only get in the way. This is also the one path that can
     /// record a real `characterOffset` — a page knows which character it opens on.
-    func notePage(chapterIndex: Int, anchor: TextAnchor) {
+    /// - Parameter fraction: the share the page itself displays, taken rather than
+    ///   recomputed from the anchor. A page measures to its own *end* — that is what
+    ///   makes the last page read 100% — while the anchor names where the page begins.
+    ///   Recomputing here would store a number a couple of percent behind the one the
+    ///   reader was just looking at, and the shelf would show the difference.
+    func notePage(chapterIndex: Int, anchor: TextAnchor, fraction: Double) {
         restoring = nil
         currentChapterIndex = chapterIndex
         currentAnchor = anchor
+        reportedFraction = fraction
+        persistProgress(.reading)
     }
 
     /// Re-aims the scrolling reader at the current position without re-fetching.
@@ -793,16 +819,32 @@ final class ReaderModel {
         scrollTarget = currentAnchor.scrollID(chapterId: current.chapter.id)
     }
 
-    /// Written on chapter change and on leaving the reader rather than on every
-    /// paragraph: the position only matters when reading stops.
-    func persistProgress() {
+    /// How far through the chapter the reader is, as the renderer on screen measures it.
+    ///
+    /// Nil only when no chapter is loaded, which is the same moment `currentPosition` has
+    /// no chapter to name.
+    var currentFraction: Double? {
+        if let reportedFraction { return reportedFraction }
+        guard let current = currentLoadedChapter else { return nil }
+        return currentAnchor.fraction(in: current.paragraphs)
+    }
+
+    /// Writes the position down, as often as `ProgressWriteRule` allows.
+    ///
+    /// Every way of *leaving* a position goes through here with `.leaving`: changing
+    /// chapter, closing the book, and the app going to the background. That last one is
+    /// why reading itself also offers positions: a process suspended in the background
+    /// can be killed without ever coming back, and until this existed everything since
+    /// the chapter was opened went with it.
+    func persistProgress(_ occasion: ProgressWriteRule.Occasion = .leaving) {
         guard !loaded.isEmpty, let position = currentPosition else { return }
-        // Compared against the start of the chapter rather than against paragraph 0:
-        // the paginated reader can move within the first paragraph, and that is still
-        // a position worth keeping.
-        guard persistedIndex != currentChapterIndex || currentAnchor != .start else { return }
-        persistedIndex = currentChapterIndex
-        env.recordProgress(book: book, position: position)
+        guard writeRule.shouldWrite(position, occasion: occasion) else { return }
+        env.recordProgress(
+            book: book,
+            position: position,
+            fraction: currentFraction,
+            publish: occasion == .leaving
+        )
     }
 
     // MARK: Saved positions
