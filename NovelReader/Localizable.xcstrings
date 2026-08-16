@@ -5352,6 +5352,174 @@
           }
         }
       }
+    },
+    "reader.settings.tapToTurn": {
+      "comment": "Toggle: turn pages by tapping while scrolling.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap to Turn Pages"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击翻页"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點擊翻頁"
+          }
+        }
+      }
+    },
+    "reader.settings.tapToTurn.footer": {
+      "comment": "Explains the tap zones the toggle switches on.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The middle of the screen shows the controls. The right side and the bottom go on; the left side and the top go back."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "屏幕中央呼出工具栏，右侧与下方往后翻页，左侧与上方往前翻页。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "畫面中央叫出工具列，右側與下方往後翻頁，左側與上方往前翻頁。"
+          }
+        }
+      }
+    },
+    "library.progress.share %lld %@": {
+      "comment": "Shelf row: which chapter the reader is in, and how far through it.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chapter %lld · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "读到第 %lld 章 · %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "讀到第 %lld 章 · %@"
+          }
+        }
+      }
+    },
+    "book.lastRead": {
+      "comment": "Header of the pinned row above the catalog.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last read"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次读到"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次讀到"
+          }
+        }
+      }
+    },
+    "book.catalog.order": {
+      "comment": "Menu title for the catalog sort order.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Order"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "排序"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "排序"
+          }
+        }
+      }
+    },
+    "book.catalog.order.ascending": {
+      "comment": "Catalog sorted first chapter first.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First chapter first"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正序"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正序"
+          }
+        }
+      }
+    },
+    "book.catalog.order.descending": {
+      "comment": "Catalog sorted newest chapter first.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Newest chapter first"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "倒序"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "倒序"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

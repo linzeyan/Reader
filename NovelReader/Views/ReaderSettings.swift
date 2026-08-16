@@ -133,6 +133,17 @@ final class ReaderSettings {
             defaults.set(keepScreenOn, forKey: Keys.keepScreenOn)
         }
     }
+    /// Turns the scrolling reader's screen into tap zones — see `ReaderTapZone`.
+    ///
+    /// Off by default, and deliberately not "on for everyone": a tap in the scrolling
+    /// reader has always meant "show me the controls", and quietly turning most of the
+    /// screen into a page turn would move the text under readers who tapped for the
+    /// controls. Paginated reading has its own zones and ignores this.
+    var tapToTurnPage: Bool {
+        didSet {
+            defaults.set(tapToTurnPage, forKey: Keys.tapToTurnPage)
+        }
+    }
 
     private enum Keys {
         static let mode = "reader.mode"
@@ -142,6 +153,7 @@ final class ReaderSettings {
         static let theme = "reader.theme"
         static let fontName = "reader.fontName"
         static let keepScreenOn = "reader.keepScreenOn"
+        static let tapToTurnPage = "reader.tapToTurnPage"
     }
 
     private let defaults: UserDefaults
@@ -158,6 +170,7 @@ final class ReaderSettings {
         let storedFont = defaults.string(forKey: Keys.fontName)
         fontName = storedFont.flatMap { UIFont(name: $0, size: 16) == nil ? nil : $0 }
         keepScreenOn = defaults.object(forKey: Keys.keepScreenOn) as? Bool ?? true
+        tapToTurnPage = defaults.object(forKey: Keys.tapToTurnPage) as? Bool ?? false
     }
 
     var font: Font {

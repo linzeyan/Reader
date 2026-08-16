@@ -75,6 +75,20 @@ struct ReadingAppearanceSections: View {
                 ThemePicker(selection: $settings.theme)
             }
 
+            // Only where it can do anything. Paginated reading turns pages by tapping
+            // already and cannot be talked out of it, so offering the switch there would
+            // be offering to turn off something that is not on.
+            if settings.mode == .scroll {
+                Section {
+                    Toggle("reader.settings.tapToTurn", isOn: $settings.tapToTurnPage)
+                        .accessibilityIdentifier("reader.settings.tapToTurn")
+                } footer: {
+                    // Which part of the screen does what, said once, here. A reader who
+                    // has to find the zones by tapping finds the wrong one first.
+                    Text("reader.settings.tapToTurn.footer")
+                }
+            }
+
             Section {
                 Toggle("reader.settings.keepScreenOn", isOn: $settings.keepScreenOn)
                     .onChange(of: settings.keepScreenOn) { _, on in

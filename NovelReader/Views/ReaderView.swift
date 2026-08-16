@@ -36,6 +36,10 @@ struct ReaderView: View {
     /// renderer holds the same two questions itself, because the selection they are
     /// about is a range in text only it has laid out.
     @State private var markChoice: ScrollMarkChoice?
+    /// Where the paragraphs on screen currently sit, which is what turns a tap in the
+    /// page-turn zones into a scroll. Empty unless `ReaderSettings.tapToTurnPage` is on:
+    /// nothing measures a frame for a reader who never asked for the zones.
+    @State private var visibleParagraphs: [ReaderTapZone.VisibleParagraph] = []
 
     var body: some View {
         ZStack {
@@ -47,13 +51,18 @@ struct ReaderView: View {
             }
         }
         .navigationBarBackButtonHidden()
-        // Never in paginated mode, even with the controls up: showing the navigation
-        // bar changes the safe area, and a changed text area means re-measuring the
-        // page breaks. The bottom control bar already carries everything the bar did.
-        .toolbar(showControls && settings.mode == .scroll ? .visible : .hidden, for: .navigationBar)
+        // Never, in either mode. A navigation bar that comes and goes changes the safe
+        // area, and a changed safe area moves every line of text down while the reader is
+        // looking at it; in paginated mode it also re-measures the page breaks. What the
+        // bar used to carry now floats over the text instead — see `titleCapsule`.
+        .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .statusBarHidden(!showControls)
+        // Always hidden, for the same reason, rather than following the controls: on a
+        // phone with no sensor housing the status bar's height *is* safe area, so
+        // toggling it shifts the text by exactly that much.
+        .statusBarHidden(true)
         .preferredColorScheme(settings.theme.colorScheme)
+        .overlay(alignment: .top) { if showControls, let model { titleCapsule(model) } }
         .overlay(alignment: .bottom) { if showControls, let model { controlBar(model) } }
         .animation(.snappy(duration: 0.2), value: showControls)
         .sheet(isPresented: $showCatalog) { catalogSheet }
@@ -107,35 +116,91 @@ struct ReaderView: View {
     }
 
     private func scrollingText(_ model: ReaderModel) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(model.loaded) { item in
-                        chapterBlock(item, model: model)
+        // The window, measured once, is what turns a tap into a zone and a zone into a
+        // page. Read from a container that does not scroll: a coordinate space on the
+        // scroll view itself travels with the text, and a tap would report where it
+        // landed in the *book* rather than on the screen.
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                let context = TapContext(window: geometry.size, proxy: proxy)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.loaded) { item in
+                            chapterBlock(item, model: model, context: context)
+                        }
+                        footer(model)
                     }
-                    footer(model)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 80)
+                    .contentShape(.rect)
+                    // A tap that reached no paragraph — the gaps, the margins, the space
+                    // under the last line of a chapter.
+                    .onTapGesture(coordinateSpace: .named(Self.tapSpace)) { point in
+                        handleTap(at: point, context: context)
+                    }
+                    .accessibilityIdentifier("reader.text")
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 80)
-                .contentShape(.rect)
-                // A tap that reached no paragraph: the chrome, unless a bar is waiting
-                // for an answer — then this is the way to say no, which is what the
-                // paginated renderer's transparent catcher is for.
-                .onTapGesture {
-                    if markChoice != nil { markChoice = nil } else { showControls.toggle() }
+                .scrollDismissesKeyboard(.immediately)
+                .onPreferenceChange(VisibleParagraphsKey.self) { visibleParagraphs = $0 }
+                .onChange(of: model.scrollTarget) { _, target in
+                    guard let target else { return }
+                    // No animation: a jump across chapters should land instantly,
+                    // not scroll through the text the user skipped.
+                    proxy.scrollTo(target, anchor: .top)
+                    model.scrollTarget = nil
                 }
-                .accessibilityIdentifier("reader.text")
+                .overlay(alignment: .bottom) { markBar(model) }
+                .animation(.snappy(duration: 0.18), value: markChoice)
             }
-            .scrollDismissesKeyboard(.immediately)
-            .onChange(of: model.scrollTarget) { _, target in
-                guard let target else { return }
-                // No animation: a jump across chapters should land instantly,
-                // not scroll through the text the user skipped.
-                proxy.scrollTo(target, anchor: .top)
-                model.scrollTarget = nil
-            }
-            .overlay(alignment: .bottom) { markBar(model) }
-            .animation(.snappy(duration: 0.18), value: markChoice)
+        }
+        .coordinateSpace(.named(Self.tapSpace))
+    }
+
+    /// What a tap needs beyond where it landed: how big the window is, and the scroll
+    /// view to move. Handed down rather than held in state, because both belong to the
+    /// scroll view being drawn right now.
+    private struct TapContext {
+        let window: CGSize
+        let proxy: ScrollViewProxy
+    }
+
+    /// The name the tap zones are measured in.
+    private static let tapSpace = "reader.window"
+
+    /// How many paragraphs from the edge of what is loaded counts as "nearly there".
+    /// Far enough that the next chapter's text arrives before the reader reaches the
+    /// seam, close enough that a reader who stops mid-chapter has not pulled a chapter
+    /// they will never look at.
+    private static let prefetchLead = 6
+
+    /// Every tap in the scrolling reader ends up here.
+    ///
+    /// The order is the point. A question waiting on screen is answered first — a tap is
+    /// how the reader says no to it, and it must not also turn a page. Then, only for
+    /// readers who asked for it, the zones; for everyone else a tap means what it has
+    /// always meant here.
+    private func handleTap(at point: CGPoint, context: TapContext) {
+        if markChoice != nil {
+            markChoice = nil
+            return
+        }
+        guard settings.tapToTurnPage else {
+            showControls.toggle()
+            return
+        }
+        let zone = ReaderTapZone.zone(at: point, in: context.window)
+        guard zone != .controls else {
+            showControls.toggle()
+            return
+        }
+        guard let scroll = ReaderTapZone.pageScroll(
+            zone, over: visibleParagraphs, viewport: context.window.height
+        ) else { return }
+        // Animated, unlike a jump between chapters: this is the reader moving through
+        // text they are reading, and a page that appears without moving gives them
+        // nothing to tell it apart from a page that never turned.
+        withAnimation(.easeOut(duration: 0.2)) {
+            context.proxy.scrollTo(scroll.id, anchor: scroll.anchor)
         }
     }
 
@@ -221,7 +286,9 @@ struct ReaderView: View {
         Task { await model.jump(toChapterAt: target) }
     }
 
-    private func chapterBlock(_ item: ReaderModel.LoadedChapter, model: ReaderModel) -> some View {
+    private func chapterBlock(
+        _ item: ReaderModel.LoadedChapter, model: ReaderModel, context: TapContext
+    ) -> some View {
         let highlights = model.highlights(inChapter: item.chapter.siteChapterId)
         let marking = markChoice?.paragraphBeingMarked(inChapter: item.chapter.siteChapterId)
         return VStack(alignment: .leading, spacing: settings.paragraphSpacing) {
@@ -248,11 +315,23 @@ struct ReaderView: View {
                     // press one — a coordinate inside the column would be a guess about
                     // where a paragraph happens to have been laid out.
                     .accessibilityIdentifier("reader.paragraph")
+                    // Only while tap-to-turn is on: this puts a `GeometryReader` behind
+                    // every paragraph the scroll view has built, and a reader who never
+                    // asked for tap zones should not pay for a measurement nothing reads.
+                    .background { if settings.tapToTurnPage { paragraphFrame(item, offset) } }
                     // Progress is recorded from whatever scrolls into view; there
                     // is no cheaper way to know the reading position in a lazy
                     // stack on iOS 17.
-                    .onAppear { model.note(chapterIndex: item.chapter.index, paragraph: offset) }
-                    .onTapGesture { tap(paragraph: offset, in: item, highlights: highlights) }
+                    .onAppear {
+                        model.note(chapterIndex: item.chapter.index, paragraph: offset)
+                        reachEdges(from: offset, of: item, in: model)
+                    }
+                    .onTapGesture(coordinateSpace: .named(Self.tapSpace)) { point in
+                        tap(
+                            paragraph: offset, in: item, highlights: highlights,
+                            at: point, context: context
+                        )
+                    }
                     // A SwiftUI long press rather than the UIKit recogniser the page
                     // needs: there the press has to say *where* it landed, here the
                     // paragraph it landed on is the whole answer. It also fails once the
@@ -262,6 +341,42 @@ struct ReaderView: View {
             }
         }
         .foregroundStyle(settings.theme.foreground)
+    }
+
+    /// Reports where one paragraph currently sits in the window, for the tap that has to
+    /// turn a page. In the window's own coordinate space, so the numbers mean "on screen"
+    /// rather than "in the book".
+    private func paragraphFrame(_ item: ReaderModel.LoadedChapter, _ offset: Int) -> some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .named(Self.tapSpace))
+            Color.clear.preference(
+                key: VisibleParagraphsKey.self,
+                value: [
+                    ReaderTapZone.VisibleParagraph(
+                        id: TextAnchor.paragraphID(chapterId: item.chapter.id, paragraph: offset),
+                        minY: frame.minY,
+                        maxY: frame.maxY
+                    )
+                ]
+            )
+        }
+    }
+
+    /// A paragraph coming into view near either end of what is loaded is what pulls the
+    /// next chapter in — or the previous one back.
+    ///
+    /// Both directions are speculative, and both are worth it. Forwards, the alternative
+    /// is the marker at the very foot of the text, which fires exactly when the scroll has
+    /// run out of content and makes the reader watch a file read at the seam. Backwards,
+    /// there was no alternative at all: `jump` drops what it replaces, so the top of the
+    /// screen was a wall.
+    private func reachEdges(from offset: Int, of item: ReaderModel.LoadedChapter, in model: ReaderModel) {
+        if offset >= item.paragraphs.count - Self.prefetchLead {
+            Task { await model.loadNextIfLast(after: item.chapter.index) }
+        }
+        if offset < Self.prefetchLead, item.chapter.index == model.loaded.first?.chapter.index {
+            Task { await model.loadPrevious() }
+        }
     }
 
     /// One paragraph, with any highlight over it tinted in.
@@ -337,7 +452,11 @@ struct ReaderView: View {
     /// answers one on the page: the reader put the mark there, and a mark that ignores
     /// being touched can only be undone from another screen.
     private func tap(
-        paragraph: Int, in chapter: ReaderModel.LoadedChapter, highlights: [TextHighlight]
+        paragraph: Int,
+        in chapter: ReaderModel.LoadedChapter,
+        highlights: [TextHighlight],
+        at point: CGPoint,
+        context: TapContext
     ) {
         // The lift of the finger that started the press arrives here as a tap, so the
         // paragraph being asked about must not dismiss its own question.
@@ -345,21 +464,21 @@ struct ReaderView: View {
            asked == chapter.chapter.siteChapterId, askedParagraph == paragraph {
             return
         }
-        guard markChoice == nil else {
-            markChoice = nil
-            return
-        }
         let length = (chapter.paragraphs[paragraph] as NSString).length
         // The first mark reaching this paragraph, in reading order. Paragraph granularity
         // is all this renderer has: a mark made on a page can cover a single sentence of
         // it, and a tap here cannot tell which sentence was touched.
-        guard let hit = highlights.first(where: {
+        //
+        // Checked before the zones for the same reason the page checks its own marks
+        // first: the reader put the mark there, and a mark that cannot answer a tap can
+        // only be undone from another screen.
+        if markChoice == nil, let hit = highlights.first(where: {
             $0.range(inParagraph: paragraph, length: length) != nil
-        }) else {
-            showControls.toggle()
+        }) {
+            markChoice = .remove(hit)
             return
         }
-        markChoice = .remove(hit)
+        handleTap(at: point, context: context)
     }
 
     /// The bar that asks about the paragraph, drawn only while the chapter it belongs to
@@ -419,6 +538,36 @@ struct ReaderView: View {
 
     // MARK: - Controls
 
+    /// The floating counterpart to the control bar: which chapter this is, and how far
+    /// through it the reader has got.
+    ///
+    /// It is an overlay, not the navigation bar it replaces, because a bar that appears
+    /// pushes the text down — the thing this whole change is about. Floating over the
+    /// page costs the reader a strip of text for as long as the controls are up, and
+    /// gives it straight back; the bar cost them the position of every line.
+    ///
+    /// The share is the one the model would store, so what the reader sees here and what
+    /// the shelf says later cannot disagree.
+    private func titleCapsule(_ model: ReaderModel) -> some View {
+        HStack(spacing: 10) {
+            Text(model.currentLoadedChapter?.chapter.title ?? book.shownName)
+                .lineLimit(1)
+            if let fraction = model.currentFraction {
+                Text(verbatim: fraction.formatted(.percent.precision(.fractionLength(0))))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.footnote)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(.bar, in: .capsule)
+        .padding(.horizontal, 24)
+        .padding(.top, 6)
+        .accessibilityIdentifier("reader.chapterTitle")
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
     private func controlBar(_ model: ReaderModel) -> some View {
         HStack(spacing: 0) {
             control("chevron.left", label: "common.back") { dismiss() }
@@ -466,25 +615,40 @@ struct ReaderView: View {
 
     private var catalogSheet: some View {
         NavigationStack {
-            List(model?.chapters ?? []) { chapter in
-                Button {
-                    showCatalog = false
-                    Task { await model?.jump(toChapterAt: chapter.index) }
-                } label: {
-                    HStack {
-                        // Against the position the book was opened with, deliberately —
-                        // see `Chapter.isNew`, which explains why chapters read in this
-                        // session keep their marker until the reader leaves.
-                        ChapterRow(
-                            chapter: chapter,
-                            lastReadIndex: book.lastReadIndex(in: model?.chapters ?? [])
-                        )
-                        if chapter.index == model?.currentChapterIndex {
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tint)
+            ScrollViewReader { proxy in
+                List(model?.chapters ?? []) { chapter in
+                    Button {
+                        showCatalog = false
+                        Task { await model?.jump(toChapterAt: chapter.index) }
+                    } label: {
+                        HStack {
+                            // Against the position the book was opened with, deliberately —
+                            // see `Chapter.isNew`, which explains why chapters read in this
+                            // session keep their marker until the reader leaves.
+                            ChapterRow(
+                                chapter: chapter,
+                                lastReadIndex: book.lastReadIndex(in: model?.chapters ?? [])
+                            )
+                            if chapter.index == model?.currentChapterIndex {
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tint)
+                            }
                         }
                     }
+                    .tint(.primary)
                 }
-                .tint(.primary)
+                // Opens where the reader is, not at chapter one. A catalog of thirteen
+                // hundred chapters that always starts at the top is a scroll the reader
+                // has to make every single time to find out where they already are.
+                // Centred rather than at the top, so the chapters either side of it —
+                // the ones worth going back to — come with it.
+                //
+                // In `task` because it runs after the first render: `scrollTo` needs rows
+                // to aim at, and there are none while the list is still being built.
+                .task {
+                    guard let model, model.chapters.indices.contains(model.currentChapterIndex)
+                    else { return }
+                    proxy.scrollTo(model.chapters[model.currentChapterIndex].id, anchor: .center)
+                }
             }
             .navigationTitle("reader.catalog")
             .navigationBarTitleDisplayMode(.inline)
@@ -683,6 +847,48 @@ final class ReaderModel {
         await append(chapters[nextIndex])
     }
 
+    /// Pulls the next chapter in while the reader is still a few paragraphs short of it.
+    ///
+    /// The marker at the very foot of the text is too late to be smooth: reaching it is
+    /// the moment the scroll runs out of content, and the file read and layout pass that
+    /// follow happen while the reader is looking at the seam. Asked for a few paragraphs
+    /// early, the same work lands before they get there.
+    ///
+    /// - Parameter index: the chapter the paragraph belongs to. A reader who scrolled
+    ///   back up into an earlier one is not near any seam, so nothing is fetched.
+    func loadNextIfLast(after index: Int) async {
+        guard loaded.last?.chapter.index == index else { return }
+        await loadNext()
+    }
+
+    /// The chapter before the first one loaded, put in front of it.
+    ///
+    /// `jump` drops everything it replaces, which keeps a long novel from filling memory
+    /// with chapters nobody is reading — but it also turned the top of the screen into a
+    /// wall: someone who opened chapter 40 from the catalog could scroll forward for ever
+    /// and not back one line. This gives back the way they came.
+    ///
+    /// Failures are silent, unlike a forward load. This is speculative work the reader
+    /// never asked for — the same bargain read-ahead makes in the other direction — and
+    /// replacing the page they are reading with an error would be answering a question
+    /// nobody asked.
+    func loadPrevious() async {
+        guard !isLoading, let first = loaded.first else { return }
+        let index = first.chapter.index - 1
+        guard chapters.indices.contains(index) else { return }
+        isLoading = true
+        defer { isLoading = false }
+        guard let text = try? await paragraphs(for: chapters[index]) else { return }
+        loaded.insert(LoadedChapter(chapter: chapters[index], paragraphs: text), at: 0)
+        // Inserting above the reader moves everything they are looking at down by a whole
+        // chapter, so the view is immediately aimed back at where they were. Their own
+        // position is the target, which is also what stops the newly arrived paragraphs
+        // from being recorded as progress on their way past.
+        retarget()
+    }
+
+    var hasPrevious: Bool { (loaded.first?.chapter.index ?? 0) > 0 }
+
     private func append(_ chapter: Chapter) async {
         isLoading = true
         error = nil
@@ -705,9 +911,7 @@ final class ReaderModel {
     /// held in memory only — writing them to disk would inflate the storage
     /// screen with files the user never asked to keep.
     private func paragraphs(for chapter: Chapter) async throws -> [String] {
-        if chapter.isDownloaded,
-           let stored = try? env.downloads.readParagraphs(book: book, siteChapterId: chapter.siteChapterId),
-           !stored.isEmpty {
+        if chapter.isDownloaded, let stored = await storedParagraphs(for: chapter), !stored.isEmpty {
             return stored
         }
         if let readAhead, readAhead.chapterId == chapter.id {
@@ -723,6 +927,25 @@ final class ReaderModel {
             throw BookService.ServiceError.badURL
         }
         return try await env.bookService.chapterParagraphs(rule: rule, chapter: chapter)
+    }
+
+    /// Reads a downloaded chapter off the main actor.
+    ///
+    /// The read itself is small, but it lands in the middle of the scroll that asked for
+    /// it — the reader is at the seam between two chapters when this runs — and a
+    /// filesystem hit on the main thread there is a stutter they can see. Only the file
+    /// store crosses over, which is a path and a `FileManager`; the database is not
+    /// touched, because "is it downloaded" was answered by the row already in hand.
+    private func storedParagraphs(for chapter: Chapter) async -> [String]? {
+        let files = env.files
+        let siteId = book.siteId
+        let siteBookId = book.siteBookId
+        let siteChapterId = chapter.siteChapterId
+        return await Task.detached(priority: .userInitiated) {
+            try? files.readParagraphs(
+                siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId
+            )
+        }.value
     }
 
     /// Fetches the chapter after the last one on screen, at a random remove,
