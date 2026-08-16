@@ -35,11 +35,21 @@ final class ReaderChromeGestureTests: XCTestCase {
             app.otherElements["reader.text"].waitForExistence(timeout: 20),
             "the scrolling renderer should be showing"
         )
-        // The second paragraph rather than the first: clear of the chapter heading, and of
-        // the top of the screen where a bar would have pushed it.
-        let paragraph = app.descendants(matching: .any)
-            .matching(identifier: "reader.paragraph").element(boundBy: 1)
-        XCTAssertTrue(paragraph.waitForExistence(timeout: 20))
+        // A paragraph wholly inside the window, and clear of both ends of it, rather
+        // than a fixed index. The demo book opens where its reader left off, part-way
+        // into the chapter, so the paragraphs before it sit above the window — and
+        // tapping one of those makes XCUITest scroll it into view, which moves the very
+        // text this test is watching. The margin keeps the tap out from under the
+        // capsule and the control bar, which appear over the page after the first tap.
+        let paragraphs = app.descendants(matching: .any).matching(identifier: "reader.paragraph")
+        XCTAssertTrue(paragraphs.firstMatch.waitForExistence(timeout: 20))
+        let reachable = app.windows.firstMatch.frame.insetBy(dx: 0, dy: 120)
+        let paragraph = try XCTUnwrap(
+            (0..<paragraphs.count)
+                .map { paragraphs.element(boundBy: $0) }
+                .first { reachable.contains($0.frame) },
+            "the reader should have a paragraph fully on screen to watch"
+        )
         let before = paragraph.frame
 
         paragraph.tap()

@@ -94,8 +94,17 @@ enum DemoSeed {
         }
         if let chapter = demo.readingChapter {
             // The field is a place in reading order; the ids seeded above run from 1.
+            let text = paragraphs(chapter: chapter + 1)
+            // Part-way into the chapter, not at its head: the shelf and the reader both
+            // say how far in the reader got, and a fixture parked at 0% would put that
+            // in a store screenshot with nothing to show. The share is measured against
+            // this same text, exactly the way the reader measures it, so the number on
+            // the shelf and the one in the reader's capsule are the same number.
+            let anchor = TextAnchor(paragraph: text.count / 2, characterOffset: 0)
             try? env.repo.updateProgress(
-                bookId: book.id, position: .chapterStart("\(chapter + 1)")
+                bookId: book.id,
+                position: ReadingPosition(siteChapterId: "\(chapter + 1)", anchor: anchor),
+                fraction: anchor.fraction(in: text)
             )
         }
     }

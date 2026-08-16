@@ -20,12 +20,22 @@ TEAM_ID   := NKJSLB6HBR
 SIMULATOR ?= iPhone 17
 IPAD      ?= iPad Pro 13-inch (M5)
 
-# App Store Connect accepts one iPhone size and one iPad size and scales the
-# rest, so shoot the largest of each: 6.9" (1320x2868) and 13" (2064x2752).
-SHOT_PHONE ?= iPhone 17 Pro Max
-SHOT_IPAD  ?= iPad Pro 13-inch (M5)
-SHOT_LANGS ?= zh-Hant zh-Hans en
-SHOTS      ?= screenshots
+# Which screens to shoot, as `simulator name=output folder`, comma separated
+# (commas because device names contain spaces and parentheses).
+#
+# Only the largest of each family is *required* — App Store Connect scales
+# 6.9" and 13" down to fill the smaller slots. The smaller phones are here
+# because a scaled 6.9" shot is not what a 4.7" screen shows: the same page has
+# fewer lines, shorter titles and a tighter shelf row, and that is the screen a
+# buyer on that phone is being sold. Drop any entry whose slot the store no
+# longer offers — that is a listing decision, not a build one.
+#
+# 5.5" (1242x2208) is absent because it cannot be shot: no device with that
+# screen runs a current iOS, so no simulator for it exists.
+SHOT_PHONES ?= iPhone 17 Pro Max=iphone-6.9,iPhone 11 Pro Max=iphone-6.5,iPhone SE (3rd generation)=iphone-4.7
+SHOT_IPADS  ?= iPad Pro 13-inch (M5)=ipad-13
+SHOT_LANGS  ?= zh-Hant zh-Hans en
+SHOTS       ?= screenshots
 
 .DEFAULT_GOAL := help
 .PHONY: help setup generate build test test-ui test-ui-live test-live run run-iphone run-ipad open release archive ipa package clean screenshots shots-device
@@ -117,18 +127,29 @@ run-ipad: build ## Build, then install & launch on the iPad simulator only
 
 # --- App Store screenshots ---
 
-screenshots: generate ## Capture App Store screenshots (all languages, iPhone 6.9" + iPad 13")
+screenshots: generate ## Capture App Store screenshots (every language × every size in SHOT_PHONES/SHOT_IPADS)
 	@# Fictional demo library (DemoSeed, Debug-only): the listing must not name
 	@# a content source, since the app itself ships pointing at none.
+	@# The list goes through a shell variable before it is split: device names
+	@# contain parentheses, which the shell would try to parse if they arrived as
+	@# literal text on the `for` line. Splitting an expansion never re-parses.
 	@for lang in $(SHOT_LANGS); do \
-		$(MAKE) --no-print-directory shots-device DEVICE="$(SHOT_PHONE)" LANG_ID=$$lang OUT="$(SHOTS)/$$lang/iphone-6.9" || exit 1; \
-		$(MAKE) --no-print-directory shots-device DEVICE="$(SHOT_IPAD)"  LANG_ID=$$lang OUT="$(SHOTS)/$$lang/ipad-13" || exit 1; \
+		( entries='$(SHOT_PHONES),$(SHOT_IPADS)'; IFS=','; \
+		for entry in $$entries; do \
+			$(MAKE) --no-print-directory shots-device \
+				DEVICE="$${entry%%=*}" LANG_ID=$$lang OUT="$(SHOTS)/$$lang/$${entry##*=}" || exit 1; \
+		done ) || exit 1; \
 	done
 	@echo "screenshots → $(SHOTS)/"
 
 shots-device:
 	@rm -rf "$(DERIVED)/shots.xcresult" "$(OUT)"
 	@mkdir -p "$(OUT)"
+	@# Xcode only creates simulators for the devices it currently ships, while the
+	@# store still has slots for smaller screens. Create the missing one from the
+	@# device type of the same name — once; later runs find it already there.
+	@xcrun simctl list devices available | grep -qF "$(DEVICE) (" \
+		|| xcrun simctl create "$(DEVICE)" "$(DEVICE)" > /dev/null
 	@echo "→ $(DEVICE) [$(LANG_ID)]"
 	@TEST_RUNNER_NOVELREADER_SCREENSHOTS=1 \
 	TEST_RUNNER_NOVELREADER_SHOT_LANG=$(LANG_ID) \

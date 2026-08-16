@@ -36,6 +36,20 @@ final class ScreenshotTests: XCTestCase {
         return inBar.exists ? inBar : app.buttons[symbol].firstMatch
     }
 
+    /// Scrolls until a row is there to be tapped.
+    ///
+    /// A `List` does not realise rows below the fold, so on a 4.7" screen the
+    /// appearance row — the sixth section of Settings — is not merely off screen,
+    /// it is absent from the accessibility tree. `waitForExistence` cannot help
+    /// with that: nothing is on its way. Shooting the small phones is what turned
+    /// this up, and it is why the walk scrolls to what it needs instead of
+    /// assuming one screen holds everything.
+    private func reveal(_ element: XCUIElement, swipingUp: Bool = true) {
+        for _ in 0..<8 where !element.exists {
+            if swipingUp { app.swipeUp() } else { app.swipeDown() }
+        }
+    }
+
     func testCaptureStoreScreenshots() throws {
         // 1. The library: bookmarks grouped by source.
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "library.book")
@@ -70,6 +84,7 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 20))
         settings.tap()
         let reading = app.buttons["settings.appearance"]
+        reveal(reading)
         XCTAssertTrue(reading.waitForExistence(timeout: 10))
         reading.tap()
         XCTAssertTrue(app.sliders.firstMatch.waitForExistence(timeout: 10))
@@ -77,7 +92,10 @@ final class ScreenshotTests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
         // 6. Sources — the part that makes the app work at all.
+        // Back at the top of the list it was scrolled down, and the first section
+        // has been left behind the same way the sixth one was.
         let sources = app.buttons["settings.sources"]
+        reveal(sources, swipingUp: false)
         XCTAssertTrue(sources.waitForExistence(timeout: 10))
         sources.tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "sources.row")
