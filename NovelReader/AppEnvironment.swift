@@ -304,6 +304,9 @@ final class AppEnvironment {
         try? downloads.delete(.book(book))
         try? repo.removeBookmark(bookId: book.id)
         cloud.removed(bookId: book.id)
+        // The one place a book stops existing, and the only chance to drop what is
+        // kept about it outside the database.
+        librarySettings.forgetCatalogOrder(bookId: book.id)
         if downloader.progress?.bookId == book.id { downloader.cancel() }
         reloadLibrary()
     }

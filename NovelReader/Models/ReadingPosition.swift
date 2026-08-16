@@ -73,6 +73,17 @@ extension TextAnchor {
         return min(1, Double(before + inside) / Double(total))
     }
 
+    /// How a share of a chapter is written, wherever one is shown: the reader's floating
+    /// capsule, the shelf row, the pinned row above a catalog.
+    ///
+    /// One place, because those three are read as one claim about where the reader is —
+    /// a capsule saying 45% above a shelf that says 45.3% reads as two different numbers
+    /// for the same thing. Whole percent: this is a position in a novel, and no reader
+    /// has ever wanted the tenth of a percent.
+    static func shareText(_ fraction: Double) -> String {
+        fraction.formatted(.percent.precision(.fractionLength(0)))
+    }
+
     /// A short lead-in from the anchored paragraph, for a list that has to say
     /// *where* a saved position points without opening the chapter.
     ///

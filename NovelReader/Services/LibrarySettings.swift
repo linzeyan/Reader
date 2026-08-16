@@ -32,10 +32,40 @@ final class LibrarySettings {
         didSet { defaults.set(onlyWithNewChapters, forKey: Keys.onlyWithNewChapters) }
     }
 
+    /// The books whose catalog runs newest chapter first, by book id.
+    ///
+    /// Per book rather than one setting for the whole app: the same shelf holds a novel
+    /// being read from chapter one, where the top of the list is where reading starts,
+    /// and a serial being followed for its updates, where the top of the list is the
+    /// thing the reader came for. One answer would be wrong for one of them every time.
+    ///
+    /// One dictionary rather than a key per book, so that forgetting a deleted book's
+    /// order is a single removal and nothing has to enumerate the defaults to find
+    /// entries left behind.
+    private(set) var catalogDescending: [String: Bool] {
+        didSet { defaults.set(catalogDescending, forKey: Keys.catalogDescending) }
+    }
+
+    func isCatalogDescending(bookId: String) -> Bool { catalogDescending[bookId] ?? false }
+
+    /// Ascending is stored as *no entry*, not as `false`: it is what a book that was
+    /// never touched already answers, so keeping the row would leave one behind for
+    /// every book whose order was changed and changed back.
+    func setCatalogDescending(_ descending: Bool, bookId: String) {
+        catalogDescending[bookId] = descending ? true : nil
+    }
+
+    /// Dropped along with the book. Nothing else clears these, and a book removed and
+    /// added again would otherwise come back with an order the reader never chose for it.
+    func forgetCatalogOrder(bookId: String) {
+        catalogDescending[bookId] = nil
+    }
+
     private enum Keys {
         static let sort = "library.sort"
         static let groupBySource = "library.groupBySource"
         static let onlyWithNewChapters = "library.onlyWithNewChapters"
+        static let catalogDescending = "library.catalogDescending"
     }
 
     private let defaults: UserDefaults
@@ -48,5 +78,6 @@ final class LibrarySettings {
         sort = defaults.string(forKey: Keys.sort).flatMap(LibrarySort.init(rawValue:)) ?? .added
         groupBySource = defaults.object(forKey: Keys.groupBySource) as? Bool ?? true
         onlyWithNewChapters = defaults.object(forKey: Keys.onlyWithNewChapters) as? Bool ?? false
+        catalogDescending = defaults.dictionary(forKey: Keys.catalogDescending) as? [String: Bool] ?? [:]
     }
 }

@@ -28,10 +28,16 @@ struct BookDetailView: View {
     /// The live row, so a rename or a progress update made elsewhere shows here.
     private var current: Book { env.books.first { $0.id == book.id } ?? book }
 
-    private var filtered: [Chapter] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return chapters }
-        return chapters.filter { $0.title.localizedStandardContains(trimmed) }
+    /// The search box and the order control, applied. Evaluated once per body and handed
+    /// to the section that draws it: filtering thirteen hundred titles is not something to
+    /// do twice because two parts of one list want the answer.
+    private var catalog: BookCatalog {
+        BookCatalog(
+            chapters: chapters,
+            query: query,
+            descending: env.librarySettings.isCatalogDescending(bookId: book.id),
+            lastReadSiteChapterId: current.lastReadSiteChapterId
+        )
     }
 
     /// Resolved once for the whole list rather than per row, and computed rather than
@@ -68,24 +74,7 @@ struct BookDetailView: View {
                     Section("book.downloading") { downloadStatus }
                 }
             }
-            Section {
-                if chapters.isEmpty {
-                    Text(isRefreshing ? "book.catalog.loading" : "book.catalog.empty")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(filtered) { chapter in
-                        NavigationLink(
-                            value: ReadingTarget(
-                                book: current, position: .chapterStart(chapter.siteChapterId)
-                            )
-                        ) {
-                            ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex)
-                        }
-                    }
-                }
-            } header: {
-                Text("book.catalog \(chapters.count)")
-            }
+            catalogSection(catalog)
         }
         .searchable(text: $query, placement: .navigationBarDrawer, prompt: Text("book.catalog.search"))
         .navigationTitle(current.shownName)
@@ -106,6 +95,15 @@ struct BookDetailView: View {
                     }
                     .disabled(isRefreshing || rule == nil)
                 }
+            }
+            // Alongside the actions rather than opposite them, unlike the shelf's
+            // arrange menu: leading is the back button's, and a view control wedged
+            // against it would be the one thing here that is easy to hit by mistake.
+            //
+            // Gone while there is no catalog, for the reason the shelf's own arrange
+            // menu is: there is nothing to put in an order yet.
+            if !chapters.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) { orderMenu }
             }
             ToolbarItem(placement: .topBarTrailing) { exportMenu }
         }
@@ -208,6 +206,92 @@ struct BookDetailView: View {
             .accessibilityIdentifier("book.downloads")
             .disabled(chapters.isEmpty)
         }
+    }
+
+    /// The chapter list: where the reader left off, pinned above it, then the catalog
+    /// in whichever direction this book is being read.
+    @ViewBuilder
+    private func catalogSection(_ catalog: BookCatalog) -> some View {
+        Section {
+            if let lastRead = catalog.lastRead { lastReadRow(lastRead) }
+            if chapters.isEmpty {
+                Text(isRefreshing ? "book.catalog.loading" : "book.catalog.empty")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(catalog.chapters) { chapter in
+                    NavigationLink(
+                        value: ReadingTarget(
+                            book: current, position: .chapterStart(chapter.siteChapterId)
+                        )
+                    ) {
+                        ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex)
+                    }
+                }
+            }
+        } header: {
+            // The count is of the book, not of what the search left: it is how long the
+            // novel is, and a header that changed with every keystroke would be reporting
+            // the query back rather than the book.
+            Text("book.catalog \(chapters.count)")
+        }
+    }
+
+    /// Where the reader left off, in full: which chapter, and how far into it.
+    ///
+    /// The actions section above already offers to continue, but it does not say *where*
+    /// — and a button whose destination you have to press it to learn is one people press
+    /// warily. This goes to exactly the same place, by the same stored anchor, and says so
+    /// first. Pinned above the list because the alternative is finding one row among
+    /// thirteen hundred, which is the position marker's whole problem.
+    private func lastReadRow(_ chapter: Chapter) -> some View {
+        NavigationLink(value: readingTarget) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("book.lastRead")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(chapter.title).lineLimit(1)
+                }
+                Spacer()
+                // Only where the position was recorded finely enough to have one — see
+                // `Book.lastReadFraction`.
+                if let fraction = current.lastReadFraction {
+                    Text(verbatim: TextAnchor.shareText(fraction))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityIdentifier("book.lastRead")
+    }
+
+    /// Which end of the book the catalog starts at, remembered for this book alone —
+    /// see `LibrarySettings.catalogDescending` for why that is per book.
+    ///
+    /// A menu with a picker rather than a button that flips: two orders both have names,
+    /// and a lone arrow icon leaves the reader to work out from the arrow which way the
+    /// list is currently going.
+    private var orderMenu: some View {
+        Menu {
+            Picker("book.catalog.order", selection: orderBinding) {
+                Text("book.catalog.order.ascending").tag(false)
+                Text("book.catalog.order.descending").tag(true)
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("book.catalog.order", systemImage: "arrow.up.arrow.down")
+        }
+        .accessibilityIdentifier("book.catalog.order")
+    }
+
+    /// The settings object comes from the environment without bindings, and this one is
+    /// keyed by book, so the binding is built by hand rather than with `@Bindable`.
+    private var orderBinding: Binding<Bool> {
+        Binding(
+            get: { env.librarySettings.isCatalogDescending(bookId: book.id) },
+            set: { env.librarySettings.setCatalogDescending($0, bookId: book.id) }
+        )
     }
 
     /// In the toolbar rather than among the actions below, for two reasons: it is

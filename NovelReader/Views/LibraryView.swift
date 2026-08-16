@@ -338,7 +338,7 @@ struct BookRow: View {
                 }
                 HStack(spacing: 6) {
                     if let lastReadIndex {
-                        Text("library.progress \(lastReadIndex + 1)")
+                        progress(lastReadIndex)
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
@@ -351,6 +351,20 @@ struct BookRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Where the reader is, as finely as the book can say.
+    ///
+    /// A chapter alone is coarse in a novel whose chapters take twenty minutes, so the
+    /// share comes with it — but only where there is one. A position recorded before the
+    /// column existed, or restored from another device and not read here since, knows
+    /// its chapter and nothing finer, and "第 12 章 · 0%" would be a claim about how far
+    /// in they are that nothing measured.
+    private func progress(_ lastReadIndex: Int) -> Text {
+        guard let fraction = book.lastReadFraction else {
+            return Text("library.progress \(lastReadIndex + 1)")
+        }
+        return Text("library.progress.share \(lastReadIndex + 1) \(TextAnchor.shareText(fraction))")
     }
 }
 

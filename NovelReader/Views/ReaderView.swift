@@ -553,7 +553,7 @@ struct ReaderView: View {
             Text(model.currentLoadedChapter?.chapter.title ?? book.shownName)
                 .lineLimit(1)
             if let fraction = model.currentFraction {
-                Text(verbatim: fraction.formatted(.percent.precision(.fractionLength(0))))
+                Text(verbatim: TextAnchor.shareText(fraction))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
@@ -613,10 +613,20 @@ struct ReaderView: View {
         .accessibilityLabel(Text(label))
     }
 
+    /// The same order the book's own catalog screen is in — one book, one direction.
+    /// A reader who put a serial newest-first is not asking for that only when they
+    /// arrive from the shelf.
+    private var catalogChapters: [Chapter] {
+        let all = model?.chapters ?? []
+        return env.librarySettings.isCatalogDescending(bookId: book.id)
+            ? Array(all.reversed())
+            : all
+    }
+
     private var catalogSheet: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                List(model?.chapters ?? []) { chapter in
+                List(catalogChapters) { chapter in
                     Button {
                         showCatalog = false
                         Task { await model?.jump(toChapterAt: chapter.index) }
