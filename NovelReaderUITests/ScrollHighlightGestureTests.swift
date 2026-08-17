@@ -36,11 +36,21 @@ final class ScrollHighlightGestureTests: XCTestCase {
             app.otherElements["reader.text"].waitForExistence(timeout: 20),
             "the scrolling renderer should be showing"
         )
-        // The second paragraph rather than the first: clear of the chapter heading and of
-        // the top of the screen, wherever the stored reading position opens the chapter.
-        let paragraph = app.descendants(matching: .any)
-            .matching(identifier: "reader.paragraph").element(boundBy: 1)
-        XCTAssertTrue(paragraph.waitForExistence(timeout: 20))
+        // A paragraph wholly inside the window, not a fixed index. The demo book opens
+        // part-way into its chapter, so the low indices name rows above the window —
+        // and XCUITest reaches an off-screen row by scrolling it into view, which can
+        // pull the previous chapter in above and renumber every index this test would
+        // then re-resolve. The same pick `ReaderChromeGestureTests` makes, for the
+        // same reason.
+        let paragraphs = app.descendants(matching: .any).matching(identifier: "reader.paragraph")
+        XCTAssertTrue(paragraphs.firstMatch.waitForExistence(timeout: 20))
+        let reachable = app.windows.firstMatch.frame.insetBy(dx: 0, dy: 120)
+        let paragraph = try XCTUnwrap(
+            (0..<paragraphs.count)
+                .map { paragraphs.element(boundBy: $0) }
+                .first { reachable.contains($0.frame) },
+            "the reader should have a paragraph fully on screen to mark"
+        )
 
         // Held well past the press recogniser's delay, and without moving: a press that
         // travels is a scroll, which is the arbitration this whole test is about.
