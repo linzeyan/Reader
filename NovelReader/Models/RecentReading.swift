@@ -49,6 +49,12 @@ struct RecentRead: Identifiable, Equatable {
     }
 
     /// The smallest share that `TextAnchor.shareText` prints as 100%.
+    ///
+    /// Both renderers now state their share through `TextAnchor.claimedShare`, which
+    /// rounds down to a whole percent, so anything they write is either exactly 1 or at
+    /// most 0.99. The gap is for shares recorded before that rule existed: those are raw
+    /// measurements, and one at 0.998 was shown as 100% on every screen that has ever
+    /// drawn it.
     private static let finishedShare = 0.995
 }
 

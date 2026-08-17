@@ -786,8 +786,9 @@ final class ReaderModel {
 
     private let book: Book
     private let env: AppEnvironment
-    /// What the paginated renderer said about its own page, held until something moves
-    /// that is not a page. Nil means the share is the anchor's own — see `currentFraction`.
+    /// The share the renderer on screen last reported: a page's, or a scrolled window's.
+    /// Nil only before either has said anything, which is the one moment `currentFraction`
+    /// has to fall back to measuring the anchor.
     private var reportedFraction: Double?
     private var writeRule = ProgressWriteRule()
     /// The one chapter read ahead, held in memory only. Never more than one:
@@ -1050,7 +1051,7 @@ final class ReaderModel {
         // the paragraph is honestly zero rather than guessed at. See `TextAnchor`.
         let anchor = TextAnchor(paragraph: top.paragraph, characterOffset: 0)
         if currentAnchor != anchor { currentAnchor = anchor }
-        reportedFraction = nil
+        reportedFraction = readShare(through: bottom)
         persistProgress(.reading)
         if !isLoading {
             if let last = loaded.last, bottom.chapterIndex == last.chapter.index,
@@ -1063,6 +1064,35 @@ final class ReaderModel {
             }
         }
         return nil
+    }
+
+    /// How far through the chapter the scrolling reader has read, measured to the bottom
+    /// of the window.
+    ///
+    /// The anchor and the share answer different questions about the same screen: the
+    /// anchor is where to come back to, so it is the top; the share is what has been
+    /// read, so it runs to the end of the last paragraph the reader can see. Deriving it
+    /// from the anchor instead — which is what this used to do, by leaving
+    /// `reportedFraction` nil — measured to where the screen *begins*, so the final
+    /// screen of a chapter reported a screenful short of its end and no scrolled chapter
+    /// could ever reach 100%. That is a couple of percent on the shelf, and it is the
+    /// whole difference between a finished book and an almost-finished one to the
+    /// reading history, which reads a full 100% as "there is nothing left of this".
+    ///
+    /// This is the same claim `PaginatedChapterView.fraction(atPage:)` makes for a page,
+    /// stated through the same rounding, so a chapter finished in one renderer is
+    /// finished in the other.
+    ///
+    /// A bottom in a later chapter means the whole of this one is behind the reader.
+    /// It can never be in an earlier one: `ReaderTapZone.visibleSpan` takes the two ends
+    /// of one window in reading order.
+    private func readShare(through bottom: ReaderTapZone.VisibleParagraph) -> Double? {
+        guard let current = currentLoadedChapter else { return nil }
+        guard bottom.chapterIndex == current.chapter.index else { return 1 }
+        return TextAnchor.claimedShare(
+            TextAnchor.endOfParagraph(bottom.paragraph, in: current.paragraphs)
+                .fraction(in: current.paragraphs)
+        )
     }
 
     /// Whether a jump's scroll has reached what it aimed at.
@@ -1129,10 +1159,16 @@ final class ReaderModel {
     ///
     /// Nil only when no chapter is loaded, which is the same moment `currentPosition` has
     /// no chapter to name.
+    ///
+    /// Both renderers report their own share — a page measures to its end, a scrolled
+    /// window to the bottom of the screen — and this prefers what they said. The fallback
+    /// measures the anchor, which is the top of the screen and therefore an
+    /// under-statement; it is reached only in the moment between a chapter loading and
+    /// the first frame being reported.
     var currentFraction: Double? {
         if let reportedFraction { return reportedFraction }
         guard let current = currentLoadedChapter else { return nil }
-        return currentAnchor.fraction(in: current.paragraphs)
+        return TextAnchor.claimedShare(currentAnchor.fraction(in: current.paragraphs))
     }
 
     /// Writes the position down, as often as `ProgressWriteRule` allows.

@@ -73,6 +73,31 @@ extension TextAnchor {
         return min(1, Double(before + inside) / Double(total))
     }
 
+    /// The anchor at the far end of a paragraph — where a reader who can see the whole
+    /// of it has read to.
+    ///
+    /// Used to turn "the bottom of the screen" into a share; `fraction(in:)` clamps the
+    /// offset against the paragraph it is handed, so this is the honest end of it rather
+    /// than a number that has to be trusted.
+    static func endOfParagraph(_ index: Int, in paragraphs: [String]) -> TextAnchor {
+        let length = paragraphs.indices.contains(index) ? (paragraphs[index] as NSString).length : 0
+        return TextAnchor(paragraph: index, characterOffset: length)
+    }
+
+    /// A share of a chapter cut down to what the app is willing to claim it is.
+    ///
+    /// Rounded *down* to the whole percent it will be shown as, because "100%" with text
+    /// still to come is the one number the reader could catch out — and because the
+    /// reading history reads a full 100% as "this book is finished", which is a claim
+    /// that must not be reachable one paragraph early.
+    ///
+    /// Here rather than in either renderer, next to `shareText`: both of them measure
+    /// a share and both have to state it the same way, or one book would be finished in
+    /// paged reading and not in scrolled.
+    static func claimedShare(_ raw: Double) -> Double {
+        min(1, max(0, (raw * 100).rounded(.down) / 100))
+    }
+
     /// How a share of a chapter is written, wherever one is shown: the reader's floating
     /// capsule, the shelf row, the pinned row above a catalog.
     ///
