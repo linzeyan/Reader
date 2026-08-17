@@ -60,6 +60,12 @@ final class DownloadManager {
     /// it left off, and a process death so the next launch can.
     private(set) var remaining: [Chapter] = []
     private var context: (book: Book, rule: SiteRule)?
+    /// Chapters that have failed since the last one that landed.
+    ///
+    /// Reset by every success and by every fresh `run`, so it counts a *streak* rather
+    /// than a total: three bad chapters spread through an 800-chapter book is a site
+    /// with three bad chapters, and the queue is right to walk past them.
+    private var failureStreak = 0
     /// Set while the queue is meant to stop after the chapter on the wire.
     private(set) var isDraining = false
     private var drainReason: String?
@@ -85,6 +91,15 @@ final class DownloadManager {
         self.pacer = pacer
         self.queueStore = queueStore
     }
+
+    /// How many chapters may fail one after another before the queue stops instead of
+    /// eating itself. See the `catch` in `run` for what this is protecting.
+    ///
+    /// Three rather than one: a chapter that will not parse is a real and ordinary
+    /// thing on these sites, and stopping the whole book for the first one would put
+    /// the reader back to tapping resume every few chapters. Three in a row is no
+    /// longer a claim about chapters.
+    static let failureLimit = 3
 
     var isBusy: Bool { status == .running }
     var canResume: Bool { status == .paused && !remaining.isEmpty }
@@ -211,6 +226,10 @@ final class DownloadManager {
         // next one it would stop that run after a single chapter, with nothing
         // on screen to explain why.
         clearDrain()
+        // So does a failure streak. Resuming is the user saying they have dealt with
+        // whatever stopped the queue — cleared a challenge, changed network — and the
+        // new run has to be allowed to find that out for itself.
+        failureStreak = 0
         runToken += 1
         let token = runToken
         task = Task { [weak self] in
@@ -230,6 +249,7 @@ final class DownloadManager {
                         book: context.book,
                         siteChapterId: chapter.siteChapterId
                     )
+                    self.noteChapterSucceeded()
                     guard self.completeIfStillQueued(chapter) else { return }
                 } catch is CancellationError {
                     return
@@ -244,6 +264,27 @@ final class DownloadManager {
                 } catch {
                     // A single unreadable chapter must not strand the rest of the
                     // book, so it is dropped from the queue and reported.
+                    //
+                    // But dropping is only right while the failure is *about the
+                    // chapter*. When it is not — a Cloudflare clearance that did not
+                    // take, a host that has started refusing us, a web view that has
+                    // stopped navigating — every chapter fails, and dropping each one
+                    // in turn walks the queue to nothing and reports it as a finished
+                    // download. That is what "I cleared the verification, pressed
+                    // resume, and my download queue vanished" is: the queue was not
+                    // lost, it was eaten, one failing chapter at a time.
+                    //
+                    // So a streak stops the run instead, with the queue intact and the
+                    // reason on screen. The chapter that hit the limit keeps its place
+                    // at the head — it was never given a fair attempt.
+                    if self.noteChapterFailed() {
+                        self.lastError = String(
+                            localized: "downloads.paused.repeatedFailures \(error.localizedDescription)"
+                        )
+                        self.status = .paused
+                        self.persistQueue()
+                        return
+                    }
                     self.lastError = error.localizedDescription
                     guard self.completeIfStillQueued(chapter) else { return }
                 }
@@ -318,6 +359,28 @@ final class DownloadManager {
         guard let onStopped else { return }
         self.onStopped = nil
         onStopped()
+    }
+
+    /// A chapter landed, so whatever was going wrong is no longer going wrong.
+    ///
+    /// Not private, like `noteChapterFailed` and for the same reason: the two together
+    /// are the rule, and half a rule is not something a test can pin.
+    func noteChapterSucceeded() {
+        failureStreak = 0
+    }
+
+    /// Records a chapter this run could not fetch.
+    ///
+    /// - Returns: true when the caller must stop the run and leave the queue alone,
+    ///   because the failures have stopped being about individual chapters.
+    ///
+    /// Not private: what matters is what this answers on the *third* call in a row, and
+    /// there is no way to reach that through the public surface without three real
+    /// fetches against a real host — which is to say, no way to pin the behaviour that
+    /// keeps a download queue from eating itself.
+    func noteChapterFailed() -> Bool {
+        failureStreak += 1
+        return failureStreak >= Self.failureLimit
     }
 
     /// Takes `chapter` off the head of the queue. Returns false when it is no

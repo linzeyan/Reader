@@ -961,6 +961,30 @@
         }
       }
     },
+    "downloads.paused.repeatedFailures %@": {
+      "comment": "Shown when several chapters in a row failed and the queue stopped rather than dropping the rest.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused after several chapters in a row failed: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连续多章下载失败，已暂停：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連續多章下載失敗，已暫停：%@"
+          }
+        }
+      }
+    },
     "error.badURL": {
       "comment": "A rule produced a URL that cannot be built.",
       "extractionState": "manual",

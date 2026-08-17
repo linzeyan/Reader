@@ -147,6 +147,75 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertTrue(released, "…and is released once that run really does stop")
     }
 
+    /// The download queue that vanished after a Cloudflare check.
+    ///
+    /// Dropping a chapter that will not fetch is deliberate — one bad chapter must not
+    /// strand the eight hundred behind it. But when the failure is not about the
+    /// chapter at all, every chapter fails, and dropping each one in turn walks the
+    /// whole queue to nothing and calls it a finished download. Resuming after a
+    /// challenge is exactly when that happens: the clearance may not have taken, and
+    /// the queue quietly ate itself while the reader watched the progress bar run.
+    func testAStreakOfFailuresStopsTheQueueInsteadOfEatingIt() throws {
+        let manager = try makeManager()
+        let chapters = (1...5).map { makeChapter("\($0)") }
+        manager.start(book: makeBook(), rule: makeRule(), chapters: chapters)
+
+        // Two chapters that will not fetch, each dropped and walked past — the rule a
+        // book with a couple of unreadable chapters depends on.
+        XCTAssertFalse(manager.noteChapterFailed())
+        XCTAssertTrue(manager.completeIfStillQueued(chapters[0]))
+        XCTAssertFalse(manager.noteChapterFailed())
+        XCTAssertTrue(manager.completeIfStillQueued(chapters[1]))
+
+        XCTAssertTrue(
+            manager.noteChapterFailed(),
+            "three in a row is no longer a claim about chapters"
+        )
+        XCTAssertEqual(
+            manager.remaining.map(\.id), ["3", "4", "5"],
+            "and the chapter that hit the limit keeps its place, never having had a fair go"
+        )
+        manager.cancel()
+    }
+
+    /// The streak has to be a streak. Three unreadable chapters spread through a long
+    /// book is a site with three unreadable chapters, and stopping there would leave the
+    /// reader tapping resume for the rest of the novel.
+    func testAChapterThatLandsClearsTheStreak() throws {
+        let manager = try makeManager()
+        let chapters = (1...4).map { makeChapter("\($0)") }
+        manager.start(book: makeBook(), rule: makeRule(), chapters: chapters)
+
+        XCTAssertFalse(manager.noteChapterFailed())
+        XCTAssertFalse(manager.noteChapterFailed())
+        manager.noteChapterSucceeded()
+
+        XCTAssertFalse(manager.noteChapterFailed())
+        XCTAssertFalse(manager.noteChapterFailed())
+        manager.cancel()
+    }
+
+    /// Resuming is the user saying they have dealt with whatever stopped the queue —
+    /// cleared the challenge, moved onto Wi-Fi. The new run has to be allowed to find
+    /// out for itself, rather than stopping on the first chapter because the last run
+    /// had already used the allowance up.
+    func testResumingStartsTheFailureCountAgain() throws {
+        let manager = try makeManager()
+        manager.start(
+            book: makeBook(), rule: makeRule(),
+            chapters: [makeChapter("1"), makeChapter("2"), makeChapter("3")]
+        )
+        XCTAssertFalse(manager.noteChapterFailed())
+        XCTAssertFalse(manager.noteChapterFailed())
+        manager.pause()
+
+        manager.resume()
+
+        XCTAssertFalse(manager.noteChapterFailed(), "the previous run's failures are spent")
+        XCTAssertFalse(manager.noteChapterFailed())
+        manager.cancel()
+    }
+
     /// The same hazard with the queue non-empty but moved on: whatever is at the
     /// head now belongs to a different run, and must not be consumed by the old
     /// one's progress accounting.
