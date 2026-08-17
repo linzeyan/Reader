@@ -96,15 +96,6 @@ struct BookDetailView: View {
                     .disabled(isRefreshing || rule == nil)
                 }
             }
-            // Alongside the actions rather than opposite them, unlike the shelf's
-            // arrange menu: leading is the back button's, and a view control wedged
-            // against it would be the one thing here that is easy to hit by mistake.
-            //
-            // Gone while there is no catalog, for the reason the shelf's own arrange
-            // menu is: there is nothing to put in an order yet.
-            if !chapters.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) { orderMenu }
-            }
             ToolbarItem(placement: .topBarTrailing) { exportMenu }
         }
         // Asked *before* the file is written, not reported after: someone
@@ -229,10 +220,16 @@ struct BookDetailView: View {
                 }
             }
         } header: {
-            // The count is of the book, not of what the search left: it is how long the
-            // novel is, and a header that changed with every keystroke would be reporting
-            // the query back rather than the book.
-            Text("book.catalog \(chapters.count)")
+            HStack {
+                // The count is of the book, not of what the search left: it is how long
+                // the novel is, and a header that changed with every keystroke would be
+                // reporting the query back rather than the book.
+                Text("book.catalog \(chapters.count)")
+                Spacer()
+                // Absent while there is no catalog: there is nothing to put in an
+                // order yet.
+                if !chapters.isEmpty { orderToggle }
+            }
         }
     }
 
@@ -269,18 +266,20 @@ struct BookDetailView: View {
     /// Which end of the book the catalog starts at, remembered for this book alone —
     /// see `LibrarySettings.catalogDescending` for why that is per book.
     ///
-    /// A menu with a picker rather than a button that flips: two orders both have names,
-    /// and a lone arrow icon leaves the reader to work out from the arrow which way the
-    /// list is currently going.
-    private var orderMenu: some View {
-        Menu {
-            Picker("book.catalog.order", selection: orderBinding) {
-                Text("book.catalog.order.ascending").tag(false)
-                Text("book.catalog.order.descending").tag(true)
-            }
-            .pickerStyle(.inline)
+    /// A one-tap toggle in the section header rather than the old navigation-bar menu:
+    /// the order is a fact about the rows under the header, and the menu's reason to
+    /// exist — a lone arrow leaves the reader to work out which way the list goes — is
+    /// kept by naming the current order on the label itself.
+    private var orderToggle: some View {
+        Button {
+            orderBinding.wrappedValue.toggle()
         } label: {
-            Label("book.catalog.order", systemImage: "arrow.up.arrow.down")
+            Label(
+                orderBinding.wrappedValue
+                    ? "book.catalog.order.descending" : "book.catalog.order.ascending",
+                systemImage: orderBinding.wrappedValue ? "arrow.up" : "arrow.down"
+            )
+            .font(.caption2)
         }
         .accessibilityIdentifier("book.catalog.order")
     }
