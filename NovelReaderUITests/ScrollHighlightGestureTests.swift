@@ -25,6 +25,9 @@ final class ScrollHighlightGestureTests: XCTestCase {
     }
 
     func testPressingAParagraphOffersToMarkItAndTappingItOffersToRemoveIt() throws {
+        // The app opens on the reading history, which the demo seed always leaves
+        // something unfinished in. This walk starts from the shelf, so it asks for it.
+        app.openLibraryTab()
         let book = app.descendants(matching: .any).matching(identifier: "library.book").firstMatch
         XCTAssertTrue(book.waitForExistence(timeout: 20), "the demo library should be seeded")
         book.tap()

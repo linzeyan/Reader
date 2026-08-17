@@ -42,12 +42,13 @@ final class LibraryShelfTests: XCTestCase {
 
     // MARK: - Recently read
 
-    /// A book that has never been opened has no reading position and therefore
-    /// nothing to be recent about. `updatedAt` alone would not know that: it is
-    /// bumped by a rename and by a catalog refresh too, so an untouched-but-renamed
-    /// book would sit above the novel the reader was in last night.
+    /// A book that has never been opened has nothing to be recent about. `updatedAt`
+    /// alone would not know that: it is bumped by a rename and by a catalog refresh
+    /// too, so an untouched-but-renamed book would sit above the novel the reader was
+    /// in last night. That is precisely why the sort reads `lastReadAt`, which is
+    /// written only when a reading position is.
     func testRecentlyReadKeepsUnreadBooksBelowReadOnes() {
-        let read = read(book(id: "read", title: "讀過", updatedAt: day(1)), atChapter: "3")
+        let read = read(book(id: "read", title: "讀過"), at: day(1))
         // Renamed a moment ago and never opened: the most recently *touched* book,
         // and the one that must not be at the top.
         let neverOpened = book(id: "unread", title: "沒讀過", updatedAt: day(9))
@@ -58,12 +59,37 @@ final class LibraryShelfTests: XCTestCase {
     }
 
     func testRecentlyReadOrdersReadBooksByWhenProgressWasRecorded() {
-        let older = read(book(id: "older", title: "舊", updatedAt: day(2)), atChapter: "1")
-        let newer = read(book(id: "newer", title: "新", updatedAt: day(7)), atChapter: "1")
+        let older = read(book(id: "older", title: "舊", updatedAt: day(9)), at: day(2))
+        // Touched longest ago and read most recently — the two timestamps pulling in
+        // opposite directions, which is the whole reason there are two of them.
+        let newer = read(book(id: "newer", title: "新", updatedAt: day(1)), at: day(7))
 
         let sorted = LibrarySort.recentlyRead.applied(to: [older, newer]).map(\.id)
 
         XCTAssertEqual(sorted, ["newer", "older"])
+    }
+
+    /// Clearing the reading history takes every book out of it, and the sort has to
+    /// degrade to the shelf's default order rather than keep an order drawn from a
+    /// record the reader has just deleted.
+    func testRecentlyReadFallsBackToNewestFirstOnceTheHistoryIsCleared() {
+        let old = read(book(id: "old", title: "舊", addedAt: day(1)), at: day(8))
+        let new = read(book(id: "new", title: "新", addedAt: day(5)), at: day(2))
+        // What `LibraryRepo.clearReadingHistory` writes: the timestamps go, the
+        // positions stay.
+        let cleared = [old, new].map { book -> Book in
+            var book = book
+            book.lastReadAt = nil
+            return book
+        }
+
+        let sorted = LibrarySort.recentlyRead.applied(to: cleared).map(\.id)
+
+        XCTAssertEqual(sorted, ["new", "old"])
+        XCTAssertTrue(
+            cleared.allSatisfy { $0.lastReadSiteChapterId != nil },
+            "clearing the history must not throw away where the reader got to"
+        )
     }
 
     /// With nothing read at all the sort has to degrade to the shelf's default
@@ -208,22 +234,23 @@ final class LibraryShelfTests: XCTestCase {
             id: id, siteId: "alpha", siteBookId: id, title: title, displayName: nil,
             author: nil, coverURL: nil, addedAt: addedAt, updatedAt: updatedAt,
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
-            lastReadCharacterOffset: nil, lastReadFraction: nil, catalogUpdatedAt: nil
+            lastReadCharacterOffset: nil, lastReadFraction: nil,
+            lastReadAt: nil, catalogUpdatedAt: nil
         )
     }
 
-    /// Mirrors what `LibraryRepo.updateProgress` writes: a position *and* a bumped
-    /// `updatedAt`. Both halves matter — the position is what the sort gates on and
-    /// the timestamp is what it then orders by.
+    /// Mirrors what `LibraryRepo.updateProgress` writes: a position *and* the moment it
+    /// was recorded. Both halves matter — the position is what the row shows and
+    /// `lastReadAt` is what the sort orders by.
     ///
-    /// A chapter id rather than a number, because that is what a stored position is: the
-    /// shelf's gate is "has this book been read at all", which needs no catalog to
-    /// answer and must keep working for a book whose chapter the site has dropped.
-    private func read(_ book: Book, atChapter siteChapterId: String) -> Book {
+    /// A chapter id rather than a number, because that is what a stored position is: it
+    /// must keep working for a book whose chapter the site has dropped.
+    private func read(_ book: Book, at readAt: Date, chapter siteChapterId: String = "3") -> Book {
         var read = book
         read.lastReadSiteChapterId = siteChapterId
         read.lastReadParagraph = 0
         read.lastReadCharacterOffset = 0
+        read.lastReadAt = readAt
         return read
     }
 

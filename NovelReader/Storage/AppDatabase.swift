@@ -344,6 +344,27 @@ final class AppDatabase {
             }
         }
 
+        // When the reader was last in a book, so "recently read" can be answered
+        // rather than approximated. See `Book.lastReadAt` for why `updatedAt` is not
+        // that answer.
+        //
+        // Backfilled from `updatedAt` for books that have a reading position, and
+        // deliberately left null for the rest. That is exactly the approximation
+        // `LibrarySort.recentlyRead` has been shipping — position as the gate,
+        // `updatedAt` as the order — so an upgrade keeps the shelf it had and the new
+        // history opens with the books the reader would expect in it, rather than
+        // empty. Every write from here on is the real thing, and each one replaces a
+        // backfilled guess the first time that book is opened.
+        migrator.registerMigration("v8.lastReadAt") { db in
+            try db.alter(table: Book.databaseTableName) { t in
+                t.add(column: "lastReadAt", .datetime)
+            }
+            try db.execute(sql: """
+                UPDATE "book" SET "lastReadAt" = "updatedAt"
+                WHERE "lastReadSiteChapterId" IS NOT NULL
+                """)
+        }
+
         return migrator
     }
 }

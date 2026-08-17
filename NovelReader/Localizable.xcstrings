@@ -1921,6 +1921,126 @@
         }
       }
     },
+    "recent.empty": {
+      "comment": "Reading history with nothing in it.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing read yet"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有阅读记录"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒有閱讀紀錄"
+          }
+        }
+      }
+    },
+    "recent.empty.hint": {
+      "comment": "Points an empty reading history at the library.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open a book from your library and this list will remember where you got to."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从书架打开一本书，这里就会记住你读到哪里。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從書櫃打開一本書，這裡就會記住你讀到哪裡。"
+          }
+        }
+      }
+    },
+    "recent.finished": {
+      "comment": "Marks a book read to the end of its last chapter.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finished"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已读完"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已讀完"
+          }
+        }
+      }
+    },
+    "recent.progress %lld %lld": {
+      "comment": "Which chapter of how many, on a reading history row.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chapter %lld of %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %lld / %lld 章"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %lld / %lld 章"
+          }
+        }
+      }
+    },
+    "recent.progress.share %lld %lld %@": {
+      "comment": "Which chapter of how many, and how far into it.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chapter %lld of %lld · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %lld / %lld 章 · %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %lld / %lld 章 · %@"
+          }
+        }
+      }
+    },
     "rules.import.error.malformed": {
       "comment": "The JSON is not a valid site rule.",
       "extractionState": "manual",
@@ -2445,6 +2565,126 @@
           "stringUnit": {
             "state": "translated",
             "value": "閱讀外觀"
+          }
+        }
+      }
+    },
+    "settings.recent": {
+      "comment": "Settings section for the reading history.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent Reading"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "近期阅读"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "近期閱讀"
+          }
+        }
+      }
+    },
+    "settings.recent.clear": {
+      "comment": "Empties the reading history.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Recent Reading"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空近期阅读"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空近期閱讀"
+          }
+        }
+      }
+    },
+    "settings.recent.clear.confirm": {
+      "comment": "Says what clearing the reading history does and does not remove.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The recent reading list will be emptied. Where you got to in each book is kept."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "近期阅读列表会被清空，每本书读到哪里会保留。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "近期閱讀清單會被清空，每本書讀到哪裡會保留。"
+          }
+        }
+      }
+    },
+    "settings.recent.count": {
+      "comment": "How many books the reading history lists.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entries shown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示条数"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示筆數"
+          }
+        }
+      }
+    },
+    "settings.recent.footer": {
+      "comment": "Explains the reading history and when the app opens on the library instead.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent Reading is the first screen when the app opens. If every book on the list has been read to 100% of its last chapter, the app opens on the library instead."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“近期阅读”是打开 App 时的第一个画面。若列表上的书都已读到最后一章的 100%，打开 App 时会直接进入书架。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「近期閱讀」是開啟 App 時的第一個畫面。若列表上的書都已讀到最後一章的 100%，開啟 App 時會直接進入書櫃。"
           }
         }
       }
@@ -3021,6 +3261,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "書櫃"
+          }
+        }
+      }
+    },
+    "tab.recent": {
+      "comment": "Points at the reading history tab, which is the app's first screen.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "近期阅读"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "近期閱讀"
           }
         }
       }

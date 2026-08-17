@@ -36,7 +36,8 @@ struct LibraryRepo {
                 displayName: nil, author: author, coverURL: coverURL,
                 addedAt: now, updatedAt: now,
                 lastReadSiteChapterId: nil, lastReadParagraph: nil,
-                lastReadCharacterOffset: nil, lastReadFraction: nil, catalogUpdatedAt: nil
+                lastReadCharacterOffset: nil, lastReadFraction: nil,
+                lastReadAt: nil, catalogUpdatedAt: nil
             )
             try book.insert(db)
             return book
@@ -82,6 +83,12 @@ struct LibraryRepo {
     ///   previous number: a share left over from the last chapter would be read as
     ///   belonging to this one. The only caller with no text is an incoming iCloud
     ///   record, and the device that owns the position re-publishes the share with it.
+    ///
+    /// The one writer of `lastReadAt`, because it is the one place a reading position
+    /// is recorded: anything else that stamped it would be claiming the book was read
+    /// when it was only renamed. An incoming iCloud record passes `now` as the time
+    /// the *other* device wrote it, so a book read on the iPad this morning lands in
+    /// the history where it belongs rather than at the moment the sync arrived.
     func updateProgress(
         bookId: String,
         position: ReadingPosition,
@@ -94,8 +101,72 @@ struct LibraryRepo {
             book.lastReadParagraph = position.anchor.paragraph
             book.lastReadCharacterOffset = position.anchor.characterOffset
             book.lastReadFraction = fraction
+            book.lastReadAt = now
             book.updatedAt = now
             try book.update(db)
+        }
+    }
+
+    // MARK: - Reading history
+
+    /// The books the reader has been in, newest first, and enough about where each
+    /// one stopped to draw a row without opening it.
+    ///
+    /// One query for the whole screen, joined rather than looked up per book, for the
+    /// reason `newChapterCounts` gives: this feeds a list, and a per-book lookup would
+    /// be a query per row on every reload. The join is the reading position — the book
+    /// stores *which* chapter, and only that chapter's own row knows its title and its
+    /// number — so a book whose chapter the site has since dropped comes back with
+    /// nulls and still appears, which is the honest answer for "you read this, and the
+    /// place is gone".
+    ///
+    /// `lastReadAt` is the gate as well as the order: a book that has never been opened
+    /// has no business in a reading history, and one whose history was cleared has been
+    /// taken out of it on purpose.
+    ///
+    /// The id breaks ties the same way `LibrarySort.recentlyRead` breaks them, so the
+    /// two orderings of the same column cannot disagree — even in the case neither of
+    /// them can really reach, two positions recorded in the same millisecond.
+    func recentlyRead(limit: Int) throws -> [RecentRead] {
+        guard limit > 0 else { return [] }
+        return try writer.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT book.*,
+                       lastRead."title" AS lastReadChapterTitle,
+                       lastRead."index" AS lastReadChapterIndex,
+                       (SELECT COUNT(*) FROM chapter WHERE chapter."bookId" = book."id")
+                           AS chapterCount
+                FROM book
+                LEFT JOIN chapter AS lastRead
+                       ON lastRead."bookId" = book."id"
+                      AND lastRead."siteChapterId" = book."lastReadSiteChapterId"
+                WHERE book."lastReadAt" IS NOT NULL
+                ORDER BY book."lastReadAt" DESC, book."id" DESC
+                LIMIT ?
+                """, arguments: [limit])
+            .map { row in
+                RecentRead(
+                    book: try Book(row: row),
+                    chapterTitle: row["lastReadChapterTitle"],
+                    chapterIndex: row["lastReadChapterIndex"],
+                    chapterCount: row["chapterCount"]
+                )
+            }
+        }
+    }
+
+    /// Forgets when every book was last read, and nothing else.
+    ///
+    /// The positions themselves stay: "clear my recent reading" is about the list on
+    /// screen, and dropping where the reader had got to in a dozen novels to satisfy
+    /// it would be answering a much larger question than the one asked.
+    ///
+    /// `updatedAt` is deliberately not bumped. It is what iCloud merges on, so
+    /// stamping it here would push a "newer" record at every other device and have
+    /// them re-pull rows that did not change.
+    func clearReadingHistory() throws {
+        try writer.write { db in
+            try db.execute(sql: #"UPDATE "book" SET "lastReadAt" = NULL"#)
         }
     }
 

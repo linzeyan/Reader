@@ -45,6 +45,22 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     /// since — both mean "which chapter, and nothing finer", which is what every screen
     /// showed before the column existed.
     var lastReadFraction: Double?
+    /// When the reader was last in this book, and `nil` for a book they have never
+    /// opened — which is what makes the recent-reading list orderable at all.
+    ///
+    /// A column of its own rather than `updatedAt`, which is the nearest thing that
+    /// already existed: that one is bumped by a rename and by a catalog refresh
+    /// picking up a new site title, so it means "last touched". A shelf sorted by it
+    /// puts a book the reader only renamed above the novel they read last night, and
+    /// a *history* built on it would be worse still — it would list books nobody has
+    /// opened. `LibrarySort.recentlyRead` reads this now for the same reason.
+    ///
+    /// Written by `LibraryRepo.updateProgress`, which is the one place a reading
+    /// position is recorded, and cleared en masse by `clearReadingHistory` — the
+    /// history is a record of reading, and clearing it is the user saying to forget
+    /// it. Their positions are untouched: forgetting *when* they read a book is not
+    /// forgetting *where* they got to.
+    var lastReadAt: Date?
     /// When the chapter index was last read from the site. `nil` means the
     /// catalog has never been fetched — which is not the same as "it is stale",
     /// and the two lead to very different screens.

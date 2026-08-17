@@ -1,23 +1,45 @@
 import SwiftUI
 
-/// The app shell: three tabs, the off-screen fetcher, and the things that have to
+/// The app shell: four tabs, the off-screen fetcher, and the things that have to
 /// be able to appear over anything — the challenge sheet, the error banner, and
 /// the import of a file another app has just handed us.
 struct RootView: View {
-    @State private var env = AppEnvironment.makeShared()
+    @State private var env: AppEnvironment
+    /// Which tab is on screen. Its starting value is the launch's answer to "where was
+    /// I", taken once in `init` — see `RootTab.home(recent:)`.
+    @State private var tab: RootTab
     @State private var hostToken = 0
     /// 0…1 while a file handed over by another app is being imported.
     @State private var importProgress: Double?
     @Environment(\.scenePhase) private var scenePhase
 
+    /// An explicit initialiser so the opening tab can be decided *from* the environment
+    /// this launch just built, before anything is on screen.
+    ///
+    /// Deciding it in the binding instead would re-decide it continuously: a reader who
+    /// finishes their last unfinished book while sitting on the history would have the
+    /// app change tabs underneath them. This is a fact about the launch, and taking it
+    /// into `@State` here is what pins it to one.
+    init() {
+        let env = AppEnvironment.makeShared()
+        _env = State(initialValue: env)
+        _tab = State(initialValue: RootTab.home(recent: env.visibleRecentReads))
+    }
+
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
+            RecentReadingView()
+                .tabItem { Label("tab.recent", systemImage: "clock") }
+                .tag(RootTab.recent)
             LibraryView()
                 .tabItem { Label("tab.library", systemImage: "books.vertical") }
+                .tag(RootTab.library)
             SearchView()
                 .tabItem { Label("tab.search", systemImage: "magnifyingglass") }
+                .tag(RootTab.search)
             SettingsView()
                 .tabItem { Label("tab.settings", systemImage: "gearshape") }
+                .tag(RootTab.settings)
         }
         .environment(env)
         // The fetcher's web view must live in the hierarchy even when idle:

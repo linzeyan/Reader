@@ -32,6 +32,42 @@ final class LibrarySettings {
         didSet { defaults.set(onlyWithNewChapters, forKey: Keys.onlyWithNewChapters) }
     }
 
+    /// How many books the reading history shows.
+    ///
+    /// Five by default: the history exists to answer "what was I reading", and that is
+    /// a question about the two or three books someone is actually in — a longer list
+    /// stops being an answer and becomes a second shelf. Fifteen is the ceiling for the
+    /// same reason, and because the list is the app's first screen: it has to be
+    /// readable without scrolling on the phone that shows the fewest rows.
+    ///
+    /// Clamped on the way in as well as in the UI. This is read straight out of
+    /// `UserDefaults`, which a previous build — or a device restored from one — is free
+    /// to have left anything in, and the value becomes a SQL `LIMIT`.
+    ///
+    /// Computed over a private store rather than written as `didSet`, the way every
+    /// other setting here is, precisely *because* it clamps. Under `@Observable` these
+    /// are no longer stored properties with observers: the macro turns each one into an
+    /// accessor pair, so the rule that assigning inside `didSet` does not re-enter it no
+    /// longer holds — it calls the setter again, and the clamp recursed until the stack
+    /// ran out. Observation still reaches this: the getter reads a stored property, and
+    /// the setter writes one.
+    var recentReadingCount: Int {
+        get { storedRecentReadingCount }
+        set {
+            storedRecentReadingCount = Self.clamp(newValue)
+            defaults.set(storedRecentReadingCount, forKey: Keys.recentReadingCount)
+        }
+    }
+
+    static let recentReadingRange = 1...15
+    static let defaultRecentReadingCount = 5
+
+    private var storedRecentReadingCount: Int
+
+    private static func clamp(_ count: Int) -> Int {
+        min(max(count, recentReadingRange.lowerBound), recentReadingRange.upperBound)
+    }
+
     /// The books whose catalog runs newest chapter first, by book id.
     ///
     /// Per book rather than one setting for the whole app: the same shelf holds a novel
@@ -66,6 +102,7 @@ final class LibrarySettings {
         static let groupBySource = "library.groupBySource"
         static let onlyWithNewChapters = "library.onlyWithNewChapters"
         static let catalogDescending = "library.catalogDescending"
+        static let recentReadingCount = "library.recentReadingCount"
     }
 
     private let defaults: UserDefaults
@@ -79,5 +116,10 @@ final class LibrarySettings {
         groupBySource = defaults.object(forKey: Keys.groupBySource) as? Bool ?? true
         onlyWithNewChapters = defaults.object(forKey: Keys.onlyWithNewChapters) as? Bool ?? false
         catalogDescending = defaults.dictionary(forKey: Keys.catalogDescending) as? [String: Bool] ?? [:]
+        // `integer(forKey:)` answers 0 for a key that was never written, which is not
+        // a length anyone chose — hence the object check before the clamp.
+        storedRecentReadingCount = Self.clamp(
+            defaults.object(forKey: Keys.recentReadingCount) as? Int ?? Self.defaultRecentReadingCount
+        )
     }
 }

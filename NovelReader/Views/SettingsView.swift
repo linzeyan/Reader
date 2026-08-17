@@ -48,6 +48,11 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings.storage")
                 }
 
+                // Next to the appearance controls rather than up with the sources and
+                // the sync toggle: those decide what the app can reach, this decides
+                // what reading looks like — which is what a list of half-read books is.
+                RecentReadingSection()
+
                 Section("reader.settings") {
                     NavigationLink("settings.appearance") { AppearanceSettingsView() }
                         .accessibilityIdentifier("settings.appearance")
@@ -66,6 +71,56 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "—"
         let build = info?["CFBundleVersion"] as? String ?? "—"
         return "\(short) (\(build))"
+    }
+}
+
+// MARK: - Reading history
+
+/// The two controls the app's first screen has: how long it is, and a way to empty it.
+///
+/// Here rather than in a menu on the screen itself, unlike the shelf's arrangement
+/// controls. Those are three choices a reader flips between; these are set once, and
+/// one of them is a delete — putting a destructive button in the toolbar of the screen
+/// it destroys is how it gets pressed by someone reaching for the first row.
+private struct RecentReadingSection: View {
+    @Environment(AppEnvironment.self) private var env
+    @State private var confirmingClear = false
+
+    var body: some View {
+        @Bindable var settings = env.librarySettings
+
+        Section {
+            Stepper(
+                value: $settings.recentReadingCount,
+                in: LibrarySettings.recentReadingRange
+            ) {
+                LabeledContent("settings.recent.count") {
+                    Text("\(settings.recentReadingCount)")
+                }
+            }
+            .accessibilityIdentifier("settings.recent.count")
+
+            Button("settings.recent.clear", role: .destructive) { confirmingClear = true }
+                .accessibilityIdentifier("settings.recent.clear")
+                // Nothing to forget is not an error, and a button that does nothing is
+                // worse than one that is plainly unavailable.
+                .disabled(env.recentReads.isEmpty)
+        } header: {
+            Text("settings.recent")
+        } footer: {
+            Text("settings.recent.footer")
+        }
+        // Asked about, unlike most of this app's deletes, because what is destroyed is
+        // not visible from here: the list is on another tab, and "clear" gives no hint
+        // that reading *positions* survive it. The dialog is where that gets said.
+        .confirmationDialog(
+            "settings.recent.clear.confirm",
+            isPresented: $confirmingClear,
+            titleVisibility: .visible
+        ) {
+            Button("settings.recent.clear", role: .destructive) { env.clearReadingHistory() }
+            Button("common.cancel", role: .cancel) {}
+        }
     }
 }
 
