@@ -890,7 +890,7 @@ final class ReaderModel {
     }
 
     func loadNext() async {
-        guard !isTurningPage else { return deferredNext = true }
+        guard !isTurningPage else { return hold(&deferredNext) }
         guard !isLoading, let last = loaded.last else { return }
         let nextIndex = last.chapter.index + 1
         guard chapters.indices.contains(nextIndex) else { return }
@@ -935,7 +935,7 @@ final class ReaderModel {
     ///   reader, and a third after that, walking backwards through the book one queued
     ///   task at a time.
     func loadPrevious(before index: Int) async {
-        guard !isTurningPage else { return deferredPrevious = true }
+        guard !isTurningPage else { return hold(&deferredPrevious) }
         guard !isLoading, let first = loaded.first, first.chapter.index == index else { return }
         let target = index - 1
         guard chapters.indices.contains(target) else { return }
@@ -1141,13 +1141,31 @@ final class ReaderModel {
     /// outside. Waiting longer would only delay text the reader is about to need.
     private static let turnSettling: Duration = .milliseconds(320)
 
+    /// How long a chapter may be held off in total, however many turns go by.
+    ///
+    /// A reader tapping faster than a turn settles — which is most of a fast read, the
+    /// traces show turns replaced after 100ms — would otherwise renew the hold on every
+    /// tap and never let the chapter in at all, until they tapped their way off the end of
+    /// what is loaded. One stall after a second of that is much the better bargain: it is
+    /// the difference between a page that hitches and a page that has nothing to show.
+    private static let deferralLimit: Duration = .seconds(1)
+
     private var turnEnds: ContinuousClock.Instant?
     private var deferredNext = false
     private var deferredPrevious = false
+    /// When the load now being held off was first asked for. Not reset by a later turn:
+    /// the limit is on how long the *chapter* waits, not on how long this turn does.
+    private var deferredSince: ContinuousClock.Instant?
 
     private var isTurningPage: Bool {
-        guard let turnEnds else { return false }
-        return ContinuousClock.now < turnEnds
+        guard let turnEnds, ContinuousClock.now < turnEnds else { return false }
+        guard let deferredSince else { return true }
+        return ContinuousClock.now < deferredSince.advanced(by: Self.deferralLimit)
+    }
+
+    private func hold(_ load: inout Bool) {
+        load = true
+        if deferredSince == nil { deferredSince = .now }
     }
 
     /// A tapped page turn has started moving.
@@ -1160,9 +1178,16 @@ final class ReaderModel {
         Task { [weak self] in
             try? await Task.sleep(for: Self.turnSettling)
             guard let self else { return }
-            self.turnEnds = nil
-            // Re-asked rather than remembered: the reader has moved since the frame that
-            // wanted this, and each of these re-checks the edge it was called about.
+            // `turnEnds` is deliberately left alone. Clearing it here is what made the
+            // first version of this leak: on a fast read the next turn has already begun
+            // by the time this wakes, and wiping the deadline it just set let the load
+            // through into the middle of *its* animation — the very thing being prevented.
+            // The deadline expires by the clock, so it does not need to be taken down.
+            //
+            // Re-asked rather than replayed: the reader has moved since the frame that
+            // wanted this, each of these re-checks the edge it was called about, and both
+            // pass the gate again — so a turn still in flight simply holds them for the
+            // next one to hand on, up to `deferralLimit`.
             if self.deferredNext, let last = self.loaded.last {
                 self.deferredNext = false
                 await self.loadNextIfLast(after: last.chapter.index)
@@ -1171,6 +1196,7 @@ final class ReaderModel {
                 self.deferredPrevious = false
                 await self.loadPrevious(before: first.chapter.index)
             }
+            if !self.deferredNext, !self.deferredPrevious { self.deferredSince = nil }
         }
     }
 
