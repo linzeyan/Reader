@@ -40,9 +40,6 @@ struct ReaderView: View {
     /// questions: which paragraph the window's top edge is in — the reading position —
     /// and where a tap in the page-turn zones should scroll to.
     @State private var visibleParagraphs: [ReaderTapZone.VisibleParagraph] = []
-    /// The paragraph the last tapped page turn aimed at, kept only so `ReaderTrace` can
-    /// follow it. Temporary — see `ReaderTrace`.
-    @State private var tracedTarget: String?
     var body: some View {
         ZStack {
             settings.theme.background.ignoresSafeArea()
@@ -143,13 +140,6 @@ struct ReaderView: View {
                     .accessibilityIdentifier("reader.text")
                 }
                 .scrollDismissesKeyboard(.immediately)
-                // Temporary, for `ReaderTrace`: simultaneous and consuming nothing, so the
-                // scroll and both tap gestures still see every touch they did before.
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { _ in ReaderTrace.touch(down: true) }
-                        .onEnded { _ in ReaderTrace.touch(down: false) }
-                )
                 // Where the reading position comes from: the frames say what is on
                 // screen, and the top of that is where the reader is. Geometry rather
                 // than `onAppear`, because appearing is a fact about which rows the
@@ -165,18 +155,6 @@ struct ReaderView: View {
                     // from estimates and corrects them as rows build, so a single
                     // `scrollTo` lands and then has the content slide out from under
                     // it.
-                    ReaderTrace.frame(
-                        topChapter: span.top.chapterIndex,
-                        topParagraph: span.top.paragraph,
-                        topMinY: span.top.minY,
-                        bottomChapter: span.bottom.chapterIndex,
-                        bottomParagraph: span.bottom.paragraph,
-                        bottomMaxY: span.bottom.maxY,
-                        targetMinY: frames.first { $0.id == tracedTarget }?.minY,
-                        isLoading: model.isLoading,
-                        loaded: model.loadedChapterRange,
-                        pendingTarget: model.scrollTarget
-                    )
                     if let pending = model.viewportChanged(top: span.top, bottom: span.bottom) {
                         proxy.scrollTo(pending, anchor: .top)
                     }
@@ -237,14 +215,6 @@ struct ReaderView: View {
         guard let scroll = ReaderTapZone.pageScroll(
             zone, over: visibleParagraphs, viewport: context.window.height
         ) else { return }
-        tracedTarget = scroll.id
-        ReaderTrace.turn(
-            zone: zone == .next ? "next" : "previous",
-            targetID: scroll.id,
-            anchorY: scroll.anchor.y,
-            targetMinY: visibleParagraphs.first { $0.id == scroll.id }?.minY,
-            viewport: context.window.height
-        )
         // Animated, unlike a jump between chapters: this is the reader moving through
         // text they are reading, and a page that appears without moving gives them
         // nothing to tell it apart from a page that never turned.
@@ -946,20 +916,10 @@ final class ReaderModel {
         retarget()
     }
 
-    /// The reading-order span of what is on screen, for `ReaderTrace`. Temporary.
-    var loadedChapterRange: ClosedRange<Int>? {
-        guard let first = loaded.first, let last = loaded.last else { return nil }
-        return first.chapter.index...last.chapter.index
-    }
-
     private func append(_ chapter: Chapter) async {
         isLoading = true
         error = nil
-        ReaderTrace.chapter("append-begin", index: chapter.index)
-        defer {
-            isLoading = false
-            ReaderTrace.chapter("append-end", index: chapter.index)
-        }
+        defer { isLoading = false }
         do {
             loaded.append(LoadedChapter(chapter: chapter, paragraphs: try await paragraphs(for: chapter)))
             startReadingAhead()
