@@ -245,6 +245,9 @@ struct ReaderView: View {
             targetMinY: visibleParagraphs.first { $0.id == scroll.id }?.minY,
             viewport: context.window.height
         )
+        // Said before the scroll starts, because the frames this turn produces are what
+        // asks for the next chapter, and the whole point is that the asking waits.
+        model?.pageTurnBegan()
         // Animated, unlike a jump between chapters: this is the reader moving through
         // text they are reading, and a page that appears without moving gives them
         // nothing to tell it apart from a page that never turned.
@@ -1094,16 +1097,77 @@ final class ReaderModel {
         reportedFraction = readShare(through: bottom)
         persistProgress(.reading)
         if !isLoading {
-            if let last = loaded.last, bottom.chapterIndex == last.chapter.index,
-               bottom.paragraph + Self.prefetchLead >= last.paragraphs.count {
-                Task { await loadNextIfLast(after: last.chapter.index) }
-            }
-            if let first = loaded.first, top.chapterIndex == first.chapter.index,
-               top.paragraph < Self.prefetchLead {
-                Task { await loadPrevious(before: first.chapter.index) }
+            let atEnd = loaded.last.map {
+                bottom.chapterIndex == $0.chapter.index
+                    && bottom.paragraph + Self.prefetchLead >= $0.paragraphs.count
+            } ?? false
+            let atStart = loaded.first.map {
+                top.chapterIndex == $0.chapter.index && top.paragraph < Self.prefetchLead
+            } ?? false
+            // Held back while a tapped page is still travelling. A page turn is what
+            // scrolls the seam into range, so the chapter it asks for arrives in the middle
+            // of the turn's own animation — and building a chapter's rows holds the main
+            // thread long enough (a tenth of a second for a long chapter, measured) that the
+            // animation freezes where it stands and then covers the rest of its distance in
+            // one frame. That is the page that half turns and jumps: not a wrong
+            // destination, a turn interrupted on its way there.
+            if isTurningPage {
+                // Kept apart, because the two are not interchangeable: `loadPrevious` does
+                // not ask whether the reader is near the top — its own guard only re-checks
+                // which chapter is first — so running it for a turn that was near the *end*
+                // would insert a chapter above a reader who never went there.
+                deferredNext = deferredNext || atEnd
+                deferredPrevious = deferredPrevious || atStart
+            } else {
+                if atEnd, let last = loaded.last {
+                    Task { await loadNextIfLast(after: last.chapter.index) }
+                }
+                if atStart, let first = loaded.first {
+                    Task { await loadPrevious(before: first.chapter.index) }
+                }
             }
         }
         return nil
+    }
+
+    /// How long a tapped page turn is left alone for.
+    ///
+    /// The turn animates for 0.2s; the rest is the layout pass that follows it, measured
+    /// from the traces of turns that were not interrupted — those settle by 0.28s at the
+    /// outside. Waiting longer would only delay text the reader is about to need.
+    private static let turnSettling: Duration = .milliseconds(320)
+
+    private var turnEnds: ContinuousClock.Instant?
+    private var deferredNext = false
+    private var deferredPrevious = false
+
+    private var isTurningPage: Bool {
+        guard let turnEnds else { return false }
+        return ContinuousClock.now < turnEnds
+    }
+
+    /// A tapped page turn has started moving.
+    ///
+    /// Only the tap zones call this. A scroll made with a finger has no animation to
+    /// protect — the reader is driving it frame by frame, and a hitch in the middle reads
+    /// as the scroll being heavy rather than as the page arriving somewhere it should not.
+    func pageTurnBegan() {
+        turnEnds = .now.advanced(by: Self.turnSettling)
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.turnSettling)
+            guard let self else { return }
+            self.turnEnds = nil
+            // Re-asked rather than remembered: the reader has moved since the frame that
+            // wanted this, and each of these re-checks the edge it was called about.
+            if self.deferredNext, let last = self.loaded.last {
+                self.deferredNext = false
+                await self.loadNextIfLast(after: last.chapter.index)
+            }
+            if self.deferredPrevious, let first = self.loaded.first {
+                self.deferredPrevious = false
+                await self.loadPrevious(before: first.chapter.index)
+            }
+        }
     }
 
     /// How far through the chapter the scrolling reader has read, measured to the bottom
