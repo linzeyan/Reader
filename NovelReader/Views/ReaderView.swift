@@ -245,9 +245,6 @@ struct ReaderView: View {
             targetMinY: visibleParagraphs.first { $0.id == scroll.id }?.minY,
             viewport: context.window.height
         )
-        // Said before the scroll starts, because the frames this turn produces are what
-        // asks for the next chapter, and the whole point is that the asking waits.
-        model?.pageTurnBegan()
         // Animated, unlike a jump between chapters: this is the reader moving through
         // text they are reading, and a page that appears without moving gives them
         // nothing to tell it apart from a page that never turned.
@@ -890,24 +887,24 @@ final class ReaderModel {
     }
 
     func loadNext() async {
-        guard !isTurningPage else { return hold(&deferredNext) }
         guard !isLoading, let last = loaded.last else { return }
         let nextIndex = last.chapter.index + 1
         guard chapters.indices.contains(nextIndex) else { return }
         await append(chapters[nextIndex])
     }
 
-    /// How many paragraphs of the visible span from the edge of what is loaded counts
-    /// as "nearly there". Far enough that the next chapter's text arrives before the
-    /// reader reaches the seam, close enough that a reader who stops mid-chapter has
-    /// not pulled a chapter they will never look at.
-    private static let prefetchLead = 6
+    /// The least a chapter may be asked for ahead of the seam, in paragraphs.
+    ///
+    /// The lead that actually governs is two pages, measured off the screen — see
+    /// `viewportChanged`. This is the floor for what measuring cannot describe: a
+    /// paragraph long enough that one of them is the entire page.
+    private static let minimumPrefetchLead = 6
 
     /// Pulls the next chapter in while the reader is still a few paragraphs short of it.
     ///
     /// The marker at the very foot of the text is too late to be smooth: reaching it is
     /// the moment the scroll runs out of content, and the file read and layout pass that
-    /// follow happen while the reader is looking at the seam. Asked for a few paragraphs
+    /// follow happen while the reader is looking at the seam. Asked for a page or two
     /// early, the same work lands before they get there.
     ///
     /// - Parameter index: the chapter the paragraph belongs to. A reader who scrolled
@@ -935,7 +932,6 @@ final class ReaderModel {
     ///   reader, and a third after that, walking backwards through the book one queued
     ///   task at a time.
     func loadPrevious(before index: Int) async {
-        guard !isTurningPage else { return hold(&deferredPrevious) }
         guard !isLoading, let first = loaded.first, first.chapter.index == index else { return }
         let target = index - 1
         guard chapters.indices.contains(target) else { return }
@@ -1099,105 +1095,29 @@ final class ReaderModel {
         reportedFraction = readShare(through: bottom)
         persistProgress(.reading)
         if !isLoading {
+            // Two pages of lead, with the page measured off this screen rather than
+            // assumed. Six paragraphs — a third of a screen at the default size — was less
+            // than one tapped page turn, so the turn that asked for the next chapter was
+            // itself the turn that ran off the end of the loaded text: with nothing below
+            // to scroll into it stopped short of where it was aimed, and then finished the
+            // journey on its own once the chapter landed. That is the page that turns
+            // twice. Measured because the reader's font size moves paragraphs-per-page by
+            // a factor of three, and a lead fixed in paragraphs is late at the largest text
+            // or greedy at the smallest.
+            let page = top.chapterIndex == bottom.chapterIndex
+                ? max(1, bottom.paragraph - top.paragraph)
+                : Self.minimumPrefetchLead
+            let lead = max(Self.minimumPrefetchLead, 2 * page)
             if let last = loaded.last, bottom.chapterIndex == last.chapter.index,
-               bottom.paragraph + Self.prefetchLead >= last.paragraphs.count {
+               bottom.paragraph + lead >= last.paragraphs.count {
                 Task { await loadNextIfLast(after: last.chapter.index) }
             }
             if let first = loaded.first, top.chapterIndex == first.chapter.index,
-               top.paragraph < Self.prefetchLead {
+               top.paragraph < lead {
                 Task { await loadPrevious(before: first.chapter.index) }
             }
         }
         return nil
-    }
-
-    // MARK: Page turns
-
-    /// While a tapped page turn is travelling, no chapter may be inserted.
-    ///
-    /// A turn is what scrolls the seam into range, so the chapter it provokes arrives in
-    /// the middle of the turn's own animation. Fetching it costs nothing — read-ahead has
-    /// the text — but building a chapter's rows holds the main thread for as much as an
-    /// eighth of a second on a long chapter, and the animation freezes where it stands and
-    /// then covers the rest of its distance in a single frame. That is the page that half
-    /// turns and jumps: not a wrong destination, a turn interrupted on its way to the right
-    /// one.
-    ///
-    /// The gate is here, on the two loads themselves, rather than on the prefetch that was
-    /// the obvious suspect. There are two ways in — the prefetch in `viewportChanged`, and
-    /// the one-point marker at the foot of the text, which a turn also scrolls into range —
-    /// and gating only the first left half the turns still stalling. One rule, at the
-    /// bottom, is a rule that cannot be walked around by a caller that did not know about
-    /// it.
-    ///
-    /// Deferring is safe here for the same reason it is honest: each is remembered only
-    /// when something actually asked for it, and both re-check on the way back in, so a
-    /// replay cannot insert a chapter beside a reader who has since moved elsewhere.
-
-    /// How long a tapped page turn is left alone for.
-    ///
-    /// The turn animates for 0.2s; the rest is the layout pass that follows it, measured
-    /// from the traces of turns that were not interrupted — those settle by 0.28s at the
-    /// outside. Waiting longer would only delay text the reader is about to need.
-    private static let turnSettling: Duration = .milliseconds(320)
-
-    /// How long a chapter may be held off in total, however many turns go by.
-    ///
-    /// A reader tapping faster than a turn settles — which is most of a fast read, the
-    /// traces show turns replaced after 100ms — would otherwise renew the hold on every
-    /// tap and never let the chapter in at all, until they tapped their way off the end of
-    /// what is loaded. One stall after a second of that is much the better bargain: it is
-    /// the difference between a page that hitches and a page that has nothing to show.
-    private static let deferralLimit: Duration = .seconds(1)
-
-    private var turnEnds: ContinuousClock.Instant?
-    private var deferredNext = false
-    private var deferredPrevious = false
-    /// When the load now being held off was first asked for. Not reset by a later turn:
-    /// the limit is on how long the *chapter* waits, not on how long this turn does.
-    private var deferredSince: ContinuousClock.Instant?
-
-    private var isTurningPage: Bool {
-        guard let turnEnds, ContinuousClock.now < turnEnds else { return false }
-        guard let deferredSince else { return true }
-        return ContinuousClock.now < deferredSince.advanced(by: Self.deferralLimit)
-    }
-
-    private func hold(_ load: inout Bool) {
-        load = true
-        if deferredSince == nil { deferredSince = .now }
-    }
-
-    /// A tapped page turn has started moving.
-    ///
-    /// Only the tap zones call this. A scroll made with a finger has no animation to
-    /// protect — the reader is driving it frame by frame, and a hitch in the middle reads
-    /// as the scroll being heavy rather than as the page arriving somewhere it should not.
-    func pageTurnBegan() {
-        turnEnds = .now.advanced(by: Self.turnSettling)
-        Task { [weak self] in
-            try? await Task.sleep(for: Self.turnSettling)
-            guard let self else { return }
-            // `turnEnds` is deliberately left alone. Clearing it here is what made the
-            // first version of this leak: on a fast read the next turn has already begun
-            // by the time this wakes, and wiping the deadline it just set let the load
-            // through into the middle of *its* animation — the very thing being prevented.
-            // The deadline expires by the clock, so it does not need to be taken down.
-            //
-            // Re-asked rather than replayed: the reader has moved since the frame that
-            // wanted this, each of these re-checks the edge it was called about, and both
-            // pass the gate again — so a turn still in flight simply holds them for the
-            // next one to hand on, up to `deferralLimit`.
-            if self.deferredNext, let last = self.loaded.last {
-                self.deferredNext = false
-                await self.loadNextIfLast(after: last.chapter.index)
-            }
-            if self.deferredPrevious, let first = self.loaded.first {
-                self.deferredPrevious = false
-                await self.loadPrevious(before: first.chapter.index)
-            }
-            if !self.deferredNext, !self.deferredPrevious { self.deferredSince = nil }
-        }
     }
 
     /// How far through the chapter the scrolling reader has read, measured to the bottom
