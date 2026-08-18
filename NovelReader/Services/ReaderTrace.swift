@@ -36,6 +36,8 @@ enum ReaderTrace {
         zone: String, targetID: String, anchorY: CGFloat, targetMinY: CGFloat?, viewport: CGFloat
     ) {
         opened = CFAbsoluteTimeGetCurrent()
+        settledTarget = nil
+        lastTarget = nil
         emit(
             "turn zone=\(zone) target=\(targetID) anchorY=\(y(anchorY)) "
                 + "targetMinY=\(y(targetMinY)) viewport=\(y(viewport))"
@@ -54,12 +56,43 @@ enum ReaderTrace {
     ) {
         guard isRecording else { return }
         emit(
-            "frame top=\(topChapter)/\(topParagraph)@\(y(topMinY)) "
+            "\(tag(for: targetMinY)) top=\(topChapter)/\(topParagraph)@\(y(topMinY)) "
                 + "bottom=\(bottomChapter)/\(bottomParagraph)@\(y(bottomMaxY)) "
-                + "targetMinY=\(y(targetMinY)) loading=\(isLoading ? 1 : 0) "
+                + "targetMinY=\(y(targetMinY)) touch=\(isTouching ? 1 : 0) "
+                + "loading=\(isLoading ? 1 : 0) "
                 + "loaded=\(loaded.map { "\($0.lowerBound)...\($0.upperBound)" } ?? "-") "
                 + "pending=\(pendingTarget ?? "-")"
         )
+    }
+
+    /// Whether a finger is on the text.
+    ///
+    /// The one thing the first capture could not answer. A turn that lands and then slides
+    /// looks, in these numbers, exactly like a turn that lands and is then dragged: both are
+    /// smooth travel starting from where the turn stopped. Without this the log cannot say
+    /// which, and the reporter should not have to remember.
+    static func touch(down: Bool) {
+        isTouching = down
+    }
+
+    /// `drift` rather than `frame` once the turn has settled and the target moves anyway.
+    ///
+    /// The report is about movement nobody asked for, and it arrives seconds after the
+    /// interesting-looking part of the log has gone quiet. Naming it in the line means the
+    /// reporter greps for one word instead of reading four hundred of them.
+    private static func tag(for targetMinY: CGFloat?) -> String {
+        guard let targetMinY else { return "frame" }
+        guard let settled = settledTarget else {
+            // Two readings within a point of each other is the turn having stopped. The
+            // animation moves tens of points per frame, so it cannot be mistaken for this.
+            if let previous = lastTarget, abs(previous - targetMinY) < 1 { settledTarget = targetMinY }
+            lastTarget = targetMinY
+            return "frame"
+        }
+        lastTarget = targetMinY
+        // Two points of slack: the frames report at sub-pixel precision and a settled
+        // reader still jitters by a rounding error.
+        return abs(targetMinY - settled) > 2 ? "drift" : "frame"
     }
 
     /// A chapter load began or ended.
@@ -76,6 +109,10 @@ enum ReaderTrace {
     /// than from a wall clock because the question is entirely about the seconds *after* a
     /// tap, and absolute timestamps would make the reader of the log do the subtraction.
     private static var opened = CFAbsoluteTimeGetCurrent()
+    private static var isTouching = false
+    /// Where the target came to rest, once it has. Nil until the turn stops moving.
+    private static var settledTarget: CGFloat?
+    private static var lastTarget: CGFloat?
 
     /// How long a turn is worth watching. Long enough to outlast a chapter arriving over a
     /// slow connection, which is the case the report points at. Costs nothing while the

@@ -143,6 +143,13 @@ struct ReaderView: View {
                     .accessibilityIdentifier("reader.text")
                 }
                 .scrollDismissesKeyboard(.immediately)
+                // Temporary, for `ReaderTrace`: simultaneous and consuming nothing, so the
+                // scroll and both tap gestures still see every touch they did before.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in ReaderTrace.touch(down: true) }
+                        .onEnded { _ in ReaderTrace.touch(down: false) }
+                )
                 // Where the reading position comes from: the frames say what is on
                 // screen, and the top of that is where the reader is. Geometry rather
                 // than `onAppear`, because appearing is a fact about which rows the
