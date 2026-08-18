@@ -83,9 +83,14 @@ enum ReaderTrace {
     private static func tag(for targetMinY: CGFloat?) -> String {
         guard let targetMinY else { return "frame" }
         guard let settled = settledTarget else {
-            // Two readings within a point of each other is the turn having stopped. The
-            // animation moves tens of points per frame, so it cannot be mistaken for this.
-            if let previous = lastTarget, abs(previous - targetMinY) < 1 { settledTarget = targetMinY }
+            // Two readings within a point of each other is the turn having stopped — but
+            // only once it has had time to arrive. A stalled main thread also reports the
+            // same position twice, and reading that as "settled" turned the rest of an
+            // ordinary turn into a page of false `drift`.
+            if let previous = lastTarget, abs(previous - targetMinY) < 1,
+               CFAbsoluteTimeGetCurrent() - opened > Self.turnDuration {
+                settledTarget = targetMinY
+            }
             lastTarget = targetMinY
             return "frame"
         }
@@ -110,6 +115,8 @@ enum ReaderTrace {
     /// tap, and absolute timestamps would make the reader of the log do the subtraction.
     private static var opened = CFAbsoluteTimeGetCurrent()
     private static var isTouching = false
+    /// The turn's own animation, past which any movement is something else's doing.
+    private static let turnDuration: CFAbsoluteTime = 0.3
     /// Where the target came to rest, once it has. Nil until the turn stops moving.
     private static var settledTarget: CGFloat?
     private static var lastTarget: CGFloat?

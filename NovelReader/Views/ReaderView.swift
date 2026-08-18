@@ -890,6 +890,7 @@ final class ReaderModel {
     }
 
     func loadNext() async {
+        guard !isTurningPage else { return deferredNext = true }
         guard !isLoading, let last = loaded.last else { return }
         let nextIndex = last.chapter.index + 1
         guard chapters.indices.contains(nextIndex) else { return }
@@ -934,6 +935,7 @@ final class ReaderModel {
     ///   reader, and a third after that, walking backwards through the book one queued
     ///   task at a time.
     func loadPrevious(before index: Int) async {
+        guard !isTurningPage else { return deferredPrevious = true }
         guard !isLoading, let first = loaded.first, first.chapter.index == index else { return }
         let target = index - 1
         guard chapters.indices.contains(target) else { return }
@@ -1097,38 +1099,40 @@ final class ReaderModel {
         reportedFraction = readShare(through: bottom)
         persistProgress(.reading)
         if !isLoading {
-            let atEnd = loaded.last.map {
-                bottom.chapterIndex == $0.chapter.index
-                    && bottom.paragraph + Self.prefetchLead >= $0.paragraphs.count
-            } ?? false
-            let atStart = loaded.first.map {
-                top.chapterIndex == $0.chapter.index && top.paragraph < Self.prefetchLead
-            } ?? false
-            // Held back while a tapped page is still travelling. A page turn is what
-            // scrolls the seam into range, so the chapter it asks for arrives in the middle
-            // of the turn's own animation — and building a chapter's rows holds the main
-            // thread long enough (a tenth of a second for a long chapter, measured) that the
-            // animation freezes where it stands and then covers the rest of its distance in
-            // one frame. That is the page that half turns and jumps: not a wrong
-            // destination, a turn interrupted on its way there.
-            if isTurningPage {
-                // Kept apart, because the two are not interchangeable: `loadPrevious` does
-                // not ask whether the reader is near the top — its own guard only re-checks
-                // which chapter is first — so running it for a turn that was near the *end*
-                // would insert a chapter above a reader who never went there.
-                deferredNext = deferredNext || atEnd
-                deferredPrevious = deferredPrevious || atStart
-            } else {
-                if atEnd, let last = loaded.last {
-                    Task { await loadNextIfLast(after: last.chapter.index) }
-                }
-                if atStart, let first = loaded.first {
-                    Task { await loadPrevious(before: first.chapter.index) }
-                }
+            if let last = loaded.last, bottom.chapterIndex == last.chapter.index,
+               bottom.paragraph + Self.prefetchLead >= last.paragraphs.count {
+                Task { await loadNextIfLast(after: last.chapter.index) }
+            }
+            if let first = loaded.first, top.chapterIndex == first.chapter.index,
+               top.paragraph < Self.prefetchLead {
+                Task { await loadPrevious(before: first.chapter.index) }
             }
         }
         return nil
     }
+
+    // MARK: Page turns
+
+    /// While a tapped page turn is travelling, no chapter may be inserted.
+    ///
+    /// A turn is what scrolls the seam into range, so the chapter it provokes arrives in
+    /// the middle of the turn's own animation. Fetching it costs nothing — read-ahead has
+    /// the text — but building a chapter's rows holds the main thread for as much as an
+    /// eighth of a second on a long chapter, and the animation freezes where it stands and
+    /// then covers the rest of its distance in a single frame. That is the page that half
+    /// turns and jumps: not a wrong destination, a turn interrupted on its way to the right
+    /// one.
+    ///
+    /// The gate is here, on the two loads themselves, rather than on the prefetch that was
+    /// the obvious suspect. There are two ways in — the prefetch in `viewportChanged`, and
+    /// the one-point marker at the foot of the text, which a turn also scrolls into range —
+    /// and gating only the first left half the turns still stalling. One rule, at the
+    /// bottom, is a rule that cannot be walked around by a caller that did not know about
+    /// it.
+    ///
+    /// Deferring is safe here for the same reason it is honest: each is remembered only
+    /// when something actually asked for it, and both re-check on the way back in, so a
+    /// replay cannot insert a chapter beside a reader who has since moved elsewhere.
 
     /// How long a tapped page turn is left alone for.
     ///
