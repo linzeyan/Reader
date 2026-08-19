@@ -88,6 +88,16 @@ struct ReaderView: View {
             guard mode == .scroll else { return }
             Task { model?.retarget() }
         }
+        // The only thing this screen holds that is worth giving back, and the only
+        // place that knows which chapters the reader still needs. Scoped to the reader
+        // being on screen, which is exactly when there are chapters to give back.
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIApplication.didReceiveMemoryWarningNotification
+            )
+        ) { _ in
+            model?.dropDistantChapters()
+        }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -340,9 +350,13 @@ struct ReaderView: View {
             .foregroundStyle(settings.theme.foreground)
             .id(item.id)
 
-        ForEach(Array(item.paragraphs.enumerated()), id: \.offset) { offset, paragraph in
+        // Over the indices rather than `Array(paragraphs.enumerated())`: the latter
+        // materialises a fresh array of pairs, and every retained string in it, each
+        // time this chapter's rows are evaluated.
+        ForEach(item.paragraphs.indices, id: \.self) { offset in
             paragraphText(
-                paragraph, highlights: highlights, paragraph: offset, isBeingMarked: marking == offset
+                item.paragraphs[offset], highlights: highlights, paragraph: offset,
+                isBeingMarked: marking == offset
             )
                 .font(settings.font)
                 .lineSpacing(settings.lineSpacing)
@@ -827,14 +841,14 @@ final class ReaderModel {
     /// is moving. Nothing more is derived from it — position comes from the report
     /// itself, this is only yesterday's copy to compare against.
     private var lastTop: ReaderTapZone.VisibleParagraph?
-    /// When a chapter was last inserted above the reader. For the next few frames the
-    /// lazy stack corrects the estimated heights of the rows it just gained, and the
-    /// corrections report transient tops *inside the inserted chapter* — a chapter's
-    /// worth of apparent upward travel in sixteen milliseconds. To the direction test
-    /// that is a reader flying toward the front of the book, and acting on it is how
-    /// one polite insert cascades chapter by chapter to the cover. Until the reflow
+    /// When the text above the reader last changed — a chapter inserted, or chapters
+    /// dropped under memory pressure. For the next few frames the lazy stack corrects
+    /// the estimated heights of the rows it gained or lost, and the corrections report
+    /// transient tops a whole chapter away from where the reader is. To the direction
+    /// test that is a reader flying toward the front of the book, and acting on it is
+    /// how one polite insert cascades chapter by chapter to the cover. Until the reflow
     /// has had a moment to settle, upward movement is not the reader's.
-    private var insertedAboveAt: ContinuousClock.Instant?
+    private var contentAboveChangedAt: ContinuousClock.Instant?
 
     init(book: Book, env: AppEnvironment) {
         self.book = book
@@ -951,7 +965,7 @@ final class ReaderModel {
         defer { isLoading = false }
         guard let text = try? await paragraphs(for: chapters[target]) else { return }
         loaded.insert(LoadedChapter(chapter: chapters[target], paragraphs: text), at: 0)
-        insertedAboveAt = .now
+        contentAboveChangedAt = .now
         // Inserting above the reader moves everything they are looking at down by a whole
         // chapter, so the view is immediately aimed back at where they were. Their own
         // position is the target, which is also what stops the newly arrived paragraphs
@@ -1158,10 +1172,10 @@ final class ReaderModel {
             // that visibly runs backwards. Someone who wants what is above will move
             // toward it, and even one upward flick is pages of warning.
             //
-            // Deaf while an insert's reflow settles — see `insertedAboveAt`. A real
+            // Deaf while the reflow settles — see `contentAboveChangedAt`. A real
             // reader is a chapter away from the next trigger by then, so the pause
             // costs them nothing; without it the reflow's own frames are the trigger.
-            let settled = insertedAboveAt.map {
+            let settled = contentAboveChangedAt.map {
                 ContinuousClock.now > $0.advanced(by: .milliseconds(600))
             } ?? true
             if movingUp, settled, let first = loaded.first,
@@ -1249,6 +1263,33 @@ final class ReaderModel {
         currentAnchor = anchor
         reportedFraction = fraction
         persistProgress(.reading)
+    }
+
+    /// Gives back every chapter but the one being read and its two neighbours.
+    ///
+    /// The scroll gains chapters in both directions and nothing takes them out again:
+    /// `jump` empties the array, but a reader who simply keeps scrolling never calls
+    /// it, so one session in the reader holds every chapter it crossed. Measured on a
+    /// real book that is about seventy kilobytes a chapter, with the lazy stack's built
+    /// rows flat at sixty-odd throughout — small enough that trimming as a matter of
+    /// course would be paying a visible price for nothing. Dropping a chapter *above*
+    /// the reader shortens the text above them, and the correction that follows can
+    /// only land on a paragraph boundary rather than exactly where they were, so it
+    /// shows. Under real pressure that flinch is a good trade and being killed is not.
+    ///
+    /// Both neighbours are kept because both are wanted: the one ahead is what the
+    /// prefetch just paid for, and the one behind is where a reader turning back goes.
+    func dropDistantChapters() {
+        guard let current = loaded.firstIndex(where: {
+            $0.chapter.index == currentChapterIndex
+        }) else { return }
+        let keep = max(0, current - 1)...min(loaded.count - 1, current + 1)
+        guard keep.count < loaded.count else { return }
+        let droppedAbove = keep.lowerBound > 0
+        loaded = Array(loaded[keep])
+        guard droppedAbove else { return }
+        contentAboveChangedAt = .now
+        retarget()
     }
 
     /// Re-aims the scrolling reader at the current position without re-fetching.

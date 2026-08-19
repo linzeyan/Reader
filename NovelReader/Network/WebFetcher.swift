@@ -187,6 +187,19 @@ final class WebFetcher: NSObject {
         }
     }
 
+    /// Gives back the web view an import was read in.
+    ///
+    /// Called when an import finishes, not when a document does: an EPUB is one
+    /// `extract` per spine document, and the rule-list compile that building this view
+    /// costs is worth paying once a book rather than once a chapter.
+    ///
+    /// Worth calling at all because a second `WKWebView` is a second web content
+    /// process — tens of megabytes — and it was living for the rest of the session on
+    /// the strength of one import, still holding the DOM of the last document it read.
+    func releaseImportView() {
+        importView = nil
+    }
+
     /// Base URL for locally supplied markup. `about:blank` gives the document an
     /// opaque origin, and `decidePolicyFor` below refuses to let the import view
     /// navigate anywhere else.

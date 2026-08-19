@@ -33,7 +33,8 @@ struct ChapterDownloadView: View {
     }
 
     private var selectedChapters: [Chapter] { chapters.filter { selection.contains($0.id) } }
-    private var downloadedCount: Int { chapters.filter(\.isDownloaded).count }
+    /// Lazily, for the reason given on `BookDetailView.downloadedCount`.
+    private var downloadedCount: Int { chapters.lazy.filter(\.isDownloaded).count }
     /// Only chapters that are actually missing are worth queueing.
     private var selectedPending: [Chapter] { selectedChapters.filter { !$0.isDownloaded } }
     private var selectedDownloaded: [Chapter] { selectedChapters.filter(\.isDownloaded) }
@@ -73,8 +74,14 @@ struct ChapterDownloadView: View {
             }
 
             Section {
+                // Resolved once for the list, not once per row. `lastReadIndex(in:)`
+                // scans the catalog, so reading it inside the loop is quadratic — a
+                // thirteen-hundred-chapter book spent the best part of a million string
+                // comparisons on every pass, and the download screen re-evaluates on
+                // every chapter that lands.
+                let lastReadIndex = book.lastReadIndex(in: chapters)
                 ForEach(filtered) { chapter in
-                    ChapterRow(chapter: chapter, lastReadIndex: book.lastReadIndex(in: chapters))
+                    ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex)
                         .tag(chapter.id)
                         // Simultaneous, not `onLongPressGesture`: an exclusive
                         // recognizer on the row makes the list's own edit-mode tap
