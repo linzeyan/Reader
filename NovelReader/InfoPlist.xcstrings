@@ -1,54 +1,78 @@
 {
-  "sourceLanguage": "zh-Hant",
-  "strings": {
-    "EPUB Book": {
-      "comment": "Document type name in another app's \"Open in…\" list. The key is the CFBundleTypeName from Info.plist, because Launch Services looks that value up as a key — an entry inside an array has no key path of its own.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "EPUB Book"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "EPUB 书籍"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "EPUB 書籍"
+  "sourceLanguage" : "zh-Hant",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Bundle display name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "書房"
           }
         }
       }
     },
-    "Plain Text Book": {
-      "comment": "Document type name in another app's \"Open in…\" list. The key is the CFBundleTypeName from Info.plist, because Launch Services looks that value up as a key — an entry inside an array has no key path of its own.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Plain Text Book"
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "NovelReader"
+          }
+        }
+      }
+    },
+    "EPUB Book" : {
+      "comment" : "Document type name in another app's \"Open in…\" list. The key is the CFBundleTypeName from Info.plist, because Launch Services looks that value up as a key — an entry inside an array has no key path of its own.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EPUB Book"
           }
         },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "纯文本书籍"
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EPUB 书籍"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "純文字書籍"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EPUB 書籍"
+          }
+        }
+      }
+    },
+    "Plain Text Book" : {
+      "comment" : "Document type name in another app's \"Open in…\" list. The key is the CFBundleTypeName from Info.plist, because Launch Services looks that value up as a key — an entry inside an array has no key path of its own.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plain Text Book"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "纯文本书籍"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "純文字書籍"
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

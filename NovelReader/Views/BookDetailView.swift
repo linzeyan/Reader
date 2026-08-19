@@ -209,13 +209,17 @@ struct BookDetailView: View {
                 Text(isRefreshing ? "book.catalog.loading" : "book.catalog.empty")
                     .foregroundStyle(.secondary)
             } else {
+                // Read into a local before the loop: `lastReadIndex` is computed, and
+                // computing it scans the catalog, so touching it per row makes drawing
+                // a thirteen-hundred-chapter list quadratic.
+                let lastRead = lastReadIndex
                 ForEach(catalog.chapters) { chapter in
                     NavigationLink(
                         value: ReadingTarget(
                             book: current, position: .chapterStart(chapter.siteChapterId)
                         )
                     ) {
-                        ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex)
+                        ChapterRow(chapter: chapter, lastReadIndex: lastRead)
                     }
                 }
             }
@@ -380,7 +384,10 @@ struct BookDetailView: View {
         }
     }
 
-    private var downloadedCount: Int { chapters.filter(\.isDownloaded).count }
+    /// Counted lazily: the eager `filter` allocated a second array of every downloaded
+    /// chapter — a hundred and fifty kilobytes on a long book — to arrive at an integer,
+    /// and this is read several times per pass.
+    private var downloadedCount: Int { chapters.lazy.filter(\.isDownloaded).count }
 
     // MARK: - Exporting
 

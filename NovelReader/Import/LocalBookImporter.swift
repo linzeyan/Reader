@@ -76,13 +76,21 @@ struct LocalBookImporter {
         // Released as soon as the bytes are in hand rather than in a `defer`, so
         // the scope is not held open across the awaits that follow.
         let scoped = url.startAccessingSecurityScopedResource()
-        let data = try? Data(contentsOf: url)
+        let data = try? Data(contentsOf: url, options: .mappedIfSafe)
         if scoped { url.stopAccessingSecurityScopedResource() }
         guard let data, !data.isEmpty else { throw LocalBookError.unreadable }
         // Reading the file is itself long enough to cancel during — the picker
         // hands over documents that live on iCloud Drive — so the first checkpoint
         // sits here, before any of the expensive work starts.
         try Task.checkCancellation()
+
+        // Taken before the parse rather than at the call below, where it used to sit.
+        // As an argument to `store` its last use was *after* everything the parse
+        // builds, which pinned the whole file in memory beside every intermediate the
+        // parse makes of it: for a fifty-megabyte text that is the bytes, the decoded
+        // string, and the split paragraphs all at once. Hoisted, the file is free to
+        // go as soon as the parse has read it.
+        let siteBookId = Self.identifier(for: data)
 
         let parsed: (title: String?, author: String?, chapters: [ImportedChapter])
         let isEpub = url.pathExtension.lowercased() == "epub"
@@ -104,7 +112,7 @@ struct LocalBookImporter {
             // carry a placeholder title from whatever produced them.
             title: parsed.title?.nonBlank ?? url.deletingPathExtension().lastPathComponent,
             author: parsed.author?.nonBlank,
-            siteBookId: Self.identifier(for: data),
+            siteBookId: siteBookId,
             chapters: parsed.chapters,
             progressBase: isEpub ? Self.extractionShare : 0,
             progress: progress
@@ -131,31 +139,42 @@ struct LocalBookImporter {
 
         let script = try ExtractorScript.chapter(Self.embeddedDocumentRule)
         var chapters: [ImportedChapter] = []
-        for (offset, item) in document.items.enumerated() {
-            // Before the extraction, not after: each document is a round trip
-            // through the web view, and one of those is the whole distance between
-            // "it stopped" and "it stops eventually".
-            try Task.checkCancellation()
-            let payload = try await fetcher.extract(
-                html: item.xhtml, extracting: script, as: ExtractorScript.ChapterPayload.self
-            )
-            // Documents that extract to nothing are covers and chapter-heading
-            // plates — a single image and no text. Keeping them would put rows
-            // in the catalog that open onto a blank page.
-            if !payload.paragraphs.isEmpty {
-                chapters.append(
-                    ImportedChapter(
-                        title: item.tocTitle?.nonBlank
-                            ?? payload.title?.nonBlank
-                            ?? Self.partTitle(chapters.count + 1),
-                        paragraphs: payload.paragraphs
+        // Spelled out rather than deferred, because giving the view back is a hop onto
+        // the main actor and `defer` cannot await one. Both exits do it: the web view
+        // the spine documents are read in is wanted for the length of one import, and
+        // the content process behind it is not small enough to leave running for the
+        // rest of the session on the strength of a book the user opened once.
+        do {
+            for (offset, item) in document.items.enumerated() {
+                // Before the extraction, not after: each document is a round trip
+                // through the web view, and one of those is the whole distance between
+                // "it stopped" and "it stops eventually".
+                try Task.checkCancellation()
+                let payload = try await fetcher.extract(
+                    html: item.xhtml, extracting: script, as: ExtractorScript.ChapterPayload.self
+                )
+                // Documents that extract to nothing are covers and chapter-heading
+                // plates — a single image and no text. Keeping them would put rows
+                // in the catalog that open onto a blank page.
+                if !payload.paragraphs.isEmpty {
+                    chapters.append(
+                        ImportedChapter(
+                            title: item.tocTitle?.nonBlank
+                                ?? payload.title?.nonBlank
+                                ?? Self.partTitle(chapters.count + 1),
+                            paragraphs: payload.paragraphs
+                        )
                     )
+                }
+                await progress(
+                    Double(offset + 1) / Double(document.items.count) * Self.extractionShare
                 )
             }
-            await progress(
-                Double(offset + 1) / Double(document.items.count) * Self.extractionShare
-            )
+        } catch {
+            await fetcher.releaseImportView()
+            throw error
         }
+        await fetcher.releaseImportView()
         return (document.title, document.author, chapters)
     }
 

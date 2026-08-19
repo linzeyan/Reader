@@ -496,14 +496,16 @@ struct PaginatedChapterView: View {
     /// How far the end of a page is through the chapter.
     ///
     /// Measured to the end of the page rather than its start, so the last page reads as
-    /// the whole chapter instead of stopping short of it. Rounded down, because "100%"
-    /// with text still to come would be the one number the reader could catch out.
+    /// the whole chapter instead of stopping short of it. The scrolling reader measures
+    /// to the bottom of its window for the same reason, and both state the result
+    /// through `TextAnchor.claimedShare` so the two cannot round differently.
     private func fraction(atPage page: Int) -> Double {
         guard let paginator, paginator.pages.indices.contains(page) else { return 0 }
         let total = paginator.text.attributed.length
         guard total > 0 else { return 0 }
-        let read = Double(NSMaxRange(paginator.pages[page].range)) / Double(total)
-        return min(1, (read * 100).rounded(.down) / 100)
+        return TextAnchor.claimedShare(
+            Double(NSMaxRange(paginator.pages[page].range)) / Double(total)
+        )
     }
 
     /// Tells the reader view where a page starts and how far it reaches.

@@ -63,9 +63,13 @@ enum DemoSeed {
 
     /// Seeded in this order; the library sorts newest-first, so the last one
     /// listed here is the one a screenshot walk opens.
+    ///
+    /// Two of the three carry a reading position and one does not, which is what makes
+    /// both of the screens that show progress worth shooting: the shelf gets a row of
+    /// each kind, and the reading history gets a list rather than a single entry.
     private static let books = [
         DemoBook(siteId: "demo.example.com", bookId: "2087", title: "山海拾遺",
-                 author: "陳知白", chapterCount: 210, downloaded: 6, readingChapter: nil),
+                 author: "陳知白", chapterCount: 210, downloaded: 6, readingChapter: 40),
         DemoBook(siteId: "demo.example.com", bookId: "1042", title: "星河渡口",
                  author: "沈聞舟", chapterCount: 128, downloaded: 12, readingChapter: 3),
         DemoBook(siteId: "books.example.org", bookId: "5513", title: "霧都舊事",

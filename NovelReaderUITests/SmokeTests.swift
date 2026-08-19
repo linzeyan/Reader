@@ -23,16 +23,41 @@ final class SmokeTests: XCTestCase {
 
     /// Tabs are addressed by position rather than label: their titles are
     /// localized, and pinning the test to zh-Hant strings would make it fail on
-    /// the other two languages the app ships.
-    private var libraryTab: XCUIElement { app.tabBars.buttons.element(boundBy: 0) }
-    private var searchTab: XCUIElement { app.tabBars.buttons.element(boundBy: 1) }
-    private var settingsTab: XCUIElement { app.tabBars.buttons.element(boundBy: 2) }
+    /// the other two languages the app ships. `AppTab` is where that position
+    /// lives, so the walks that navigate and the walk that counts the tabs cannot
+    /// end up with different ideas of the order.
+    private var recentTab: XCUIElement { app.tabButton(.recent) }
+    private var libraryTab: XCUIElement { app.tabButton(.library) }
+    private var searchTab: XCUIElement { app.tabButton(.search) }
+    private var settingsTab: XCUIElement { app.tabButton(.settings) }
 
     func testTabsExist() {
-        XCTAssertEqual(app.tabBars.buttons.count, 3)
+        XCTAssertEqual(app.tabBars.buttons.count, 4)
+        XCTAssertTrue(recentTab.exists)
         XCTAssertTrue(libraryTab.exists)
         XCTAssertTrue(searchTab.exists)
         XCTAssertTrue(settingsTab.exists)
+    }
+
+    /// The reading history is the app's first screen, and it has to be *arrived at* —
+    /// the whole feature is that a reader with a book on the go opens the app onto it
+    /// without tapping anything.
+    ///
+    /// Driven through the demo seed, which wipes and re-seeds the library on every
+    /// launch: a UI-test simulator carries whatever the previous case left behind, and
+    /// "did the app open here" is exactly the question leftover state would answer
+    /// wrongly. One of the seeded books has a reading position part-way into a chapter,
+    /// so the history has something unfinished in it by construction.
+    func testALaunchWithSomethingUnfinishedOpensOnTheReadingHistory() {
+        app.terminate()
+        app.launchArguments = ["-NovelReaderDemoSeed", "-reader.mode", "scroll"]
+        app.launch()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(identifier: "recent.book")
+                .firstMatch.waitForExistence(timeout: 20),
+            "A half-read book should put the launch on the reading history"
+        )
     }
 
     /// The Debug build seeds the recon rules, so this also proves the seeding
@@ -88,6 +113,10 @@ final class SmokeTests: XCTestCase {
     func testAppearanceSettingsExposeTypeAndThemeControls() {
         settingsTab.tap()
         let appearance = app.buttons["settings.appearance"]
+        // Several sections down, and a `List` does not realise rows below the fold —
+        // see `XCUIApplication.reveal`. Waiting would time out on a row that is not on
+        // its way, which is what adding a section above it did.
+        app.reveal(appearance)
         XCTAssertTrue(appearance.waitForExistence(timeout: 5))
         appearance.tap()
         XCTAssertTrue(app.sliders.firstMatch.waitForExistence(timeout: 5))

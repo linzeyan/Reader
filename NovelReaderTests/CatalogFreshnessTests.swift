@@ -13,7 +13,7 @@ final class CatalogFreshnessTests: XCTestCase {
             id: "demo|1", siteId: "demo", siteBookId: "1", title: "t", displayName: nil,
             author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
-            lastReadCharacterOffset: nil, lastReadFraction: nil, catalogUpdatedAt: catalogUpdatedAt
+            lastReadCharacterOffset: nil, lastReadFraction: nil, lastReadAt: nil, catalogUpdatedAt: catalogUpdatedAt
         )
     }
 

@@ -121,28 +121,25 @@ extension LibrarySort {
         }
     }
 
-    /// Reading order rests on `updatedAt`, which `LibraryRepo.updateProgress`
-    /// bumps on every recorded reading position — but also on a rename and on a
-    /// catalog refresh picking up a new site title. So it means "last touched",
-    /// not "last read", and on its own it would promote a book the reader only
-    /// renamed above the one they read last night.
+    /// Reading order rests on `lastReadAt`, which is written when — and only when —
+    /// a reading position is recorded. It used to rest on `updatedAt` gated by "has a
+    /// position at all", because that was the closest thing the row carried; but
+    /// `updatedAt` is bumped by a rename and by a catalog refresh picking up a new
+    /// site title, so it means "last touched", and the gate could only keep an
+    /// untouched book down, not a renamed one. The column says the thing outright,
+    /// and it is the same column the reading history is built from — one answer to
+    /// "when did they last read this", not two that can disagree.
     ///
-    /// The gate is `lastReadSiteChapterId`: a book with no stored position has
-    /// never been read, has nothing to be recent about, and drops below every book
-    /// that has been — in the shelf's default order, which is the honest fallback.
-    /// Storing a true `lastReadAt` would be the precise answer and needs a column;
-    /// this is the accurate half of the question answered with what is already
-    /// written on every page turn.
-    ///
-    /// The stored chapter id, deliberately, and not whether it still resolves to a
-    /// chapter: a reader whose chapter the site has since dropped has still read this
-    /// book, and only the exact place in it is lost. Resolving would also need a catalog
-    /// per book, which this pure function has no business fetching.
+    /// A book with no `lastReadAt` has never been read, has nothing to be recent
+    /// about, and drops below every book that has been — in the shelf's default
+    /// order, which is the honest fallback. Clearing the reading history puts every
+    /// book in that state, which is the coherent reading of what was asked for: the
+    /// record of what was read is what the sort was sorting by.
     private func readMoreRecently(_ lhs: Book, _ rhs: Book) -> Bool {
-        switch (lhs.lastReadSiteChapterId, rhs.lastReadSiteChapterId) {
+        switch (lhs.lastReadAt, rhs.lastReadAt) {
         case (.some, .none): return true
         case (.none, .some): return false
-        case (.some, .some): return (lhs.updatedAt, lhs.id) > (rhs.updatedAt, rhs.id)
+        case (.some(let left), .some(let right)): return (left, lhs.id) > (right, rhs.id)
         case (.none, .none): return (lhs.addedAt, lhs.id) > (rhs.addedAt, rhs.id)
         }
     }

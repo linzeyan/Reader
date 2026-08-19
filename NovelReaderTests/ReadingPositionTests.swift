@@ -102,6 +102,45 @@ final class ReadingPositionTests: XCTestCase {
         )
     }
 
+    /// What the scrolling reader needed to be able to say. It records the anchor from the
+    /// *top* of the window, and measuring the share from there reported a screenful short
+    /// of wherever the reader had actually got to — so the last screen of a chapter came
+    /// out at 96%, and no scrolled book could ever be finished. The share is measured to
+    /// the end of the bottom paragraph on screen instead, and that is this anchor.
+    func testTheEndOfTheLastParagraphIsTheWholeChapter() {
+        let paragraphs = [String(repeating: "字", count: 10), String(repeating: "字", count: 10)]
+
+        XCTAssertEqual(
+            TextAnchor.endOfParagraph(1, in: paragraphs).fraction(in: paragraphs), 1,
+            "a reader who can see the whole of the last paragraph has read the chapter"
+        )
+        XCTAssertEqual(
+            TextAnchor(paragraph: 1, characterOffset: 0).fraction(in: paragraphs), 0.5,
+            "…where the top of that same paragraph is only half of it"
+        )
+        XCTAssertEqual(TextAnchor.endOfParagraph(0, in: paragraphs).fraction(in: paragraphs), 0.5)
+    }
+
+    /// A chapter the site refetched shorter, and an empty one. Neither may produce an
+    /// anchor that claims a length nothing measured.
+    func testTheEndOfAParagraphTheChapterDoesNotHaveIsItsStart() {
+        XCTAssertEqual(TextAnchor.endOfParagraph(9, in: ["一二三"]).characterOffset, 0)
+        XCTAssertEqual(TextAnchor.endOfParagraph(0, in: []).characterOffset, 0)
+    }
+
+    /// Both renderers measure a share and both have to state it the same way, or the
+    /// same chapter would be finished in paged reading and not in scrolled. Rounding
+    /// *down* is what keeps 100% honest: the reading history reads a full 100% as "there
+    /// is nothing left of this book", so it must not be reachable a paragraph early.
+    func testAShareIsClaimedOnlyAsFarAsTheWholePercentItIsShownAs() {
+        XCTAssertEqual(TextAnchor.claimedShare(0.9999), 0.99)
+        XCTAssertEqual(TextAnchor.claimedShare(1), 1)
+        XCTAssertEqual(TextAnchor.shareText(TextAnchor.claimedShare(0.9999)), "99%")
+        // Out of range on either side is a caller mistake, not a number to pass on.
+        XCTAssertEqual(TextAnchor.claimedShare(1.2), 1)
+        XCTAssertEqual(TextAnchor.claimedShare(-0.5), 0)
+    }
+
     // MARK: - Round trip
 
     func testAPositionSurvivesBeingStoredAndReadBack() throws {

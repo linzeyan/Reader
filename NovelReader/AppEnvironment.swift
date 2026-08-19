@@ -49,6 +49,12 @@ final class AppEnvironment {
     /// reason the counts are: the position names a chapter, turning that into a number
     /// needs the book's catalog, and the shelf holds no catalogs.
     private(set) var lastReadChapterIndexes: [String: Int] = [:]
+    /// The reading history, always loaded to its greatest permitted length rather than
+    /// to the reader's chosen one. How many rows to show is a view preference that
+    /// changes from a stepper in settings; loading to the setting would mean a database
+    /// round trip per tap, and a list that grows one row at a time as the number climbs.
+    /// `visibleRecentReads` is what the screen draws.
+    private(set) var recentReads: [RecentRead] = []
     /// Set when a site demands an interactive challenge; drives the sheet that
     /// hands the web view to the user.
     var challenge: ChallengeRequest?
@@ -177,6 +183,24 @@ final class AppEnvironment {
         // already been removed.
         newChapterCounts = (try? repo.newChapterCounts()) ?? [:]
         lastReadChapterIndexes = (try? repo.lastReadChapterIndexes()) ?? [:]
+        recentReads = (try? repo.recentlyRead(
+            limit: LibrarySettings.recentReadingRange.upperBound
+        )) ?? []
+    }
+
+    /// The reading history as the first screen draws it.
+    var visibleRecentReads: [RecentRead] {
+        Array(recentReads.prefix(librarySettings.recentReadingCount))
+    }
+
+    /// Forgets when each book was last read. The positions themselves stay — see
+    /// `LibraryRepo.clearReadingHistory`.
+    func clearReadingHistory() {
+        try? repo.clearReadingHistory()
+        // The whole library, not just the history: the shelf's "recently read" order
+        // is built on the same column, and leaving it drawn from rows that no longer
+        // exist would have it sorting by a record the reader has just deleted.
+        reloadLibrary()
     }
 
     /// Books grouped by source, in the rule order the settings screen shows.

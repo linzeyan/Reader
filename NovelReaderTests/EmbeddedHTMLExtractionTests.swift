@@ -185,4 +185,36 @@ final class EmbeddedHTMLExtractionTests: XCTestCase {
         // still reach the network fails here rather than shipping quietly.
         XCTAssertNotNil(fetcher.importView, "the import must have built its own web view")
     }
+
+    /// An import's web view must not outlive the import.
+    ///
+    /// It is a whole second `WKWebView`, which is a whole second web content process,
+    /// and it was kept for the rest of the session on the strength of one imported
+    /// file — still holding the DOM of the last document it read. `LocalBookImporter`
+    /// gives it back when a book finishes; this pins the mechanism it calls, and that
+    /// asking for another one after works rather than returning a dead view.
+    func testTheImportViewIsGivenBackAndCanBeBuiltAgain() async throws {
+        let fetcher = WebFetcher()
+        let script = try ExtractorScript.chapter(LocalBookImporter.embeddedDocumentRule)
+        let html = Data("<html><body><p>一。</p></body></html>".utf8)
+
+        _ = try await fetcher.extract(
+            html: html, extracting: script, as: ExtractorScript.ChapterPayload.self
+        )
+        let first = try XCTUnwrap(fetcher.importView, "an import must build its own view")
+
+        fetcher.releaseImportView()
+        XCTAssertNil(fetcher.importView, "the view must not outlive the import that needed it")
+
+        let payload = try await fetcher.extract(
+            html: html, extracting: script, as: ExtractorScript.ChapterPayload.self
+        )
+        XCTAssertEqual(payload.paragraphs, ["一。"], "a later import must still be readable")
+        let second = try XCTUnwrap(fetcher.importView, "and must build a view of its own")
+        XCTAssertNotIdentical(first, second, "a released view must be rebuilt, not revived")
+        XCTAssertFalse(
+            second.configuration.websiteDataStore.isPersistent,
+            "the rebuilt view has to be isolated on exactly the same terms as the first"
+        )
+    }
 }

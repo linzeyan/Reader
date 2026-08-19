@@ -116,7 +116,7 @@ final class SiteRuleTests: XCTestCase {
             siteId: siteId, siteBookId: siteBookId, title: "t", displayName: nil,
             author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
-            lastReadCharacterOffset: nil, lastReadFraction: nil, catalogUpdatedAt: nil
+            lastReadCharacterOffset: nil, lastReadFraction: nil, lastReadAt: nil, catalogUpdatedAt: nil
         )
     }
 

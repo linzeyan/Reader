@@ -170,7 +170,12 @@ final class ReaderSettings {
         let storedFont = defaults.string(forKey: Keys.fontName)
         fontName = storedFont.flatMap { UIFont(name: $0, size: 16) == nil ? nil : $0 }
         keepScreenOn = defaults.object(forKey: Keys.keepScreenOn) as? Bool ?? true
-        tapToTurnPage = defaults.object(forKey: Keys.tapToTurnPage) as? Bool ?? false
+        // `bool(forKey:)` rather than the `object(forKey:) as? Bool` the settings above
+        // use: it answers false for a key nobody has set, which is this flag's default
+        // anyway, and unlike the cast it also reads the value out of a launch argument —
+        // which is the only way a UI walk can turn the zones on without persisting the
+        // choice into the simulator for every test that runs after it.
+        tapToTurnPage = defaults.bool(forKey: Keys.tapToTurnPage)
     }
 
     var font: Font {
