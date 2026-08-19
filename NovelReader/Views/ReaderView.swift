@@ -212,6 +212,18 @@ struct ReaderView: View {
             showControls.toggle()
             return
         }
+        // A previous-page tap at the very head of what is loaded has nothing above to
+        // scroll into, and with the previous chapter now arriving only on upward
+        // movement, no movement would ever happen: the tap would be a wall. The tap is
+        // itself the intent the movement gate waits for, so it asks for the chapter
+        // directly; the next tap has somewhere to go.
+        if zone == .previous, let model,
+           let span = ReaderTapZone.visibleSpan(
+               of: visibleParagraphs, viewport: context.window.height
+           ),
+           span.top.paragraph == 0, span.top.minY >= 0 {
+            Task { await model.loadPrevious(before: span.top.chapterIndex) }
+        }
         guard let scroll = ReaderTapZone.pageScroll(
             zone, over: visibleParagraphs, viewport: context.window.height
         ) else { return }
@@ -795,6 +807,26 @@ final class ReaderModel {
     /// this is here to hide a page load, not to become a second download queue.
     private var readAhead: (chapterId: String, paragraphs: [String])?
     private var readAheadTask: Task<Void, Never>?
+    /// What the in-flight read-ahead is doing, so a reader who catches up with it can
+    /// act on the difference: a fetch already on the wire is worth waiting for, while
+    /// a politeness pause that has not asked for anything yet is worth abandoning.
+    /// Without this, catching up meant issuing the same request *again*, queued behind
+    /// the read-ahead's copy in the fetcher — a slow chapter made twice as slow.
+    ///
+    /// Left stale when the task ends on its own: by then awaiting the task is free and
+    /// the result — or its absence — answers correctly. Only the paths that abandon
+    /// the task clear it.
+    private var readAheadPhase: ReadAheadPhase?
+
+    private enum ReadAheadPhase {
+        case pacing(chapterId: String)
+        case fetching(chapterId: String)
+    }
+
+    /// Where the top of the window was last report, for telling which way the reader
+    /// is moving. Nothing more is derived from it — position comes from the report
+    /// itself, this is only yesterday's copy to compare against.
+    private var lastTop: ReaderTapZone.VisibleParagraph?
 
     init(book: Book, env: AppEnvironment) {
         self.book = book
@@ -834,7 +866,9 @@ final class ReaderModel {
         persistProgress()
         // Whatever was read ahead belonged to the old position.
         readAheadTask?.cancel()
+        readAheadPhase = nil
         readAhead = nil
+        lastTop = nil
         loaded = []
         currentChapterIndex = index
         currentAnchor = anchor
@@ -941,6 +975,22 @@ final class ReaderModel {
         if chapter.isDownloaded, let stored = await storedParagraphs(for: chapter), !stored.isEmpty {
             return stored
         }
+        switch readAheadPhase {
+        case .fetching(let id) where id == chapter.id:
+            // The read-ahead is already asking for exactly this page. Waiting joins
+            // that request; fetching here instead would queue a second copy behind it
+            // in the fetcher and pay for the page twice — on the slow sites, the
+            // difference between a pause at the seam and a page that will not turn.
+            await readAheadTask?.value
+        case .pacing(let id) where id == chapter.id:
+            // Still waiting its polite turn. The reader arriving is what makes the
+            // request no longer speculative, and politeness delays are only for
+            // speculation — abandon the pause and ask directly.
+            readAheadTask?.cancel()
+            readAheadPhase = nil
+        default:
+            break
+        }
         if let readAhead, readAhead.chapterId == chapter.id {
             self.readAhead = nil
             return readAhead.paragraphs
@@ -996,10 +1046,16 @@ final class ReaderModel {
         else { return }
 
         readAheadTask?.cancel()
+        // The phase is written here and inside the task, never by the task being
+        // replaced: a superseded task finds itself cancelled when it wakes and
+        // returns without touching anything, so it cannot smear its state over the
+        // read-ahead that replaced it.
+        readAheadPhase = .pacing(chapterId: next.id)
         readAheadTask = Task { [weak self] in
             guard let self else { return }
             await self.env.pacer.pace()
             guard !Task.isCancelled else { return }
+            self.readAheadPhase = .fetching(chapterId: next.id)
             guard let paragraphs = try? await self.env.bookService.chapterParagraphs(
                 rule: rule, chapter: next
             ) else { return }
@@ -1013,6 +1069,7 @@ final class ReaderModel {
     func stopReading() {
         readAheadTask?.cancel()
         readAheadTask = nil
+        readAheadPhase = nil
         persistProgress()
     }
 
@@ -1054,6 +1111,19 @@ final class ReaderModel {
         if currentAnchor != anchor { currentAnchor = anchor }
         reportedFraction = readShare(through: bottom)
         persistProgress(.reading)
+        // Which way the reader is heading, judged against the previous report. Same
+        // paragraph is compared by where it sits: the paragraph's top moving down the
+        // window is the text moving down, which is the reader going up. The half-point
+        // of slack keeps a settled screen's sub-pixel jitter from reading as travel.
+        let movingUp: Bool
+        if let lastTop {
+            movingUp = (top.chapterIndex, top.paragraph) < (lastTop.chapterIndex, lastTop.paragraph)
+                || ((top.chapterIndex, top.paragraph) == (lastTop.chapterIndex, lastTop.paragraph)
+                    && top.minY > lastTop.minY + 0.5)
+        } else {
+            movingUp = false
+        }
+        lastTop = top
         if !isLoading {
             // Two pages of lead, with the page measured off this screen rather than
             // assumed. Six paragraphs — a third of a screen at the default size — was less
@@ -1072,7 +1142,13 @@ final class ReaderModel {
                bottom.paragraph + lead >= last.paragraphs.count {
                 Task { await loadNextIfLast(after: last.chapter.index) }
             }
-            if let first = loaded.first, top.chapterIndex == first.chapter.index,
+            // Only for a reader actually heading up. Nearness alone is not intent: a
+            // jump lands at the head of its chapter, which is inside any useful lead,
+            // and inserting the previous chapter there shoves the text the reader just
+            // asked for down a whole chapter and drags the view back to it — the open
+            // that visibly runs backwards. Someone who wants what is above will move
+            // toward it, and even one upward flick is pages of warning.
+            if movingUp, let first = loaded.first, top.chapterIndex == first.chapter.index,
                top.paragraph < lead {
                 Task { await loadPrevious(before: first.chapter.index) }
             }
