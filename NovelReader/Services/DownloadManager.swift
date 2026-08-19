@@ -79,6 +79,8 @@ final class DownloadManager {
     /// run that *replaced* it — telling a background window its queue had come to
     /// rest before the first chapter had even been requested.
     private var runToken = 0
+    /// Chapters left before the run takes a longer rest. See `restIsDue`.
+    private var chaptersUntilRest = 0
 
     init(
         service: BookService,
@@ -230,6 +232,7 @@ final class DownloadManager {
         // whatever stopped the queue — cleared a challenge, changed network — and the
         // new run has to be allowed to find that out for itself.
         failureStreak = 0
+        chaptersUntilRest = Self.sampleRestBlock()
         runToken += 1
         let token = runToken
         task = Task { [weak self] in
@@ -293,6 +296,13 @@ final class DownloadManager {
                 if self.haltIfDraining() { return }
                 if self.remaining.isEmpty { break }
                 await self.pacer.pace()
+                if self.restIsDue() {
+                    try? await Task.sleep(for: .seconds(Double.random(in: 15...45)))
+                    // A drain asked for during the rest must not wait through one
+                    // more fetch: backgrounding grants seconds, and the rest may
+                    // already have spent most of them.
+                    if self.haltIfDraining() { return }
+                }
             }
             if !Task.isCancelled && self.remaining.isEmpty {
                 self.finish()
@@ -381,6 +391,29 @@ final class DownloadManager {
     func noteChapterFailed() -> Bool {
         failureStreak += 1
         return failureStreak >= Self.failureLimit
+    }
+
+    /// Whether the run has earned its longer pause, counting down the block and
+    /// sampling the next one when it has.
+    ///
+    /// The pacer's one-to-three-second gaps keep requests from *bursting*, but a
+    /// run still asks for pages far faster than anyone reads them, and the hosts'
+    /// WAF answers that with a verification wall at around the twenty-chapter
+    /// mark. So the run breathes: a dozen-odd chapters, then long enough away for
+    /// the sustained rate to stop looking like a crawler. Both numbers are drawn
+    /// fresh each time because a rest every Nth chapter on the dot is itself a
+    /// fingerprint. The threshold sits under the cadence the wall was observed
+    /// at; whether that is enough slack is empirical, and this is the first lever
+    /// to adjust if the wall still comes.
+    private func restIsDue() -> Bool {
+        chaptersUntilRest -= 1
+        guard chaptersUntilRest <= 0 else { return false }
+        chaptersUntilRest = Self.sampleRestBlock()
+        return true
+    }
+
+    private static func sampleRestBlock() -> Int {
+        Int.random(in: 10...15)
     }
 
     /// Takes `chapter` off the head of the queue. Returns false when it is no

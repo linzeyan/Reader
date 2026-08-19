@@ -52,10 +52,21 @@ struct RootView: View {
         }
         .sheet(item: $env.challenge) { challenge in
             ChallengeSheet(webView: env.fetcher.webView, url: challenge.url) {
+                // Read before it is cleared: it is what says this challenge was the
+                // one that stopped the download queue, rather than one a page load
+                // in the reader tripped over.
+                let stoppedTheQueue = env.downloader.pendingChallenge != nil
                 env.challenge = nil
                 env.downloader.pendingChallenge = nil
                 // Reclaim the web view from the sheet.
                 hostToken += 1
+                // Closing the sheet is the user saying the challenge is dealt with,
+                // and resuming is why they dealt with it — making them go find the
+                // paused row afterwards turned every verification into two chores.
+                // Dismissed without solving, the resumed queue meets the challenge
+                // again and this sheet comes straight back, which is the honest
+                // answer to that too.
+                if stoppedTheQueue { env.downloader.resume() }
             }
         }
         .onChange(of: env.downloader.pendingChallenge) { _, new in
