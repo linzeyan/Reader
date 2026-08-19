@@ -827,6 +827,14 @@ final class ReaderModel {
     /// is moving. Nothing more is derived from it — position comes from the report
     /// itself, this is only yesterday's copy to compare against.
     private var lastTop: ReaderTapZone.VisibleParagraph?
+    /// When a chapter was last inserted above the reader. For the next few frames the
+    /// lazy stack corrects the estimated heights of the rows it just gained, and the
+    /// corrections report transient tops *inside the inserted chapter* — a chapter's
+    /// worth of apparent upward travel in sixteen milliseconds. To the direction test
+    /// that is a reader flying toward the front of the book, and acting on it is how
+    /// one polite insert cascades chapter by chapter to the cover. Until the reflow
+    /// has had a moment to settle, upward movement is not the reader's.
+    private var insertedAboveAt: ContinuousClock.Instant?
 
     init(book: Book, env: AppEnvironment) {
         self.book = book
@@ -943,6 +951,7 @@ final class ReaderModel {
         defer { isLoading = false }
         guard let text = try? await paragraphs(for: chapters[target]) else { return }
         loaded.insert(LoadedChapter(chapter: chapters[target], paragraphs: text), at: 0)
+        insertedAboveAt = .now
         // Inserting above the reader moves everything they are looking at down by a whole
         // chapter, so the view is immediately aimed back at where they were. Their own
         // position is the target, which is also what stops the newly arrived paragraphs
@@ -1148,8 +1157,15 @@ final class ReaderModel {
             // asked for down a whole chapter and drags the view back to it — the open
             // that visibly runs backwards. Someone who wants what is above will move
             // toward it, and even one upward flick is pages of warning.
-            if movingUp, let first = loaded.first, top.chapterIndex == first.chapter.index,
-               top.paragraph < lead {
+            //
+            // Deaf while an insert's reflow settles — see `insertedAboveAt`. A real
+            // reader is a chapter away from the next trigger by then, so the pause
+            // costs them nothing; without it the reflow's own frames are the trigger.
+            let settled = insertedAboveAt.map {
+                ContinuousClock.now > $0.advanced(by: .milliseconds(600))
+            } ?? true
+            if movingUp, settled, let first = loaded.first,
+               top.chapterIndex == first.chapter.index, top.paragraph < lead {
                 Task { await loadPrevious(before: first.chapter.index) }
             }
         }

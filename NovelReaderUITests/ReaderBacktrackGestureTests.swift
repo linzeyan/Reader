@@ -73,6 +73,11 @@ final class ReaderBacktrackGestureTests: XCTestCase {
     func testScrollingUpReachesThePreviousChapter() {
         openReader()
 
+        // Let the landing finish, as the sibling test does: while the jump is still
+        // re-aiming, every swipe is undone by the next frame, and the budget below
+        // gets spent fighting it instead of travelling.
+        Thread.sleep(forTimeInterval: 1.5)
+
         // The demo book opens part-way into 第4章, so the chapter before it is above
         // the window — and, until the prefetch pulls it in, not loaded at all. Its
         // heading appearing is the whole claim: the top of an opened chapter used to
@@ -82,8 +87,10 @@ final class ReaderBacktrackGestureTests: XCTestCase {
         ).firstMatch
 
         // Bounded rather than while-not-found: a reader that cannot get there should
-        // fail here, not hang the suite.
-        for _ in 0..<12 {
+        // fail here, not hang the suite. Fourteen rather than twelve: the previous
+        // chapter now arrives on the first upward move rather than at the landing,
+        // so the journey is a swipe or two longer than it used to be.
+        for _ in 0..<14 {
             if previousChapter.exists && previousChapter.isHittable { break }
             app.otherElements["reader.text"].swipeDown()
         }

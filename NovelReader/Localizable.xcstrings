@@ -1669,6 +1669,30 @@
         }
       }
     },
+    "downloads.rangeHint" : {
+      "comment" : "Footer under the chapter list on the download-management screen, explaining the long-press range selection.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long-press a chapter to select everything from the last ticked one through it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长按章节，可从上一个勾选处连选到该章。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "長按章節，可從上一個勾選處連選到該章。"
+          }
+        }
+      }
+    },
     "downloads.selectAll" : {
       "comment" : "Select every chapter.",
       "extractionState" : "manual",
