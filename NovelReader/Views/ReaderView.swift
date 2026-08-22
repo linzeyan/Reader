@@ -603,8 +603,13 @@ struct ReaderView: View {
     /// the shelf says later cannot disagree.
     private func titleCapsule(_ model: ReaderModel) -> some View {
         HStack(spacing: 10) {
+            // No line limit. A capsule this wide holds about twenty CJK characters at
+            // footnote size, and these titles run past that routinely — a capsule
+            // reading "第363章 爆發之二，逆天刷子，啓動！魔帝之…" names no chapter the
+            // reader can place, which is the one thing it is for. Wrapping costs a
+            // strip of text only while the controls are up, and only for the titles
+            // that need it.
             Text(model.currentLoadedChapter?.chapter.title ?? book.shownName)
-                .lineLimit(1)
             if let fraction = model.currentFraction {
                 Text(verbatim: TextAnchor.shareText(fraction))
                     .monospacedDigit()

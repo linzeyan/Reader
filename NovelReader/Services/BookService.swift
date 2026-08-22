@@ -114,6 +114,13 @@ final class BookService {
         let payload = try await fetcher.fetch(url, extracting: script, as: ExtractorScript.ChapterPayload.self)
         let paragraphs = Self.dropping(rule.chapter.dropParagraphPatterns, from: payload.paragraphs)
         guard !paragraphs.isEmpty else { throw ServiceError.emptyChapter }
+        // The page names the chapter too, and names it in full where the catalog
+        // truncated. Written here because this is the only moment both halves are in
+        // hand, and swallowed on failure: a chapter the reader is waiting for must not
+        // fail to open because its title could not be tidied up.
+        if let fuller = Chapter.fullerTitle(payload.title, extending: chapter.title) {
+            try? repo.updateChapterTitle(chapterId: chapter.id, to: fuller)
+        }
         return paragraphs
     }
 

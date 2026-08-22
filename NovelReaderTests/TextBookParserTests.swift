@@ -85,7 +85,9 @@ final class TextBookParserTests: XCTestCase {
     /// book in half. The length cap is the whole guard: prose that references a
     /// chapter runs on, headings stop.
     func testALongLineThatOnlyLooksLikeAHeadingStaysProse() {
-        let long = "第三章的內容其實是後來才補寫的，作者在後記裡提過這件事，說是為了補上一段回憶。"
+        let long = "第三章的內容其實是後來才補寫的，作者在後記裡提過這件事，說是為了補上一段回憶，"
+            + "而那段回憶又牽出另一個人，於是整章就這樣長了出來。"
+        XCTAssertGreaterThan(long.count, 60, "fixture must sit above the cap it is testing")
         let chapters = TextBookParser.chapters(from: """
         第一章 下山
         雪停了。
@@ -94,6 +96,18 @@ final class TextBookParserTests: XCTestCase {
 
         XCTAssertEqual(chapters.count, 1)
         XCTAssertEqual(chapters[0].paragraphs, ["雪停了。", long])
+    }
+
+    /// The reason the cap is 60 rather than 30: a subtitled heading is ordinary, and
+    /// one that fails the test does not fail quietly — it stays in the body, so the
+    /// reader meets the chapter's name mid-text and the chapter never starts.
+    func testALongSubtitledHeadingIsStillAHeading() {
+        let heading = "第一百二十三章 龍城之戰（上）——他終於明白什麼叫做代價，也明白了得付出多少"
+        XCTAssertGreaterThan(heading.count, 30, "fixture must sit above the old cap")
+        let chapters = TextBookParser.chapters(from: "\(heading)\n雪停了。")
+
+        XCTAssertEqual(chapters.map(\.title), [heading])
+        XCTAssertEqual(chapters.first?.paragraphs, ["雪停了。"])
     }
 
     /// Punctuation must not disqualify a heading — including at the end of the
@@ -181,10 +195,10 @@ final class TextBookParserTests: XCTestCase {
     }
 
     /// The counterweight to reading English headings at all. "Chapter 12 was…" is an
-    /// ordinary sentence, and the 30-character cap counts characters, which is only
-    /// five or six English words — so the cap catches the first line here and none
-    /// of the rest. What stops those is the guard that a heading does not continue
-    /// in lower case; without it every one of them would cut the book in half.
+    /// ordinary sentence, and the 60-character cap counts characters, which is barely
+    /// a dozen English words — so the cap catches none of these lines. What stops
+    /// them is the guard that a heading does not continue in lower case; without it
+    /// every one of them would cut the book in half.
     func testEnglishProseThatOpensLikeAHeadingStaysProse() {
         let prose = [
             "Chapter 12 was the one he remembered for years afterwards.",
@@ -195,7 +209,7 @@ final class TextBookParserTests: XCTestCase {
             "Prologues are rarely read.",
         ]
         XCTAssertTrue(
-            prose.dropFirst().allSatisfy { $0.count <= 30 },
+            prose.allSatisfy { $0.count <= 60 },
             "the length cap alone would not stop these"
         )
 

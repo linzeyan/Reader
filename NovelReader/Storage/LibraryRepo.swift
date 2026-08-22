@@ -322,7 +322,12 @@ struct LibraryRepo {
                 let id = Chapter.makeId(bookId: bookId, siteChapterId: entry.siteChapterId)
                 if var existing = try Chapter.fetchOne(db, key: id) {
                     existing.index = index
-                    existing.title = entry.title
+                    // The stored name wins when it is this one made whole: a chapter
+                    // read once carries the full title its own page gave it (see
+                    // `BookService.fetchParagraphs`), and a refresh must not put the
+                    // catalog's truncation back over it every time it runs.
+                    existing.title =
+                        Chapter.fullerTitle(existing.title, extending: entry.title) ?? entry.title
                     existing.url = entry.url
                     // `addedAt` is intentionally not touched: rewriting it every
                     // refresh would either clear the marker the reader has not
@@ -348,6 +353,20 @@ struct LibraryRepo {
                 book.catalogUpdatedAt = now
                 try book.update(db)
             }
+        }
+    }
+
+    /// Writes a chapter's whole name over the truncated one its catalog gave it.
+    ///
+    /// Its own row rather than something the reader holds in memory: the name has to
+    /// survive into the catalog sheet, the shelf's "last read" line and the next
+    /// launch, none of which will ever fetch that page. See `Chapter.fullerTitle`
+    /// for what makes a name a repair rather than a rename.
+    func updateChapterTitle(chapterId: String, to title: String) throws {
+        try writer.write { db in
+            guard var chapter = try Chapter.fetchOne(db, key: chapterId) else { return }
+            chapter.title = title
+            try chapter.update(db)
         }
     }
 

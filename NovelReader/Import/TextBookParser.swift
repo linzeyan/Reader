@@ -171,17 +171,23 @@ enum TextBookParser {
     /// headings carry it ("第一章 上京：雪夜"), and rejecting a trailing 。／！ to
     /// protect against a paragraph *opening* with "第三章的內容其實是……" bought that
     /// protection by silently dropping headings people actually write. For Chinese
-    /// the length cap is the only line drawn: a 30-character ceiling is roomy for a
+    /// the length cap is the only line drawn: a 60-character ceiling is roomy for a
     /// title and short for prose. The cost is accepted and stated — a body line
     /// that begins with a chapter reference and stays under the cap becomes a
     /// chapter break. The Latin branches of `headingPattern` add a second guard of
-    /// their own, because 30 characters of English is only a handful of words.
+    /// their own, because 60 characters of English is only a dozen words.
+    ///
+    /// Raised from 30 because that ceiling was cutting real headings loose: a
+    /// subtitled chapter ("第一百二十三章 龍城之戰（上）——他終於明白什麼叫代價")
+    /// runs past 30 characters easily, and a heading that fails this test does not
+    /// fail quietly — it stays in the body, so the reader meets the chapter's name
+    /// mid-text and the chapter itself never starts.
     ///
     /// Lines are what the splitter iterates over, so "single line" is structural
     /// rather than checked: a heading cannot span a newline because a newline is
     /// what ended it.
     private static func isHeading(_ line: String, _ regex: NSRegularExpression?) -> Bool {
-        guard let regex, line.count <= 30 else { return false }
+        guard let regex, line.count <= 60 else { return false }
         return regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
     }
 

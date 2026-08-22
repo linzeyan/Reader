@@ -189,4 +189,24 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     static func makeId(bookId: String, siteChapterId: String) -> String {
         "\(bookId)|\(siteChapterId)"
     }
+
+    /// `candidate` when it is the same name as `stored` but whole, and nil otherwise.
+    ///
+    /// A chapter is named by the catalog, and some of these sites truncate their own
+    /// catalog's link text — 69shuba cuts at 27 characters, mid-word: the reader gets
+    /// "第363章 爆發之二，逆天刷子，啓動！魔帝之" for a chapter its own page calls
+    /// "第363章 爆發之二，逆天刷子，啓動！魔帝之邀！". Downloading does not help; the
+    /// text comes from a file but the name still comes from the catalog.
+    ///
+    /// "The same name but whole" is exactly `hasPrefix`, and deliberately nothing
+    /// looser: a truncation *is* a prefix, so anything that is not one is a different
+    /// name rather than a completion of this one. That is what refuses the sites whose
+    /// chapter heading glues the book title in front (`書名 第363章 …`) — taking that
+    /// would be renaming the chapter, not repairing it.
+    static func fullerTitle(_ candidate: String?, extending stored: String) -> String? {
+        guard let candidate, candidate.count > stored.count, candidate.hasPrefix(stored) else {
+            return nil
+        }
+        return candidate
+    }
 }
