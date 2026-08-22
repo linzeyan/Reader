@@ -127,6 +127,10 @@ struct ReaderView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase != .active else { return }
             model?.persistProgress()
+            // A drag the app was taken away from mid-gesture never ends, and a finger
+            // the reader believes is still down would hold back every later chapter it
+            // is asked for. Leaving is as good as lifting.
+            model?.touch(down: false)
         }
     }
 
@@ -166,6 +170,15 @@ struct ReaderView: View {
                     .accessibilityIdentifier("reader.text")
                 }
                 .scrollDismissesKeyboard(.immediately)
+                // Whether a finger is on the glass, which decides when a chapter may be
+                // put in above the reader — see `ReaderModel.showPreviousChapter`.
+                // Simultaneous and consuming nothing, so the scroll, both tap gestures
+                // and the long press still see every touch they did before.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in model.touch(down: true) }
+                        .onEnded { _ in model.touch(down: false) }
+                )
                 // Where the reading position comes from: the frames say what is on
                 // screen, and the top of that is where the reader is. Geometry rather
                 // than `onAppear`, because appearing is a fact about which rows the
@@ -648,6 +661,9 @@ struct ReaderView: View {
                 Task { await model.jump(toChapterAt: model.currentChapterIndex + 1) }
             }
             .disabled(model.currentChapterIndex >= model.chapters.count - 1)
+            // Named for the walks that have to make a chapter jump. The label is
+            // localized, so it is not a handle a test can hold.
+            .accessibilityIdentifier("reader.nextChapter")
             control("textformat.size", label: "reader.settings") { showSettings = true }
         }
         .padding(.vertical, 10)
@@ -870,6 +886,11 @@ final class ReaderModel {
     /// how one polite insert cascades chapter by chapter to the cover. Until the reflow
     /// has had a moment to settle, upward movement is not the reader's.
     private var contentAboveChangedAt: ContinuousClock.Instant?
+    /// The chapter before the first one loaded, fetched and waiting for a moment when
+    /// putting it on screen will not fight the reader's finger — see `showPreviousChapter`.
+    private var pendingPrevious: LoadedChapter?
+    /// Whether a finger is on the glass right now. Set by the reader's drag recogniser.
+    private var isTouching = false
 
     init(book: Book, env: AppEnvironment) {
         self.book = book
@@ -911,6 +932,10 @@ final class ReaderModel {
         readAheadTask?.cancel()
         readAheadPhase = nil
         readAhead = nil
+        // Fetched for a place the reader is leaving. Dropped here rather than left for
+        // `showPreviousChapter` to reject, so a jump can never be followed by a chapter
+        // arriving above the one it landed in.
+        pendingPrevious = nil
         lastTop = nil
         loaded = []
         currentChapterIndex = index
@@ -973,25 +998,69 @@ final class ReaderModel {
     /// replacing the page they are reading with an error would be answering a question
     /// nobody asked.
     ///
+    /// Fetching it is all this does. Putting it on screen waits for `showPreviousChapter`,
+    /// because an insert while a finger is on the glass cannot be corrected — see there.
+    ///
     /// - Parameter index: the chapter the caller believed was first. Re-checked here
     ///   because these calls queue up — the viewport reports every frame — and a call
     ///   that ran after another one's insert would put a *second* chapter above the
     ///   reader, and a third after that, walking backwards through the book one queued
     ///   task at a time.
     func loadPrevious(before index: Int) async {
-        guard !isLoading, let first = loaded.first, first.chapter.index == index else { return }
+        guard !isLoading, pendingPrevious == nil,
+              let first = loaded.first, first.chapter.index == index
+        else { return }
         let target = index - 1
         guard chapters.indices.contains(target) else { return }
         isLoading = true
         defer { isLoading = false }
         guard let text = try? await paragraphs(for: chapters[target]) else { return }
-        loaded.insert(LoadedChapter(chapter: chapters[target], paragraphs: text), at: 0)
+        pendingPrevious = LoadedChapter(chapter: chapters[target], paragraphs: text)
+        showPreviousChapter()
+    }
+
+    /// Puts a fetched previous chapter above the reader, once nothing is touching the
+    /// screen.
+    ///
+    /// The insert moves everything the reader is looking at down by a whole chapter, and
+    /// the `retarget` that follows is what puts it back. That correction is a `scrollTo`,
+    /// and a `scrollTo` cannot hold against a pan that is still running: the scroll view
+    /// recomputes its offset from where the finger started, so the correction survives a
+    /// single frame and is then undone — with the arrival gate already closed behind it,
+    /// so nothing re-aims. The reader is left at the *opening of the previous chapter*,
+    /// and, since a drag pinned to the top keeps reporting upward movement, the next
+    /// cooldown fetches the chapter before that one. That is the report this exists for:
+    /// an upward drag after a chapter jump walking backwards through the book.
+    ///
+    /// So the fetch happens the moment the reader shows they are heading up — that part
+    /// costs a request and is worth starting early — and only the visible half waits.
+    /// The wait is at most one gesture: a reader dragging up at the top of what is loaded
+    /// finds this chapter already above them by the time their next drag begins.
+    func showPreviousChapter() {
+        guard !isTouching, let pending = pendingPrevious else { return }
+        // The world can have moved on while the fetch was in flight — a jump empties
+        // `loaded`, and a chapter fetched for a place the reader has left belongs nowhere.
+        guard let first = loaded.first, first.chapter.index == pending.chapter.index + 1 else {
+            pendingPrevious = nil
+            return
+        }
+        pendingPrevious = nil
+        loaded.insert(pending, at: 0)
         contentAboveChangedAt = .now
-        // Inserting above the reader moves everything they are looking at down by a whole
-        // chapter, so the view is immediately aimed back at where they were. Their own
-        // position is the target, which is also what stops the newly arrived paragraphs
-        // from being recorded as progress on their way past.
+        // Aimed back at where the reader was, which is also what stops the newly arrived
+        // paragraphs from being recorded as progress on their way past.
         retarget()
+    }
+
+    /// Whether a finger is on the glass, from the reader's own drag recogniser.
+    ///
+    /// The one thing the geometry cannot say: a scroll that is being dragged and one
+    /// that is coasting report identical frames, and only the first of them can undo a
+    /// correction. Costs nothing when it does not change.
+    func touch(down: Bool) {
+        guard isTouching != down else { return }
+        isTouching = down
+        if !down { showPreviousChapter() }
     }
 
     private func append(_ chapter: Chapter) async {
