@@ -15,6 +15,13 @@ import Foundation
 enum DemoSeed {
     nonisolated static let launchArgument = "-NovelReaderDemoSeed"
 
+    /// Adds `stressBook` on top of the demo library: one book long enough, and fully
+    /// on disk, to rebuild the state a reading session reaches after hours of
+    /// continuous scrolling — which is where the "tap stalls for seconds" report
+    /// lives. Separate from the screenshot fixtures because those are pixels in a
+    /// store listing, and a fourth shelf row would change every one of them.
+    nonisolated static let stressArgument = "-NovelReaderDemoStress"
+
     nonisolated static var isRequested: Bool {
         ProcessInfo.processInfo.arguments.contains(launchArgument)
     }
@@ -33,6 +40,12 @@ enum DemoSeed {
 
         for source in sources { _ = try? env.sites.importRule(data: source.ruleJSON) }
         for book in books { seed(book, into: env) }
+        // Seeded after the screenshot books so its progress row is the newest one:
+        // the reading history opens first and sorts by last-read time, which makes
+        // this book the first row a stress walk taps.
+        if ProcessInfo.processInfo.arguments.contains(stressArgument) {
+            seed(stressBook, into: env)
+        }
         env.reloadLibrary()
     }
 
@@ -75,6 +88,14 @@ enum DemoSeed {
         DemoBook(siteId: "books.example.org", bookId: "5513", title: "霧都舊事",
                  author: "林可昀", chapterCount: 64, downloaded: 0, readingChapter: nil),
     ]
+
+    /// Every chapter on disk, so a scroll can cross a hundred and fifty seams without
+    /// once touching the network — the report this serves says downloaded books stall
+    /// too, so the network must not be able to explain anything the walk observes.
+    private static let stressBook = DemoBook(
+        siteId: "demo.example.com", bookId: "9001", title: "長夜行",
+        author: "顧一葦", chapterCount: 160, downloaded: 160, readingChapter: 1
+    )
 
     private static func seed(_ demo: DemoBook, into env: AppEnvironment) {
         guard let book = try? env.repo.bookmark(

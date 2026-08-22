@@ -77,6 +77,22 @@ struct ReaderView: View {
             let created = ReaderModel(book: book, env: env)
             model = created
             await created.start(at: position)
+            #if DEBUG
+            // Test-only: grow the loaded window to what hours of continuous reading
+            // accumulate, without spending test time scrolling there. Read from the
+            // defaults argument domain like the other test switches, and zero for
+            // everyone else. The chapters arrive through the same `loadNext` path a
+            // real session grows by, so the state is the real state, not a mock of
+            // it. See `ReaderLongSessionTapTests`.
+            let stressChapters = UserDefaults.standard.integer(forKey: "reader.stressPreload")
+            while created.loaded.count < stressChapters, created.hasMore {
+                let before = created.loaded.count
+                await created.loadNext()
+                // A chapter that will not load would hold this loop forever; the
+                // walk is better served by whatever did load than by no reader.
+                guard created.loaded.count > before else { break }
+            }
+            #endif
         }
         // Switching to the scrolling renderer builds a fresh scroll view, which starts
         // at the top of whatever is loaded. Re-aiming it happens on the next runloop
