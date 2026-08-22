@@ -53,11 +53,11 @@ final class ReaderLandingGestureTests: XCTestCase {
         let offsets = (0..<matches.count)
             .map { matches.element(boundBy: $0).frame.minY - window.minY }
         let paragraphOffset = try XCTUnwrap(offsets.min(by: { abs($0) < abs($1) }))
-        // Near the top of the window, which is where a landing puts its target. The
-        // demo chapter's paragraphs are short enough that this one is *visible* from the
-        // head of the chapter too — that is exactly how an earlier version of the
-        // arrival gate passed while landing in the wrong place — so being on screen is
-        // not the claim. Being at the top is.
+        // Near the top of the window, which is where a landing puts its target. The demo
+        // chapter's paragraphs are short enough that this one is *visible* from the head
+        // of the chapter too — that is exactly how an earlier version of the arrival gate
+        // passed while landing in the wrong place — so being on screen is not the claim.
+        //
         // The top third, not the top edge. A landing can only put its target at the very
         // top when there is a screenful of text below it, and the demo chapter is under
         // two screens long — so the scroll clamps against the end of what is loaded and
