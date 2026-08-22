@@ -1,12 +1,17 @@
 import XCTest
 
-/// One report: after jumping to a chapter, the first upward drag does not move a
-/// screen — the reader lands at the *previous* chapter's opening.
+/// What the first backward drag after a chapter jump does.
 ///
-/// A jump leaves exactly one chapter loaded, so the first upward move is also the one
-/// that asks for the chapter above it. That insert changes the content above the
-/// reader, which is the shape this file's history keeps coming back to — see
-/// `docs/PITFALLS.md`.
+/// It began as one report — the drag landed the reader at the *previous* chapter's
+/// opening, and kept going, a chapter per drag, toward the front of the book — and the
+/// claim has since grown a second half. A jump leaves exactly one chapter loaded, so
+/// that first drag has nothing above it to move into: it must neither walk backwards
+/// (the report) nor refuse to move at all (the wall that fixing the report left behind).
+/// Both halves are one measurement, how far the text travelled, and only the band
+/// between them is a reader going back the way they came.
+///
+/// Inserting a chapter above the reader is the shape this file's history keeps coming
+/// back to — see `docs/PITFALLS.md`.
 ///
 /// The gesture is a slow drag with the finger still down at the end, not `swipeDown()`:
 /// a flick has lifted long before the chapter arrives, and a correction that only works
@@ -76,11 +81,21 @@ final class ReaderChapterJumpBacktrackTests: XCTestCase {
             landing.exists,
             "the heading of the chapter the reader is in must still be on the page"
         )
+        let travelled = landing.frame.minY - before.minY
         // Half a screen of drag may not move the text by more than one screen. Landing a
         // whole chapter earlier is what the report describes, and a chapter is several.
         XCTAssertLessThan(
-            landing.frame.minY - before.minY, window.height,
+            travelled, window.height,
             "an upward drag of half a screen must not move the text more than a screen"
+        )
+        // And it has to move. A drag with nothing above it to move into rubber-bands and
+        // springs back to exactly where it started, which is what this reads as: the
+        // chapter the reader wants arrives only after the finger lifts, so their way back
+        // is always one gesture late. The chapter behind a landing is put in at the
+        // landing for this — see `ReaderModel.loadStoredPrevious`.
+        XCTAssertGreaterThan(
+            travelled, window.height / 4,
+            "the drag should read back into the chapter above, not rubber-band"
         )
     }
 }

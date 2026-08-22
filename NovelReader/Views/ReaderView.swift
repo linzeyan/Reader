@@ -902,6 +902,10 @@ final class ReaderModel {
     /// The chapter before the first one loaded, fetched and waiting for a moment when
     /// putting it on screen will not fight the reader's finger — see `showPreviousChapter`.
     private var pendingPrevious: LoadedChapter?
+    /// Set by `jump`, spent when that jump's landing settles: see `loadStoredPrevious`.
+    /// A flag rather than a call at the end of `jump`, because the moment worth acting on
+    /// is not when the chapter loads, it is when the scroll has stopped moving.
+    private var wantsPreviousBehindLanding = false
     /// Whether a finger is on the glass right now. Set by the reader's drag recogniser.
     private var isTouching = false
 
@@ -951,12 +955,19 @@ final class ReaderModel {
         pendingPrevious = nil
         lastTop = nil
         loaded = []
-        currentChapterIndex = index
-        currentAnchor = anchor
         await append(chapters[index])
+        // Both halves of the aim written together, after the load. Set before it, the
+        // index is overwritten in the meantime: the fetch suspends, the frames of the
+        // *old* content keep arriving, and `viewportChanged` records where they say the
+        // reader is — so the gate that decides this landing has arrived would be holding
+        // the chapter the reader just left.
+        currentChapterIndex = index
         let landing = landingAnchor(for: anchor)
         currentAnchor = landing
         scrollTarget = landing.scrollID(chapterId: chapters[index].id)
+        // The way back, once this landing has settled. Nothing to give back at the front
+        // of the book.
+        wantsPreviousBehindLanding = index > 0
     }
 
     /// A stored anchor can outlive the text it named: a chapter re-fetched from the
@@ -1042,6 +1053,36 @@ final class ReaderModel {
         isLoading = true
         defer { isLoading = false }
         guard let text = try? await paragraphs(for: chapters[target]) else { return }
+        pendingPrevious = LoadedChapter(chapter: chapters[target], paragraphs: text)
+        showPreviousChapter()
+    }
+
+    /// The chapter behind a landing, put in place while the reader is still looking at
+    /// where they arrived.
+    ///
+    /// A jump leaves one chapter loaded, so the first backward drag after one has nothing
+    /// above it to move into: it rubber-bands, the chapter it asks for arrives only once
+    /// the finger lifts (`showPreviousChapter`), and the reader's way back is a whole
+    /// gesture late. Every time. Spending that gesture here instead costs them nothing —
+    /// at a landing there is no scroll in flight to fight and, almost always, no finger on
+    /// the glass; and if there is one, the same gate holds this back until it lifts.
+    ///
+    /// Off disk only, and silently nothing otherwise. An insert above the reader is paid
+    /// for with a correction that can land no finer than a paragraph boundary, and paying
+    /// that — plus a request to the site — on *every* jump, for a reader who may well
+    /// never look back, is a worse bargain than the wall. A downloaded book pays for a
+    /// file read. That is also why this does not go through `loadPrevious`: falling back
+    /// to the network is exactly what it must not do.
+    ///
+    /// Asked of the loaded window rather than of a chapter number: what belongs above the
+    /// reader is whatever comes before the first chapter *loaded*, and that is the one
+    /// fact here that cannot be stale.
+    private func loadStoredPrevious() async {
+        guard pendingPrevious == nil, let first = loaded.first else { return }
+        let target = first.chapter.index - 1
+        guard chapters.indices.contains(target), chapters[target].isDownloaded,
+              let text = await storedParagraphs(for: chapters[target]), !text.isEmpty
+        else { return }
         pendingPrevious = LoadedChapter(chapter: chapters[target], paragraphs: text)
         showPreviousChapter()
     }
@@ -1241,6 +1282,13 @@ final class ReaderModel {
         if let target = scrollTarget {
             guard hasArrived(top: top, bottom: bottom) else { return target }
             scrollTarget = nil
+            // The scroll has just stopped moving, and this is the only frame that knows
+            // it. Anything above the reader put in before now would be inserted into a
+            // landing still in flight — the open that visibly runs backwards.
+            if wantsPreviousBehindLanding {
+                wantsPreviousBehindLanding = false
+                Task { await loadStoredPrevious() }
+            }
         }
         // Compared before writing because this fires on every scrolled frame, and an
         // `@Observable` write is a notification whether or not the value changed.
