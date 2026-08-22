@@ -33,10 +33,18 @@ final class AppEnvironment {
 
     /// The environment the running app is using, for the one caller that cannot be
     /// handed it: `BGTaskScheduler`'s launch handler is registered before any view
-    /// exists and can fire without one ever existing. Weak on purpose — a
-    /// background launch with no scene must hand the window back rather than build
-    /// a second object graph nobody owns, on top of a database the real one holds.
-    private(set) static weak var live: AppEnvironment?
+    /// exists and can fire without one ever existing.
+    ///
+    /// Also *the* environment, and the reason `makeShared` hands it back rather than
+    /// building a second: SwiftUI evaluates a `WindowGroup`'s content closure more
+    /// than once per launch, so a `@State` initialiser that constructs the graph
+    /// constructs it once per evaluation — two databases, two web views, two
+    /// download-queue restorers reading the same file — of which SwiftUI keeps one
+    /// and silently drops the rest. Measured at two full builds per cold launch.
+    ///
+    /// Nil until a scene asks for one, which is what a background launch reads: no
+    /// scene means no window, and the fetcher's web view cannot work without one.
+    private(set) static var live: AppEnvironment?
 
     /// The library, kept here so every screen sees the same list without each one
     /// re-querying on appear.
@@ -133,6 +141,7 @@ final class AppEnvironment {
     }
 
     static func makeShared() -> AppEnvironment {
+        if let live { return live }
         let env = makeFromDisk()
         // Only the app's own graph is published. Environments built directly — by
         // tests — must not become the one a background task would drive.

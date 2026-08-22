@@ -99,6 +99,10 @@ struct RootView: View {
         // screen because it can arrive against any tab, including on a launch where
         // the library has never been on screen.
         .onOpenURL { url in Task { await open(url) } }
+        // Deliberately here rather than in `AppEnvironment.init`: this is the first
+        // moment the app is on screen, and the iCloud merge it starts used to run
+        // between the launch and the first frame.
+        .task { env.cloud.startSyncing() }
         // Only the two ends of the transition. `.inactive` also arrives for a
         // pulled-down notification centre, and stopping a download for that
         // would be stopping it while the user is still holding the phone.

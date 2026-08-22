@@ -91,7 +91,23 @@ final class CloudSync {
         self.store = store
         self.defaults = defaults
         self.isEnabled = defaults.bool(forKey: Self.enabledDefaultsKey)
-        if isEnabled { enable() }
+        // Observing only. The first sync is `startSyncing`, called once the app is on
+        // screen: `synchronize` talks to the iCloud daemon and `mergeOnEnable` walks
+        // every book in the store and every book in the library, and all of that sat
+        // between the launch and the first frame — a reader who never turns iCloud on
+        // pays nothing, and one who does was paying it before they could see anything.
+        if isEnabled { observe() }
+    }
+
+    /// The first sync of the launch, once there is something on screen to sync behind.
+    ///
+    /// Separate from `init` rather than kicked off by it in a `Task`: a task enqueued
+    /// during init runs at the main actor's next opportunity, which can still be
+    /// before the first frame is committed. The caller is the one place that knows
+    /// the app is up.
+    func startSyncing() {
+        guard isEnabled else { return }
+        sync()
     }
 
     // MARK: - Lifecycle
@@ -100,7 +116,14 @@ final class CloudSync {
     // nonisolated, and this object lives as long as the app anyway. Turning the
     // toggle off is the real teardown path.
 
+    /// Turning the toggle on is a user action waiting on an answer, so it syncs
+    /// there and then — unlike a launch, which defers to `startSyncing`.
     private func enable() {
+        observe()
+        sync()
+    }
+
+    private func observe() {
         observer = NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: store,
@@ -108,6 +131,9 @@ final class CloudSync {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.pull() }
         }
+    }
+
+    private func sync() {
         store.synchronize()
         mergeOnEnable()
     }
