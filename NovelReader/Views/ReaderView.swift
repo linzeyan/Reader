@@ -324,17 +324,7 @@ struct ReaderView: View {
         } else if model.isLoading {
             ProgressView()
         } else if let error = model.error {
-            VStack(spacing: 10) {
-                Text(error).font(.footnote).foregroundStyle(.secondary)
-                Button("reader.retry") {
-                    Task {
-                        await model.jump(
-                            toChapterAt: model.currentChapterIndex, anchor: model.currentAnchor
-                        )
-                    }
-                }
-                    .buttonStyle(.bordered)
-            }
+            failure(error, model: model)
         } else {
             Text("reader.end").font(.footnote).foregroundStyle(.secondary)
         }
@@ -573,18 +563,41 @@ struct ReaderView: View {
         }
     }
 
+    /// What either renderer shows when a chapter will not load: what went wrong, another
+    /// go at it, and a way out.
+    ///
+    /// The way out is the part that was missing. This screen hides the navigation bar and
+    /// the back button with it, so the only way off it is the floating control bar — and
+    /// the control bar is summoned by a tap *on the text*, which a chapter that failed to
+    /// load does not have. A site demanding verification lands the reader here every time,
+    /// including straight after they have passed it, and until this button existed the
+    /// only way off the screen was to kill the app.
+    private func failure(_ message: String, model: ReaderModel) -> some View {
+        VStack(spacing: 12) {
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 12) {
+                Button("common.back") { dismiss() }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("reader.failure.back")
+                Button("reader.retry") { Task { await model.retry() } }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("reader.retry")
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+    }
+
     @ViewBuilder
     private func footer(_ model: ReaderModel) -> some View {
         Group {
             if model.isLoading {
                 ProgressView().padding(.vertical, 28)
             } else if let error = model.error {
-                VStack(spacing: 10) {
-                    Text(error).font(.footnote).foregroundStyle(.secondary)
-                    Button("reader.retry") { Task { await model.loadNext() } }
-                        .buttonStyle(.bordered)
-                }
-                .padding(.vertical, 28)
+                failure(error, model: model).padding(.vertical, 28)
             } else if model.hasMore {
                 // Reaching this marker is what pulls in the next chapter, so the
                 // text simply continues instead of ending at a "next" button.
@@ -956,6 +969,20 @@ final class ReaderModel {
         guard count > 0 else { return .start }
         guard anchor.paragraph >= count else { return anchor }
         return TextAnchor(paragraph: count - 1, characterOffset: 0)
+    }
+
+    /// Another go at whatever failed.
+    ///
+    /// Which call that is depends on how far the reader got. With text on screen the
+    /// failure was the chapter *after* it, and `loadNext` is the retry. With nothing
+    /// loaded the chapter the reader opened is the one that failed — and `loadNext`
+    /// cannot ask for it, because it works from the last loaded chapter and there is
+    /// none. That is what made the retry button do nothing on the one screen where it
+    /// was the only control: a site demanding verification fails the *first* chapter,
+    /// so the reader was left tapping a button that could not act.
+    func retry() async {
+        guard loaded.isEmpty else { return await loadNext() }
+        await jump(toChapterAt: currentChapterIndex, anchor: currentAnchor)
     }
 
     func loadNext() async {
