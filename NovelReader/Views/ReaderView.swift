@@ -1492,7 +1492,15 @@ final class ReaderModel {
     /// the chapter was opened went with it.
     func persistProgress(_ occasion: ProgressWriteRule.Occasion = .leaving) {
         guard !loaded.isEmpty, let position = currentPosition else { return }
-        guard writeRule.shouldWrite(position, occasion: occasion) else { return }
+        guard writeRule.shouldWrite(position, occasion: occasion) else {
+            // Refused means the row already holds this position — a throttled
+            // `.reading` write got there first, and those deliberately tell nobody.
+            // Leaving still has to publish, or the shelf keeps showing wherever the
+            // previous session ended until something unrelated reloads it — which is
+            // what "reading during a download loses my progress" turned out to be.
+            if occasion == .leaving { env.publishProgress(bookId: book.id) }
+            return
+        }
         env.recordProgress(
             book: book,
             position: position,

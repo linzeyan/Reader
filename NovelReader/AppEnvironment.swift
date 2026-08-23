@@ -358,8 +358,20 @@ final class AppEnvironment {
     ) {
         try? repo.updateProgress(bookId: book.id, position: position, fraction: fraction)
         guard publish else { return }
+        publishProgress(bookId: book.id)
+    }
+
+    /// Publishes the position already on the row — the shelf reload and the iCloud
+    /// push — without writing it again.
+    ///
+    /// Split from `recordProgress` for the reader leaving a position the throttled
+    /// `.reading` writes have already recorded: the row is correct, but those writes
+    /// deliberately told nobody, so the screens drawing from the in-memory library
+    /// are still showing wherever the previous publish left them. See
+    /// `ReaderModel.persistProgress`.
+    func publishProgress(bookId: String) {
         reloadLibrary()
-        if let updated = books.first(where: { $0.id == book.id }) { cloud.push(updated) }
+        if let updated = books.first(where: { $0.id == bookId }) { cloud.push(updated) }
     }
 
     // MARK: - Downloads
