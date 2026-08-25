@@ -891,6 +891,11 @@ final class ReaderModel {
     /// is moving. Nothing more is derived from it — position comes from the report
     /// itself, this is only yesterday's copy to compare against.
     private var lastTop: ReaderTapZone.VisibleParagraph?
+    /// When the viewport last reported at all — the reader's "the screen is moving"
+    /// signal. Frames arrive continuously through a turn's animation and its
+    /// deceleration, and stop when the text is still; quiet is what the deferred
+    /// append waits for.
+    private var lastViewportReportAt: ContinuousClock.Instant = .now
     /// When the text above the reader last changed — a chapter inserted, or chapters
     /// dropped under memory pressure. For the next few frames the lazy stack corrects
     /// the estimated heights of the rows it gained or lost, and the corrections report
@@ -1000,7 +1005,16 @@ final class ReaderModel {
         guard !isLoading, let last = loaded.last else { return }
         let nextIndex = last.chapter.index + 1
         guard chapters.indices.contains(nextIndex) else { return }
-        await append(chapters[nextIndex])
+        // Settling, unlike every other append: this is the one that fires while a
+        // page turn's animation is in flight, because the prefetch lead is measured
+        // off the frames that animation delivers. Device watchdog traces put the
+        // append's own cost — one SwiftUI transaction growing the lazy stack by a
+        // whole chapter — at 300–800ms of main-thread graph work, which landed
+        // squarely on the turn the reader had just made, froze it mid-flight, and
+        // was the reported "tap stalls for seconds, periodically": once per
+        // chapter, at reading pace. Landed on a still screen instead, the same
+        // work is invisible.
+        await append(chapters[nextIndex], settling: true)
     }
 
     /// The least a chapter may be asked for ahead of the seam, in paragraphs.
@@ -1017,8 +1031,10 @@ final class ReaderModel {
     /// follow happen while the reader is looking at the seam. Asked for a page or two
     /// early, the same work lands before they get there.
     ///
-    /// - Parameter index: the chapter the paragraph belongs to. A reader who scrolled
-    ///   back up into an earlier one is not near any seam, so nothing is fetched.
+    /// - Parameter index: the chapter the caller saw as the last one loaded. Re-checked
+    ///   here because these calls queue up — the viewport reports every frame — and a
+    ///   queued call running after another one's append would load past the frontier
+    ///   the reader is actually near.
     func loadNextIfLast(after index: Int) async {
         guard loaded.last?.chapter.index == index else { return }
         await loadNext()
@@ -1131,12 +1147,26 @@ final class ReaderModel {
         if !down { showPreviousChapter() }
     }
 
-    private func append(_ chapter: Chapter) async {
+    /// - Parameter settling: wait for the viewport to go quiet before mutating
+    ///   `loaded`. Only the read-ahead path asks for this; a jump or a retry is the
+    ///   reader waiting on an empty screen, and making them wait longer to be polite
+    ///   to an animation that does not exist would be absurd.
+    private func append(_ chapter: Chapter, settling: Bool = false) async {
         isLoading = true
         error = nil
         defer { isLoading = false }
         do {
-            loaded.append(LoadedChapter(chapter: chapter, paragraphs: try await paragraphs(for: chapter)))
+            let text = try await paragraphs(for: chapter)
+            if settling {
+                await settleBeforeGrowingContent()
+                // The world can move while this waits — and could already move
+                // across the fetch's own suspension: a catalog jump replaces
+                // `loaded`, and a chapter fetched for the old window belongs
+                // nowhere. Valid only while it still extends the frontier it was
+                // asked for.
+                guard loaded.last?.chapter.index == chapter.index - 1 else { return }
+            }
+            loaded.append(LoadedChapter(chapter: chapter, paragraphs: text))
             startReadingAhead()
         } catch {
             // A challenge has to reach the shell so the sheet can be presented;
@@ -1185,6 +1215,25 @@ final class ReaderModel {
             throw BookService.ServiceError.badURL
         }
         return try await env.bookService.chapterParagraphs(rule: rule, chapter: chapter)
+    }
+
+    /// Returns once the viewport has been quiet for a few frames' worth of time —
+    /// the moment a whole chapter can be added to the lazy stack without anyone
+    /// watching it happen.
+    ///
+    /// Quiet, not "animation finished": the model cannot see the scroll view's
+    /// animations, but a moving screen delivers geometry reports every frame and a
+    /// still one delivers none, so silence on that channel *is* stillness. Capped,
+    /// because a reader parked exactly at the frontier is starving for this text
+    /// and reports nothing — for them the wait must be a beat, not a bargain.
+    private func settleBeforeGrowingContent() async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while ContinuousClock.now < deadline {
+            if ContinuousClock.now > lastViewportReportAt.advanced(by: .milliseconds(400)) {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
 
     /// Reads a downloaded chapter off the main actor.
@@ -1279,15 +1328,35 @@ final class ReaderModel {
     func viewportChanged(
         top: ReaderTapZone.VisibleParagraph, bottom: ReaderTapZone.VisibleParagraph
     ) -> String? {
+        // Before the consistency guard: a lying reflow frame is still the screen
+        // moving, which is exactly what the settle must not mutate under.
+        lastViewportReportAt = .now
+        // A report whose bottom sits before its top in reading order is not a place —
+        // it is the lazy stack mid-reflow, with the rows of a freshly inserted chapter
+        // overlapping the rows on screen at estimated offsets. On a device trace one
+        // such frame passed the arrival test, the gate opened on it, and the next
+        // report — the reflow settled a chapter up — was recorded as the reader's own
+        // movement: reader and stored position both fell back a whole chapter.
+        // Nothing here can be trusted, so nothing is recorded; a pending jump keeps
+        // re-aiming, which is also what pulls the scroll back once the reflow settles.
+        guard (top.chapterIndex, top.paragraph) <= (bottom.chapterIndex, bottom.paragraph)
+        else { return scrollTarget }
         if let target = scrollTarget {
             guard hasArrived(top: top, bottom: bottom) else { return target }
             scrollTarget = nil
-            // The scroll has just stopped moving, and this is the only frame that knows
-            // it. Anything above the reader put in before now would be inserted into a
-            // landing still in flight — the open that visibly runs backwards.
+            // Deferred, not spent on this frame. The gate does not only open at rest:
+            // a landing that stops one paragraph short of its aim leaves the gate
+            // closed until the *next* page turn carries the top across it, and that
+            // gate-open is mid-animation — the one moment the insert's correction
+            // cannot hold. The pause outlives a turn's animation and its estimated-
+            // height corrections; `showPreviousChapter` re-checks the world when it
+            // fires, so a jump or a touch in the meantime still wins.
             if wantsPreviousBehindLanding {
                 wantsPreviousBehindLanding = false
-                Task { await loadStoredPrevious() }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    await loadStoredPrevious()
+                }
             }
         }
         // Compared before writing because this fires on every scrolled frame, and an
