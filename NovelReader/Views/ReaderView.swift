@@ -1326,8 +1326,16 @@ final class ReaderModel {
                 ? max(1, bottom.paragraph - top.paragraph)
                 : Self.minimumPrefetchLead
             let lead = max(Self.minimumPrefetchLead, 2 * page)
-            if let last = loaded.last, bottom.chapterIndex == last.chapter.index,
-               bottom.paragraph + lead >= last.paragraphs.count {
+            // The lead runs to the end of *everything* loaded, not of the chapter the
+            // bottom is in. Measured against the last chapter alone, a short chapter
+            // sitting between the reader and the frontier ate the whole lead: the next
+            // load could not start until the reader had crossed into it, and for a
+            // chapter shorter than the lead that crossing is the same tap that needs
+            // the chapter after it — a turn into a wall, on a book that is entirely on
+            // disk. Counted across the tail, its few paragraphs are just part of the
+            // distance, and the load after it starts while the reader is still a page
+            // or two away.
+            if let last = loaded.last, paragraphsBelow(bottom) < lead {
                 Task { await loadNextIfLast(after: last.chapter.index) }
             }
             // Only for a reader actually heading up. Nearness alone is not intent: a
@@ -1349,6 +1357,18 @@ final class ReaderModel {
             }
         }
         return nil
+    }
+
+    /// Paragraphs loaded but still below the bottom of the window — the text the reader
+    /// has left before they run out of content, however many chapter seams it crosses.
+    private func paragraphsBelow(_ bottom: ReaderTapZone.VisibleParagraph) -> Int {
+        loaded.reduce(0) { count, item in
+            if item.chapter.index < bottom.chapterIndex { return count }
+            if item.chapter.index == bottom.chapterIndex {
+                return count + max(0, item.paragraphs.count - 1 - bottom.paragraph)
+            }
+            return count + item.paragraphs.count
+        }
     }
 
     /// How far through the chapter the scrolling reader has read, measured to the bottom
