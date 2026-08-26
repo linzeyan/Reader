@@ -44,7 +44,12 @@ enum DemoSeed {
         // the reading history opens first and sorts by last-read time, which makes
         // this book the first row a stress walk taps.
         if ProcessInfo.processInfo.arguments.contains(stressArgument) {
-            seed(stressBook, into: env)
+            var stress = stressBook
+            // Walk-only override, so one walk can compare chapter sizes without
+            // a second build: `-reader.stressRepeats 1` seeds 30-paragraph chapters.
+            let repeats = UserDefaults.standard.integer(forKey: "reader.stressRepeats")
+            if repeats > 0 { stress.paragraphRepeats = repeats }
+            seed(stress, into: env)
         }
         env.reloadLibrary()
     }
@@ -67,6 +72,12 @@ enum DemoSeed {
         /// to show and the storage screen reports a real size.
         let downloaded: Int
         let readingChapter: Int?
+        /// How many copies of the demo text one chapter carries. The screenshot
+        /// books stay at one; the stress book matches a real serial's ~200
+        /// paragraphs, because the cost being rebuilt — the scrolling reader's
+        /// per-append work — scales with rows per chapter, and a 30-row chapter
+        /// understates it sevenfold.
+        var paragraphRepeats: Int = 1
     }
 
     private static let sources = [
@@ -94,7 +105,8 @@ enum DemoSeed {
     /// too, so the network must not be able to explain anything the walk observes.
     private static let stressBook = DemoBook(
         siteId: "demo.example.com", bookId: "9001", title: "長夜行",
-        author: "顧一葦", chapterCount: 160, downloaded: 160, readingChapter: 1
+        author: "顧一葦", chapterCount: 160, downloaded: 160, readingChapter: 1,
+        paragraphRepeats: 7
     )
 
     private static func seed(_ demo: DemoBook, into env: AppEnvironment) {
@@ -112,14 +124,14 @@ enum DemoSeed {
 
         for index in 0..<demo.downloaded {
             try? env.downloads.save(
-                paragraphs: paragraphs(chapter: index + 1),
+                paragraphs: chapterText(demo, chapter: index + 1),
                 book: book,
                 siteChapterId: "\(index + 1)"
             )
         }
         if let chapter = demo.readingChapter {
             // The field is a place in reading order; the ids seeded above run from 1.
-            let text = paragraphs(chapter: chapter + 1)
+            let text = chapterText(demo, chapter: chapter + 1)
             // Part-way into the chapter, not at its head: the shelf and the reader both
             // say how far in the reader got, and a fixture parked at 0% would put that
             // in a store screenshot with nothing to show. The share is measured against
@@ -138,6 +150,14 @@ enum DemoSeed {
         "夜渡", "舊碼頭", "北風起", "第三封信", "無名的燈", "落雪之前",
         "渡口重逢", "舊約定", "回聲", "遠行",
     ]
+
+    /// One chapter's text as a given book carries it — the shared paragraphs,
+    /// repeated as many times as the book asks for.
+    private static func chapterText(_ demo: DemoBook, chapter: Int) -> [String] {
+        let base = paragraphs(chapter: chapter)
+        guard demo.paragraphRepeats > 1 else { return base }
+        return (0..<demo.paragraphRepeats).flatMap { _ in base }
+    }
 
     /// The text every demo chapter carries.
     ///

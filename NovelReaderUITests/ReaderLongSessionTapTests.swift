@@ -24,6 +24,56 @@ final class ReaderLongSessionTapTests: XCTestCase {
         app = XCUIApplication()
     }
 
+    /// The frontier walk: no preload, tapped turns at reading pace, so `loadNext`
+    /// fires the way it does in a real session — with the append landing a page or
+    /// two below the viewport, where the lazy stack realizes the new rows at once.
+    /// The preload curve above showed appends far below the fold cost nothing the
+    /// simulator can see; this is the other half of the device scenario.
+    func testTapWalkAcrossTheFrontier() throws {
+        launch(preloadChapters: 0)
+        openReader()
+        Thread.sleep(forTimeInterval: 3)
+        drive(turns: 18)
+    }
+
+    /// The frontier walk with the control bar up: the reported "with the toolbar
+    /// open, every tapped turn stutters". The centre tap summons the controls;
+    /// the turns that follow are the same turns the plain walk makes.
+    func testTapWalkWithControlsShown() throws {
+        launch(preloadChapters: 0)
+        openReader()
+        Thread.sleep(forTimeInterval: 3)
+        // Relative to the app (the screen), not to "reader.text": that element's
+        // accessibility frame is the whole scrollable column, thousands of points
+        // tall, so its centre is nowhere near the window's centre.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        // The walk is about the controls being up; a missed centre tap would
+        // silently re-run the plain walk and compare nothing. The `.any` descendant
+        // query is the one `ReaderChromeGestureTests` uses — the capsule's element
+        // type is not a static text.
+        let capsule = app.descendants(matching: .any)
+            .matching(identifier: "reader.chapterTitle").firstMatch
+        XCTAssertTrue(
+            capsule.waitForExistence(timeout: 5),
+            "the control chrome should be up for the whole walk"
+        )
+        drive(turns: 18)
+    }
+
+    /// Hours of an evening's reading, compressed to what actually accumulates: the
+    /// chapters crossed. The pace is the same tapped turn every two seconds; seventy
+    /// chapters is roughly three hours at a real reading speed. The probe log holds
+    /// the verdict — `loaded=` pinned at the window, `gap=` and `mem=` flat across
+    /// the whole run, stall sizes the same at chapter seventy as at chapter seven.
+    /// Driven with `-reader.stressRepeats 3` so each chapter is ~90 paragraphs, the
+    /// shape of the real serials the reports come from.
+    func testAMultiHourReadingSessionCompressed() throws {
+        launch(preloadChapters: 0)
+        openReader()
+        Thread.sleep(forTimeInterval: 3)
+        drive(turns: 700)
+    }
+
     /// The state a long evening of continuous reading arrives at, without the evening.
     func testTapTurnsInAnInflatedSession() throws {
         launch(preloadChapters: 120)
@@ -52,6 +102,11 @@ final class ReaderLongSessionTapTests: XCTestCase {
             "-reader.mode", "scroll", "-reader.tapToTurnPage", "1",
             "-reader.stressPreload", String(preloadChapters),
         ]
+        // A/B arms arrive through the environment (TEST_RUNNER_ prefix on the
+        // xcodebuild side), so both arms run the same build and the same walk.
+        if let extra = ProcessInfo.processInfo.environment["READER_EXTRA_ARGS"] {
+            app.launchArguments += extra.split(separator: " ").map(String.init)
+        }
         app.launch()
     }
 
@@ -74,9 +129,11 @@ final class ReaderLongSessionTapTests: XCTestCase {
     private func drive(turns: Int) {
         let text = app.otherElements["reader.text"]
         for _ in 1...turns {
-            // Half way across and most of the way down: inside the forward zone,
-            // clear of the middle cell that toggles the chrome.
-            text.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
+            // Half way across and most of the way down the *screen*: inside the
+            // forward zone, clear of the middle cell that toggles the chrome. App
+            // coordinates, because "reader.text" is the whole scrollable column
+            // and points on it land wherever the scroll offset happens to put them.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
             Thread.sleep(forTimeInterval: 2.0)
         }
         XCTAssertTrue(text.exists, "the walk should end still inside the reader")
