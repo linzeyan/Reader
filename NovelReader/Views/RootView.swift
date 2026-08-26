@@ -72,6 +72,13 @@ struct RootView: View {
         .onChange(of: env.downloader.pendingChallenge) { _, new in
             if let new { env.challenge = ChallengeRequest(url: new) }
         }
+        // The history's half of opening a book: it posts the target, this switches
+        // tabs, and the library — the tab that owns books — builds the route. The
+        // handoff is consumed by `LibraryView`, which is also what makes it work on
+        // a launch where the library has never been on screen.
+        .onChange(of: env.readingHandoff) { _, target in
+            if target != nil { tab = .library }
+        }
         // Owned here, like the challenge sheet: a download can be queued from the
         // book screen and the answer must survive that screen going away.
         .alert(

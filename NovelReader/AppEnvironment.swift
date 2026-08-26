@@ -66,6 +66,14 @@ final class AppEnvironment {
     /// Set when a site demands an interactive challenge; drives the sheet that
     /// hands the web view to the user.
     var challenge: ChallengeRequest?
+    /// A book the reading history wants opened, for the library tab to pick up.
+    ///
+    /// The history used to push the reader onto its own stack, which made *its* tab the
+    /// one holding the book — so backing all the way out of a book landed on the
+    /// history, while every other route into a book backs out onto the shelf. Handing
+    /// the target over instead keeps one rule: books live in the library tab, and the
+    /// history is a shortcut into them, not a second home for them.
+    var readingHandoff: ReadingTarget?
     /// Surfaced as a banner rather than an alert — most failures here are "one
     /// site is unhappy", not "the app is broken".
     var banner: String?

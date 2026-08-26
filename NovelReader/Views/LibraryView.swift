@@ -23,9 +23,12 @@ struct LibraryView: View {
     /// The imported book a swipe is about to destroy. Only imported books get
     /// asked about, because only they have nowhere to come back from.
     @State private var confirmingLocalDelete: Book?
+    /// Held so the reading history's handoff can lay down a whole route — shelf,
+    /// book screen, reader — in one assignment. See `consumeHandoff`.
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 let sections = env.shelf
                 if env.books.isEmpty {
@@ -40,6 +43,17 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("tab.library")
+            // At the stack's root rather than on the shelf list, for the same reason
+            // the history used to declare them at its root: the handoff lays both
+            // path values down in one transaction, before any pushed screen — and
+            // its own destinations — exists. The book screen still declares
+            // `ReadingTarget` for the links it pushes one at a time.
+            .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
+            .navigationDestination(for: ReadingTarget.self) { target in
+                ReaderView(book: target.book, position: target.position)
+            }
+            .onAppear { consumeHandoff() }
+            .onChange(of: env.readingHandoff) { _, _ in consumeHandoff() }
             .toolbar {
                 // Leading, away from the two buttons that add books: those are
                 // actions and this is a view control, and putting it on the same
@@ -101,6 +115,22 @@ struct LibraryView: View {
 
     private var renamingBinding: Binding<Bool> {
         Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
+    }
+
+    /// Opens the book the reading history handed over: the book's screen beneath the
+    /// reader, so the way back is the same as from any other route into a book.
+    ///
+    /// The path is *replaced*, not appended to — whatever the shelf was showing, the
+    /// handoff means "take me to this sentence", and pushing on top of an old stack
+    /// would put an unrelated book on the way back. One assignment, so the stack
+    /// plays the route as a single push.
+    private func consumeHandoff() {
+        guard let target = env.readingHandoff else { return }
+        env.readingHandoff = nil
+        var route = NavigationPath()
+        route.append(target.book)
+        route.append(target)
+        path = route
     }
 
     /// Sort, grouping and filter in one menu.
@@ -190,7 +220,6 @@ struct LibraryView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
         .confirmationDialog(
             "local.delete.confirm",
             isPresented: Binding(

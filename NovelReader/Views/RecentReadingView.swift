@@ -13,11 +13,9 @@ import SwiftUI
 /// into the text, because the only thing being asked is "carry on".
 struct RecentReadingView: View {
     @Environment(AppEnvironment.self) private var env
-    /// Held so a row can push two screens in one go — see `open(_:)`.
-    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             Group {
                 let entries = env.visibleRecentReads
                 if entries.isEmpty {
@@ -28,10 +26,6 @@ struct RecentReadingView: View {
                 }
             }
             .navigationTitle("tab.recent")
-            .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
-            .navigationDestination(for: ReadingTarget.self) { target in
-                ReaderView(book: target.book, position: target.position)
-            }
         }
     }
 
@@ -57,7 +51,8 @@ struct RecentReadingView: View {
                 }
                 Spacer()
                 // The chevron a `NavigationLink` row would have drawn; the row stopped
-                // being one so that a tap can push two screens — see `open(_:)`.
+                // being one because it does not push onto this stack at all — see
+                // `open(_:)`.
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -69,18 +64,17 @@ struct RecentReadingView: View {
         .accessibilityIdentifier("recent.book")
     }
 
-    /// Straight into the text, with the book's own screen put beneath it.
+    /// Straight into the text, by way of the library tab.
     ///
     /// The row's promise is "carry on", so the reader opens directly — but the way
-    /// *back* should land where leaving a book lands everywhere else: on its catalog
-    /// screen, where the chapters are. Popping to this list instead meant the only
-    /// route from "reading" to "the book's chapters" was back out and in through the
-    /// shelf. Both values go into the path in one call, which the stack plays as a
-    /// single push; the book screen is only ever seen on the way out.
+    /// *back* should retrace the route every book is reached by: reader to catalog
+    /// screen, catalog screen to shelf. Pushing here instead made this tab a second
+    /// home for the book, and backing out of its catalog landed on the history. The
+    /// target goes to the environment, the root view switches tabs, and the library
+    /// builds the whole route — see `AppEnvironment.readingHandoff`.
     private func open(_ entry: RecentRead) {
         guard let target = target(for: entry) else { return }
-        path.append(target.book)
-        path.append(target)
+        env.readingHandoff = target
     }
 
     /// The chapter's own title, or a note that the site has dropped it — the same thing
