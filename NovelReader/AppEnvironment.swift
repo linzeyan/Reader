@@ -370,8 +370,23 @@ final class AppEnvironment {
     /// are still showing wherever the previous publish left them. See
     /// `ReaderModel.persistProgress`.
     func publishProgress(bookId: String) {
-        reloadLibrary()
-        if let updated = books.first(where: { $0.id == bookId }) { cloud.push(updated) }
+        // Only what a progress write can change: this book's row, its two derived
+        // numbers, and the history's order. This used to be `reloadLibrary()`, whose
+        // two library-wide chapter joins ran on the main thread at every chapter
+        // turn — for shelf screens nobody could see behind the reader.
+        guard let fresh = try? repo.book(id: bookId) else { return }
+        if let at = books.firstIndex(where: { $0.id == bookId }) { books[at] = fresh }
+        if let index = try? repo.lastReadChapterIndex(bookId: bookId) {
+            lastReadChapterIndexes[bookId] = index
+        }
+        if let count = try? repo.newChapterCount(bookId: bookId) {
+            // Absent rather than zero, matching how `reloadLibrary` builds the map.
+            newChapterCounts[bookId] = count > 0 ? count : nil
+        }
+        recentReads = (try? repo.recentlyRead(
+            limit: LibrarySettings.recentReadingRange.upperBound
+        )) ?? []
+        cloud.push(fresh)
     }
 
     // MARK: - Downloads

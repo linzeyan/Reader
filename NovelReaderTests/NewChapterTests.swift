@@ -321,6 +321,18 @@ final class NewChapterTests: XCTestCase {
         for book in [read, untouched, quiet, orphaned] {
             let byRow = try newChapters(of: book.id, in: repo).count
             XCTAssertEqual(counts[book.id] ?? 0, byRow, "SQL and Swift must agree for \(book.title)")
+            // The single-book slice the progress publish refreshes with must be the
+            // same rule again — it exists so a chapter turn stops re-joining the
+            // whole library, not so it can drift from what the shelf shows.
+            XCTAssertEqual(
+                try repo.newChapterCount(bookId: book.id), counts[book.id] ?? 0,
+                "the per-book count must match the shelf's for \(book.title)"
+            )
+            XCTAssertEqual(
+                try repo.lastReadChapterIndex(bookId: book.id),
+                try repo.lastReadChapterIndexes()[book.id],
+                "the per-book index must match the shelf's for \(book.title)"
+            )
         }
     }
 }

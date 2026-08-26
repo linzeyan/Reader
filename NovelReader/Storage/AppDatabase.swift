@@ -25,6 +25,15 @@ final class AppDatabase {
         )
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let queue = try DatabaseQueue(path: folder.appendingPathComponent("library.sqlite").path)
+        // WAL instead of SQLite's default rollback journal: the throttled reading
+        // progress write runs on the main thread mid-session, and under a DELETE
+        // journal every one of them pays journal-create → fsync → unlink. WAL makes
+        // a small write one log append. The mode is sticky in the database file, so
+        // setting it once at open covers every later connection. Outside a
+        // transaction, because SQLite refuses to switch journal modes inside one.
+        try queue.writeWithoutTransaction { db in
+            _ = try String.fetchOne(db, sql: "PRAGMA journal_mode = WAL")
+        }
         return try AppDatabase(queue)
     }
 

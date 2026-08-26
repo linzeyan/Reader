@@ -167,7 +167,10 @@ final class CloudSync {
     func push(_ book: Book) {
         guard isEnabled else { return }
         write(book)
-        store.synchronize()
+        // No `synchronize()` here, unlike the bulk paths: this fires at every
+        // chapter turn, and the round trip to the ubiquity daemon is not what
+        // uploads the value — the system coalesces and sends KVS writes on its
+        // own schedule. Forcing it per turn was pure battery.
     }
 
     func removed(bookId: String) {

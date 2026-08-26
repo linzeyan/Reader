@@ -105,7 +105,9 @@ final class WebFetcher: NSObject {
                 self.webView.load(URLRequest(url: url))
             }
             try await self.failIfChallenged()
-            return try await self.evaluate(script, as: type, in: self.webView)
+            let value = try await self.evaluate(script, as: type, in: self.webView)
+            await self.parkAfterExtraction()
+            return value
         }
     }
 
@@ -132,7 +134,27 @@ final class WebFetcher: NSObject {
                 self.webView.evaluateJavaScript(submitScript, completionHandler: nil)
             }
             try await self.failIfChallenged()
-            return try await self.evaluate(script, as: type, in: self.webView)
+            let value = try await self.evaluate(script, as: type, in: self.webView)
+            await self.parkAfterExtraction()
+            return value
+        }
+    }
+
+    /// Parks the fetcher's web view on a blank page once a fetch has what it came
+    /// for.
+    ///
+    /// Left on the fetched page, the document lives on in the web content process —
+    /// timers, animation loops, the ad scripts these sites carry — burning CPU for
+    /// the whole session on a view that is deliberately kept in the window
+    /// hierarchy and non-hidden (see `RootView`). The blank load ends that. Cookies
+    /// live in the data store, so `cf_clearance` survives it. Awaited inside the
+    /// serialised block rather than fired and forgotten: racing the next fetch's
+    /// own load would cancel that navigation out from under its continuation. Never
+    /// reached on the challenge path, where the sheet must show the page that
+    /// challenged.
+    private func parkAfterExtraction() async {
+        try? await navigate(timeout: .seconds(5), in: webView) {
+            self.webView.load(URLRequest(url: URL(string: "about:blank")!))
         }
     }
 

@@ -436,6 +436,40 @@ struct LibraryRepo {
         }
     }
 
+    /// The single-book slice of `lastReadChapterIndexes`, for the progress publish
+    /// that fires at every chapter turn: refreshing one book must not re-join the
+    /// whole library's chapter table behind the reader.
+    func lastReadChapterIndex(bookId: String) throws -> Int? {
+        try writer.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT chapter."index"
+                FROM book
+                JOIN chapter ON chapter."bookId" = book."id"
+                            AND chapter."siteChapterId" = book."lastReadSiteChapterId"
+                WHERE book."id" = ?
+                """, arguments: [bookId])
+        }
+    }
+
+    /// The single-book slice of `newChapterCounts`, for the same caller and the
+    /// same reason.
+    func newChapterCount(bookId: String, now: Date = .now) throws -> Int {
+        let cutoff = now.addingTimeInterval(-Chapter.newWindow)
+        return try writer.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*)
+                FROM chapter
+                JOIN book ON book."id" = chapter."bookId"
+                LEFT JOIN chapter AS lastRead
+                       ON lastRead."bookId" = book."id"
+                      AND lastRead."siteChapterId" = book."lastReadSiteChapterId"
+                WHERE chapter."bookId" = ?
+                  AND chapter."addedAt" > ?
+                  AND (lastRead."index" IS NULL OR chapter."index" > lastRead."index")
+                """, arguments: [bookId, cutoff]) ?? 0
+        }
+    }
+
     /// Requirement 4.2: which chapters of this book are held locally.
     func downloadedChapterIds(bookId: String) throws -> Set<String> {
         try writer.read { db in
