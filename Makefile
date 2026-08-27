@@ -91,6 +91,18 @@ test-ui-live: generate ## Run the UI walk including the network-dependent read-a
 		-destination 'platform=iOS Simulator,name=$(SIMULATOR)' \
 		-only-testing:NovelReaderUITests
 
+test-soak: generate ## Run the half-hour tap walk (worth it only with a probe kit in the app)
+	@# Excluded from `make test-ui` on purpose: half an hour of taps, and on its own it
+	@# only claims the page never stopped moving — which the short walks already ask for
+	@# the price of a minute. Its real verdict is read out of the probe log afterwards.
+	TEST_RUNNER_NOVELREADER_SOAK=1 \
+	xcodebuild test -project $(PROJECT) \
+		-scheme $(SCHEME) \
+		-configuration $(CONFIGURATION) \
+		-derivedDataPath $(DERIVED) \
+		-destination 'platform=iOS Simulator,name=$(SIMULATOR)' \
+		-only-testing:NovelReaderUITests/ReaderLongSessionTapTests/testAMultiHourReadingSessionCompressed
+
 test-live: generate ## Run the opt-in live site checks (needs a network; slow)
 	@# Excluded from `make test` on purpose: these fail on site redesigns and
 	@# Cloudflare challenges, which must never turn a code regression green.

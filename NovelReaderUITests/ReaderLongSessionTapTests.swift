@@ -8,14 +8,19 @@ import XCTest
 /// reader's own loaded window — `-reader.stressPreload` rebuilds that state up front,
 /// through the same path a real session grows by.
 ///
-/// This walk deliberately asserts almost nothing. The verdict comes from the
-/// [DEBUG-t4p] probes inside the app, read out of the unified log by the diagnosis
-/// scripts: XCUITest waits for the app to idle before every query and every synthesized
-/// event, so an in-test measurement is inflated by the very stalls it is trying to
-/// measure — an earlier version of this walk reported misses on turns a recording
-/// showed were frame-perfect. The taps still go through the real event pipeline, which
-/// is the part no in-app probe can drive; the app-side clock is the part no XCUI query
-/// can read. Together they are the loop.
+/// What these walks settle on their own is that the page keeps moving. That is a question
+/// about state rather than timing, which is why it holds with no probes in the app: XCUI
+/// waits for the app to idle before every query, which ruins a duration but is exactly
+/// right for reading a screen that has settled. A tap that turned nothing is what the
+/// report describes, and it is what these assert.
+///
+/// How *long* a stall lasted is the part no XCUI query can read — an in-test measurement
+/// is inflated by the very stalls it is trying to measure, and an earlier version of this
+/// walk reported misses on turns a recording showed were frame-perfect. That verdict needs
+/// a probe kit inside the app, read out of the unified log. The taps still go through the
+/// real event pipeline, which is the part no in-app probe can drive; together they are the
+/// loop, and the long walk below is the harness for one — which is why it only runs when
+/// it is asked for.
 final class ReaderLongSessionTapTests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -61,13 +66,22 @@ final class ReaderLongSessionTapTests: XCTestCase {
     }
 
     /// Hours of an evening's reading, compressed to what actually accumulates: the
-    /// chapters crossed. The pace is the same tapped turn every two seconds; seventy
-    /// chapters is roughly three hours at a real reading speed. The probe log holds
-    /// the verdict — `loaded=` pinned at the window, `gap=` and `mem=` flat across
-    /// the whole run, stall sizes the same at chapter seventy as at chapter seven.
-    /// Driven with `-reader.stressRepeats 3` so each chapter is ~90 paragraphs, the
-    /// shape of the real serials the reports come from.
+    /// chapters crossed. The pace is the same tapped turn every two seconds, so seven
+    /// hundred turns is roughly three hours at a real reading speed — and lands about two
+    /// fifths of the way through the stress book, whose 160 chapters carry ~200 paragraphs
+    /// each, the shape of the real serials the reports come from.
+    ///
+    /// Opt-in, and deliberately: it costs half an hour, and on its own it can only report
+    /// that the page never stopped moving — which the short walks above already ask, for
+    /// the price of a minute. The numbers it exists to produce — `loaded=` pinned at the
+    /// window, stall sizes and memory the same at chapter seventy as at chapter seven —
+    /// come from a probe kit in the app, so it runs when there is one there to read.
     func testAMultiHourReadingSessionCompressed() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["NOVELREADER_SOAK"] == "1",
+            "Half an hour of taps with nothing measuring them: run `make test-soak`, "
+                + "with a probe kit in the app to read afterwards."
+        )
         launch(preloadChapters: 0)
         openReader()
         Thread.sleep(forTimeInterval: 3)
@@ -123,18 +137,41 @@ final class ReaderLongSessionTapTests: XCTestCase {
         )
     }
 
-    /// Forward taps on a fixed cadence. Two seconds is enough for a healthy turn to
-    /// land and settle, and short enough that a stalled one is still stalled when the
-    /// next tap arrives — which is exactly the double-tap the report describes.
+    /// Forward taps on a fixed cadence, watching that the text keeps moving under them.
+    ///
+    /// Two seconds is enough for a healthy turn to land and settle, and short enough that
+    /// a stalled one is still stalled when the next tap arrives — which is exactly the
+    /// double-tap the report describes.
+    ///
+    /// Two consecutive turns that move nothing is the failure, not one: the report is a
+    /// tap that does nothing *and goes on doing nothing* until the reader swipes, while a
+    /// single synthesized tap can miss for reasons of its own.
+    ///
+    /// Compared turn by turn rather than in strides, because the stress book repeats one
+    /// chapter's twenty-nine paragraphs seven times over — a label names a row only
+    /// together with a position, and samples far enough apart can land on identical text
+    /// four chapters along. A ten-turn stride reported a stuck page on a walk that was
+    /// moving perfectly well; one turn moves fifteen to twenty-one paragraphs, which can
+    /// never be a whole number of repeats.
     private func drive(turns: Int) {
         let text = app.otherElements["reader.text"]
-        for _ in 1...turns {
+        var seen = app.topParagraphLabel()
+        var unmoved = 0
+        for turn in 1...turns {
             // Half way across and most of the way down the *screen*: inside the
             // forward zone, clear of the middle cell that toggles the chrome. App
             // coordinates, because "reader.text" is the whole scrollable column
             // and points on it land wherever the scroll offset happens to put them.
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
             Thread.sleep(forTimeInterval: 2.0)
+            let now = app.topParagraphLabel()
+            unmoved = now == seen ? unmoved + 1 : 0
+            seen = now
+            XCTAssertLessThan(
+                unmoved, 2,
+                "turns \(turn - 1) and \(turn) both left the top of the window on the same "
+                    + "paragraph — the tap that does nothing, and keeps doing nothing"
+            )
         }
         XCTAssertTrue(text.exists, "the walk should end still inside the reader")
     }

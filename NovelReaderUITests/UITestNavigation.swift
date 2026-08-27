@@ -52,6 +52,22 @@ extension XCUIApplication {
         openTab(.library, timeout: timeout)
     }
 
+    /// The label of the topmost paragraph with any part on screen — enough to tell whether
+    /// the text moved at all, which is the one thing a tap that turned nothing looks like.
+    ///
+    /// Filtered by frame rather than taken as the first match: a lazy stack keeps rows it
+    /// has scrolled past, so the first element in the tree is usually somewhere above the
+    /// window and says nothing about what the reader can see.
+    func topParagraphLabel() -> String {
+        let paragraphs = descendants(matching: .any).matching(identifier: "reader.paragraph")
+        let window = windows.firstMatch.frame
+        return (0..<paragraphs.count)
+            .map { paragraphs.element(boundBy: $0) }
+            .filter { $0.frame.maxY > window.minY && $0.frame.minY < window.maxY }
+            .min(by: { $0.frame.minY < $1.frame.minY })?
+            .label ?? ""
+    }
+
     /// Scrolls until a row is there to be tapped.
     ///
     /// A `List` does not realise rows below the fold, so a row further down Settings is

@@ -45,18 +45,6 @@ final class ReaderPageTurnGestureTests: XCTestCase {
         )
     }
 
-    /// The label of the topmost paragraph with any part on screen — enough to tell whether
-    /// the text moved at all, which is the one thing a tap that turned nothing looks like.
-    private func topParagraphLabel() -> String {
-        let paragraphs = app.descendants(matching: .any).matching(identifier: "reader.paragraph")
-        let window = app.windows.firstMatch.frame
-        return (0..<paragraphs.count)
-            .map { paragraphs.element(boundBy: $0) }
-            .filter { $0.frame.maxY > window.minY && $0.frame.minY < window.maxY }
-            .min(by: { $0.frame.minY < $1.frame.minY })?
-            .label ?? ""
-    }
-
     /// Turns eight pages by tapping, and after each one watches the text.
     ///
     /// The watch begins only once the turn has settled. A turn in flight is the reader
@@ -85,7 +73,7 @@ final class ReaderPageTurnGestureTests: XCTestCase {
         // What the top of the window showed before any tap. If tap-to-turn is not actually
         // on, every tap in this loop toggles the control bar instead of turning a page and
         // the whole walk passes without once exercising what it claims to test.
-        let beforeAnyTurn = topParagraphLabel()
+        let beforeAnyTurn = app.topParagraphLabel()
 
         for turn in 1...turns {
             // Half way across and most of the way down is inside the forward zone and
@@ -99,7 +87,7 @@ final class ReaderPageTurnGestureTests: XCTestCase {
 
             if turn == 1 {
                 XCTAssertNotEqual(
-                    topParagraphLabel(), beforeAnyTurn,
+                    app.topParagraphLabel(), beforeAnyTurn,
                     "the first tap must turn a page — tap-to-turn is not on for this launch"
                 )
             }
