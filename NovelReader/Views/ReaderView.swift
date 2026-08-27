@@ -182,15 +182,6 @@ struct ReaderView: View {
                 let context = TapContext(window: geometry.size, proxy: proxy)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        // Everything the window has let go of, kept as pure length:
-                        // the chapters the reader scrolled past are collapsed into
-                        // this one spacer at exactly their measured height, so the
-                        // scroll offset keeps meaning the same place without their
-                        // rows staying alive in the container. See
-                        // `ReaderModel.readGapHeight`.
-                        if model.readGapHeight > 0 {
-                            Color.clear.frame(height: model.readGapHeight)
-                        }
                         ForEach(model.loaded) { item in
                             chapterRows(item, model: model)
                         }
@@ -243,7 +234,9 @@ struct ReaderView: View {
                     model.noteFrames(frames)
                     guard let span = ReaderTapZone.visibleSpan(
                         of: frames, viewport: geometry.size.height
-                    ) else { return }
+                    ) else {
+                        return
+                    }
                     // The model answers with the target while a jump is still in
                     // flight, and the scroll is commanded again. Re-issued per layout
                     // pass, not called once: the lazy stack positions unbuilt rows
@@ -253,6 +246,24 @@ struct ReaderView: View {
                     if let pending = model.viewportChanged(top: span.top, bottom: span.bottom) {
                         proxy.scrollTo(pending, anchor: .top)
                     }
+                }
+                // A collapse or a re-inflation has changed the length of the text above
+                // the reader, and states where they must stay. Aimed at a point inside
+                // a row rather than at the row's top: `scrollTo` lines the anchor point
+                // of the target up with the same point of the window, so for a row of
+                // height `h` in a window of height `v`, an anchor of `a` puts the row's
+                // top at `a * (v - h)` — the same arithmetic the tap zones use to move
+                // inside an over-tall paragraph. One shot, no arrival gate: the content
+                // it corrects for changed in the same transaction, so there is nothing
+                // to keep chasing.
+                .onChange(of: model.scrollCorrection) { _, correction in
+                    guard let correction else { return }
+                    let span = geometry.size.height - correction.height
+                    if span > 0 {
+                        let anchor = min(max(correction.minY / span, 0), 1)
+                        proxy.scrollTo(correction.id, anchor: UnitPoint(x: 0, y: anchor))
+                    }
+                    model.clearScrollCorrection()
                 }
                 .onChange(of: model.scrollTarget) { _, target in
                     guard let target else { return }
@@ -347,9 +358,10 @@ struct ReaderView: View {
            span.top.paragraph == 0, span.top.minY >= 0 {
             Task { await model.loadPrevious(before: span.top.chapterIndex) }
         }
-        guard let scroll = ReaderTapZone.pageScroll(
+        let scroll = ReaderTapZone.pageScroll(
             zone, over: visibleParagraphs, viewport: context.window.height
-        ) else { return }
+        )
+        guard let scroll else { return }
         // Animated, unlike a jump between chapters: this is the reader moving through
         // text they are reading, and a page that appears without moving gives them
         // nothing to tell it apart from a page that never turned.
@@ -457,6 +469,22 @@ struct ReaderView: View {
     /// row and is built only when the scroll approaches it.
     @ViewBuilder
     private func chapterRows(
+        _ item: ReaderModel.LoadedChapter, model: ReaderModel
+    ) -> some View {
+        if let height = item.collapsedHeight {
+            // A chapter the reader is well past, kept as pure length: the same space
+            // its rows occupied, in the same place, so the scroll offset still means
+            // the same sentence — and none of those rows alive in the container. It
+            // keeps the chapter's own id, so a jump to this chapter still has
+            // somewhere to land.
+            Color.clear.frame(height: height).id(item.id)
+        } else {
+            fullChapterRows(item, model: model)
+        }
+    }
+
+    @ViewBuilder
+    private func fullChapterRows(
         _ item: ReaderModel.LoadedChapter, model: ReaderModel
     ) -> some View {
         let highlights = model.highlights(inChapter: item.chapter.siteChapterId)
@@ -894,6 +922,18 @@ final class ReaderModel {
     struct LoadedChapter: Identifiable {
         let chapter: Chapter
         let paragraphs: [String]
+        /// Set once the reader is well past this chapter: the height its block was
+        /// measured at, drawn as one clear spacer *in the chapter's own place* while
+        /// its rows are given back to the container.
+        ///
+        /// In place, rather than removed and added to a single spacer at the head of
+        /// the column, because a chapter whose rows were never all measured cannot be
+        /// priced — and in the head-spacer arrangement that one chapter dammed every
+        /// chapter behind it: nothing could leave the window without changing the
+        /// length of what sat above the reader. A chapter arriving by `loadPrevious`
+        /// at a landing is exactly such a chapter, so on a device trace of an ordinary
+        /// session the collapse never fired once and the window grew all evening.
+        var collapsedHeight: CGFloat?
         var id: String { chapter.id }
     }
 
@@ -914,6 +954,121 @@ final class ReaderModel {
     private(set) var highlightsByChapter: [String: [TextHighlight]] = [:]
     /// Set when the view should scroll somewhere; cleared by the view once done.
     var scrollTarget: String?
+
+    /// Where the reader was, to the point, at the moment the text above them changed
+    /// length — and therefore where the scroll has to be put back to.
+    ///
+    /// This exists because the collapse cannot be made height-neutral. A spacer stands
+    /// in for a chapter at the height its rows measured, but the container does not
+    /// hold a released chapter at that height: measured against a sweep of spacer
+    /// heights on a 203-paragraph chapter, it had been giving it about four fifths of
+    /// the sum of its own rows — so the "exact" spacer pushed the reader back about a
+    /// page and a half, every time. That number is the container's, not ours, and
+    /// nothing in the app can read it.
+    ///
+    /// So the height is left as the honest estimate it is, and the position is stated
+    /// outright: a row currently on screen, and the exact offset it must sit at. Unlike
+    /// `scrollTarget` this is a single shot with no arrival gate — it is a correction,
+    /// not a journey — and unlike `retarget` it can name a point inside a paragraph
+    /// rather than snapping to the paragraph's top, which is the flinch that made the
+    /// first trim attempt worse than the problem.
+    struct ScrollCorrection: Equatable {
+        let id: String
+        /// Where the row's top must end up, measured from the top of the window.
+        let minY: CGFloat
+        /// The row's own height, which the anchor arithmetic needs.
+        let height: CGFloat
+        /// Distinguishes two corrections that ask for the same place, so the view
+        /// applies both rather than seeing no change.
+        let serial: Int
+    }
+    private(set) var scrollCorrection: ScrollCorrection?
+
+    /// Consumed by the view once the scroll has been put back.
+    func clearScrollCorrection() { scrollCorrection = nil }
+
+    /// The row a correction should be stated in terms of: the first one whose top is
+    /// inside the window, so the anchor arithmetic stays within the scroll view's own
+    /// range. Kept fresh by `noteFrames`, which sees every reported row.
+    @ObservationIgnored private var correctionAnchor: (id: String, minY: CGFloat, height: CGFloat)?
+    @ObservationIgnored private var correctionSerial = 0
+
+    /// A correction that has been posted, with the place it was meant to reach: the
+    /// anchor arithmetic is the scroll view's and not ours, and on a device it lands a
+    /// few tens of points out. The frames that follow say by how much, and the
+    /// correction is re-stated against its own miss.
+    @ObservationIgnored private var heldPosition: (
+        id: String, target: CGFloat, height: CGFloat, request: CGFloat, tries: Int, skip: Int
+    )?
+
+    /// Reports to ignore after a correction is posted. The first frames to arrive are
+    /// the mutation's own reflow — rows at estimated offsets, a whole chapter out —
+    /// and reading a miss off one of those turns a settling nudge into a shove.
+    private static let holdSettleFrames = 3
+
+    /// How far out a correction may land before it is worth re-stating. Under a couple
+    /// of points is beneath noticing and not worth another transaction.
+    private static let holdTolerance: CGFloat = 3
+
+    /// Beyond this a miss is somebody else's movement, not the correction's own.
+    private static let holdAbandon: CGFloat = 300
+
+    /// States where the reader must stay, for a mutation about to change the length of
+    /// the text above them.
+    private func holdPosition() {
+        guard let anchor = correctionAnchor else { return }
+        heldPosition = (
+            id: anchor.id, target: anchor.minY, height: anchor.height,
+            request: anchor.minY, tries: 0, skip: Self.holdSettleFrames
+        )
+        postHeldPosition()
+    }
+
+    private func postHeldPosition() {
+        guard let held = heldPosition else { return }
+        correctionSerial += 1
+        scrollCorrection = ScrollCorrection(
+            id: held.id, minY: held.request, height: held.height, serial: correctionSerial
+        )
+    }
+
+    /// Checks where the last correction actually put the reader, and asks again if it
+    /// missed. Twice at most: this is a settling nudge of a few points, not a loop the
+    /// screen should be allowed to argue with.
+    private func checkHeldPosition(_ frames: [ReaderTapZone.VisibleParagraph]) {
+        guard let held = heldPosition, scrollCorrection == nil else { return }
+        guard held.skip == 0 else {
+            heldPosition = (
+                id: held.id, target: held.target, height: held.height,
+                request: held.request, tries: held.tries, skip: held.skip - 1
+            )
+            return
+        }
+        guard let landed = frames.first(where: { $0.id == held.id }) else {
+            // The row the correction was stated in terms of has left the screen —
+            // whatever happened, this correction can no longer be checked against it.
+            heldPosition = nil
+            return
+        }
+        let error = held.target - landed.minY
+        // A miss of half a screen or more is not the scroll view's arithmetic being
+        // out — it is somebody else moving the text, and the last thing a correction
+        // may do is argue with the reader.
+        guard abs(error) < Self.holdAbandon else {
+            heldPosition = nil
+            return
+        }
+        guard abs(error) > Self.holdTolerance, held.tries < 2 else {
+            heldPosition = nil
+            return
+        }
+        heldPosition = (
+            id: held.id, target: held.target, height: held.height,
+            request: held.request + error, tries: held.tries + 1,
+            skip: Self.holdSettleFrames
+        )
+        postHeldPosition()
+    }
 
     var hasMore: Bool {
         guard let last = loaded.last else { return false }
@@ -997,30 +1152,16 @@ final class ReaderModel {
     /// how one polite insert cascades chapter by chapter to the cover. Until the reflow
     /// has had a moment to settle, upward movement is not the reader's.
     private var contentAboveChangedAt: ContinuousClock.Instant?
-    /// The height of everything the window has let go of, drawn as one clear spacer
-    /// above the loaded chapters.
-    ///
-    /// Collapsing a read chapter into exactly its own measured height is what lets the
-    /// window shrink without a correction: the content above the reader keeps its
-    /// length, the scroll offset still means the same place, and nothing on screen
-    /// moves. The first version *removed* the chapter and re-aimed with `retarget` —
-    /// and that correction can land no finer than a paragraph boundary, so every
-    /// chapter seam of ordinary forward reading flinched backwards, and the arrival
-    /// gate it opened held the progress writes shut while it did.
-    private(set) var readGapHeight: CGFloat = 0
-    /// Each collapsed chapter's measured block height, so scrolling back up can put
-    /// the chapter back and shorten the spacer by the same amount in one transaction —
-    /// again no correction. Keyed by reading order; a jump clears it with the rest of
-    /// the window. Heights are only as durable as the text settings they were measured
-    /// under: a font change mid-session leaves them stale, which costs one small
-    /// jitter per reinflation rather than anything worth invalidating eagerly.
-    @ObservationIgnored private var collapsedHeights: [Int: CGFloat] = [:]
     /// Row heights recorded as rows pass through the measured frames, keyed
     /// chapter → paragraph. Heights, never positions: the two chapter heads a block
     /// height could be read from directly are never on screen in the same frame — a
     /// chapter is taller than the window — so the collapse sums what the frames said
     /// row by row, while the reader was actually reading them. Observation-ignored:
     /// written every scrolled frame, drawn from never.
+    ///
+    /// Kept across a collapse rather than discarded with the rows, so a chapter that
+    /// is put back for a glance upward can collapse again the moment the reader turns
+    /// round — without being read from end to end a second time.
     @ObservationIgnored private var recordedRowHeights: [Int: [Int: CGFloat]] = [:]
     /// One title block's height, recorded at the first chapter seam that shows the
     /// gap between two measured rows. Every title is styled identically, so one
@@ -1083,12 +1224,8 @@ final class ReaderModel {
         lastTop = nil
         lastShareBottom = nil
         loaded = []
-        // The gap describes what sat above the window being replaced; above the new
-        // one there is simply the rest of the book, reachable the way it always was.
-        // The row-height record goes with it — the title height alone survives,
-        // because titles are styled the same everywhere in the book.
-        readGapHeight = 0
-        collapsedHeights = [:]
+        // The heights described a window that is being replaced. The title height
+        // alone survives, because titles are styled the same everywhere in the book.
         recordedRowHeights = [:]
         await append(chapters[index])
         // Both halves of the aim written together, after the load. Set before it, the
@@ -1193,7 +1330,9 @@ final class ReaderModel {
     func loadPrevious(before index: Int) async {
         guard !isLoading, pendingPrevious == nil,
               let first = loaded.first, first.chapter.index == index
-        else { return }
+        else {
+            return
+        }
         let target = index - 1
         guard chapters.indices.contains(target) else { return }
         isLoading = true
@@ -1259,7 +1398,9 @@ final class ReaderModel {
         guard !isTouching, pendingPrevious != nil else { return }
         Task {
             await settleBeforeGrowingContent()
-            guard !isTouching, let pending = pendingPrevious else { return }
+            guard !isTouching, let pending = pendingPrevious else {
+                return
+            }
             // The world can have moved on while the fetch or the settle waited — a jump
             // empties `loaded`, and a chapter fetched for a place the reader has left
             // belongs nowhere.
@@ -1269,18 +1410,6 @@ final class ReaderModel {
                 return
             }
             pendingPrevious = nil
-            if let height = collapsedHeights.removeValue(forKey: pending.chapter.index) {
-                // A chapter coming back out of the gap: the spacer shortens by the
-                // very height the chapter renders at, in the same transaction, so
-                // nothing above the reader changes length and no correction is
-                // needed. The reflow gate still closes — rounding can wobble a
-                // frame, and a wobble read as upward movement is the cascade the
-                // gate exists for.
-                readGapHeight = max(0, readGapHeight - height)
-                loaded.insert(pending, at: 0)
-                contentAboveChangedAt = .now
-                return
-            }
             loaded.insert(pending, at: 0)
             contentAboveChangedAt = .now
             // Aimed back at where the reader was, which is also what stops the newly
@@ -1289,8 +1418,8 @@ final class ReaderModel {
         }
     }
 
-    /// Collapses chapters the reader has scrolled well past into the gap spacer.
-    /// Returns whether any collapsed.
+    /// Gives back the rows of every chapter the reader has scrolled well past, each
+    /// replaced by a spacer of the height it was measured at. Returns whether any did.
     ///
     /// `loaded` used to only grow, and a lazy stack never releases a row it has built —
     /// so every read chapter stayed in the container as live nodes. A device trace
@@ -1298,44 +1427,74 @@ final class ReaderModel {
     /// turn's realization alike — stalled ~25ms longer per accumulated chapter,
     /// reaching a third of a second by the fourteenth. That is both "the stalls grow
     /// the longer I read" and "the app slows down over a session"; the cap here is
-    /// what those curves scale against. The chapter's strings go with its rows, which
-    /// is what keeps a three-hour session's memory flat.
+    /// what those curves scale against.
     ///
-    /// One chapter is kept above the current one, so a flick back stays free; further
-    /// up is the existing backtrack path (`loadPrevious`), whose insert puts a
-    /// collapsed chapter back seamlessly — see `readGapHeight`.
+    /// Each chapter is judged on its own, and left where it is. The first version
+    /// removed collapsed chapters and pooled their heights into one spacer at the head
+    /// of the column, which made the window a queue: a chapter that could not be priced
+    /// stood at the front and dammed every chapter behind it, none of which could leave
+    /// without changing the length of the text above the reader. That is not a corner
+    /// case — a landing pulls the chapter before it in through `loadStoredPrevious`, the
+    /// reader never scrolls back through it, and so its rows are never all measured. A
+    /// device trace of an ordinary evening showed the consequence: not one collapse in
+    /// twenty minutes, `loaded` at five chapters and climbing, every touch costing more
+    /// than the last, until the unpriceable chapter fell far enough behind to be evicted
+    /// outright — and that eviction's correction is the page that visibly slid backwards.
+    /// Collapsed in place, the same chapter is simply skipped: it keeps its rows, which
+    /// cost only what the few realized ones cost, and everything behind it collapses.
+    ///
+    /// One chapter is kept whole above the current one, so a flick back stays free.
     ///
     /// The height is the sum of row heights recorded while the reader read the
     /// chapter (`noteFrames`), plus the one title height priced at a seam — never a
     /// difference of positions: two chapter heads are taller than a screen apart, so
-    /// they are never reported in the same frame. A chapter with any row unpriced
-    /// simply is not collapsed this round.
+    /// they are never reported in the same frame.
     private func collapseReadChapters() -> Bool {
         var collapsed = false
-        while let first = loaded.first, first.chapter.index < currentChapterIndex - 1 {
-            guard let height = measuredBlockHeight(of: first) else {
-                // A chapter with rows the frames never priced — a scroll that
-                // skipped them, in practice almost never. It cannot join the gap,
-                // and left at the head it would dam every chapter behind it, so
-                // once it falls well behind it is evicted the old way: removed
-                // with the one paragraph-boundary correction that shows. Rare
-                // beats unbounded.
-                if first.chapter.index < currentChapterIndex - 3 {
-                    recordedRowHeights[first.chapter.index] = nil
-                    loaded.removeFirst()
-                    contentAboveChangedAt = .now
-                    retarget()
-                    return true
-                }
-                break
+        // Stated before the mutation, from frames that still describe the screen the
+        // reader is looking at.
+        let held = correctionAnchor
+        for index in loaded.indices
+        where loaded[index].collapsedHeight == nil
+            && loaded[index].chapter.index < currentChapterIndex - 1 {
+            guard let height = measuredBlockHeight(of: loaded[index]) else {
+                continue
             }
-            collapsedHeights[first.chapter.index] = height
-            recordedRowHeights[first.chapter.index] = nil
-            readGapHeight += height
-            loaded.removeFirst()
+            loaded[index].collapsedHeight = height
             collapsed = true
         }
+        if collapsed, held != nil {
+            correctionAnchor = held
+            holdPosition()
+        }
         return collapsed
+    }
+
+    /// Puts the rows back into the collapsed chapter directly above the reader.
+    ///
+    /// The way back, and the counterpart of the collapse: the rows return to a spacer
+    /// their own measurements priced, so no text arrives above the reader that was not
+    /// already accounted for — unlike `showPreviousChapter`, which brings in a chapter
+    /// that was never there. It may run with a finger still on the glass, which is the
+    /// point: a reader dragging upward must meet text, not a blank.
+    ///
+    /// One chapter per call, gated on the same reflow pause as the backtrack fetch, so a
+    /// long flick upward re-inflates the book one chapter at a time rather than all of it.
+    /// - Returns: whether a chapter was put back.
+    private func reinflateChapterAbove(_ chapterIndex: Int) -> Bool {
+        guard let position = loaded.firstIndex(where: { $0.chapter.index == chapterIndex }),
+              position > 0, loaded[position - 1].collapsedHeight != nil
+        else { return false }
+        loaded[position - 1].collapsedHeight = nil
+        // The same bargain in reverse: the rows coming back do not occupy what the
+        // spacer did, so the reader is held where they are rather than left to be
+        // moved by the difference.
+        holdPosition()
+        // The heights match, but the container still re-registers a chapter's worth of
+        // rows, and rounding can wobble a frame. A wobble read as upward movement is
+        // the cascade the reflow gate exists for.
+        contentAboveChangedAt = .now
+        return true
     }
 
     /// Feeds the frames the view measured this pass into the height record.
@@ -1347,6 +1506,15 @@ final class ReaderModel {
         for frame in frames
         where recordedRowHeights[frame.chapterIndex]?[frame.paragraph] == nil {
             recordedRowHeights[frame.chapterIndex, default: [:]][frame.paragraph] = frame.height
+        }
+        checkHeldPosition(frames)
+        // The row a correction would be stated in terms of — the first whose top is on
+        // screen. Only while nothing is already being corrected or aimed: those are
+        // the frames that lie, and a correction taken from one would hold the reader
+        // to a place they were never at.
+        if scrollTarget == nil, scrollCorrection == nil, heldPosition == nil,
+           let anchor = frames.filter({ $0.minY >= 0 }).min(by: { $0.minY < $1.minY }) {
+            correctionAnchor = (id: anchor.id, minY: anchor.minY, height: anchor.height)
         }
         guard recordedTitleHeight == nil, frames.count > 1,
               // Not while a jump or an insert is still settling: those are the
@@ -1368,7 +1536,9 @@ final class ReaderModel {
                 $0.chapter.index == previous.chapterIndex
             }), previous.paragraph == previousChapter.paragraphs.count - 1 else { continue }
             let title = current.minY - previous.maxY
-            if title > 0, title < 200 { recordedTitleHeight = title }
+            if title > 0, title < 200 {
+                recordedTitleHeight = title
+            }
             return
         }
     }
@@ -1392,6 +1562,10 @@ final class ReaderModel {
     func touch(down: Bool) {
         guard isTouching != down else { return }
         isTouching = down
+        // A finger on the glass ends any correction still settling: a tap is a page
+        // turn, and a correction that re-states itself over one is the page that turns
+        // and comes straight back.
+        if down { heldPosition = nil }
         if !down { showPreviousChapter() }
     }
 
@@ -1737,6 +1911,15 @@ final class ReaderModel {
             let settled = contentAboveChangedAt.map {
                 ContinuousClock.now > $0.advanced(by: .milliseconds(600))
             } ?? true
+            // Nearing the top of the chapter they are in, on the way up: whatever lies
+            // above has to be there before they reach it. A collapsed chapter is put
+            // back where it stands — free, and no correction; only when there is no
+            // collapsed chapter above does the window have to grow at the front, which
+            // is the expensive half.
+            if movingUp, settled, top.paragraph < lead,
+               reinflateChapterAbove(top.chapterIndex) {
+                return nil
+            }
             if movingUp, settled, pendingPrevious == nil, let first = loaded.first,
                top.chapterIndex == first.chapter.index, top.paragraph < lead {
                 Task { await loadPrevious(before: first.chapter.index) }

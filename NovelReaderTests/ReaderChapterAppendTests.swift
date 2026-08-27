@@ -84,8 +84,9 @@ final class ReaderChapterAppendTests: XCTestCase {
         )
     }
 
-    /// Chapters the reader has moved past collapse into the gap spacer before new
-    /// ones arrive — and nothing about it may move the screen.
+    /// Chapters the reader has moved past give their rows back before new ones
+    /// arrive, each standing in as a spacer of its own measured height — and nothing
+    /// about it may move the screen.
     ///
     /// The report behind this one: the stalls grew the longer the session ran —
     /// ~25ms more per accumulated chapter on device, for the append *and* for every
@@ -94,12 +95,104 @@ final class ReaderChapterAppendTests: XCTestCase {
     /// correction; that correction flinched the screen backwards at every seam and
     /// its arrival gate held progress writes shut — which is why this test pins
     /// `scrollTarget` staying nil through both the collapse and the way back, not
-    /// just the window's size.
-    func testChaptersFarBehindTheReaderCollapseIntoTheGap() async throws {
-        try env.repo.replaceCatalog(bookId: book.id, entries: (1...7).map {
+    /// just how much of the window is live.
+    func testChaptersFarBehindTheReaderCollapseInPlace() async throws {
+        let model = try await readForward(chapters: 5)
+
+        XCTAssertEqual(
+            model.loaded.filter { $0.collapsedHeight == nil }.map(\.chapter.index),
+            [3, 4, 5],
+            "only the kept chapter, the current one and the frontier may still hold rows"
+        )
+        // 60pt of title plus thirty 40pt rows, for each chapter over.
+        XCTAssertEqual(
+            model.loaded.compactMap(\.collapsedHeight), Array(repeating: 60 + 30 * 40, count: 3),
+            "a collapsed chapter must stand in as exactly its measured height"
+        )
+        XCTAssertNil(
+            model.scrollTarget,
+            "a collapse must not aim the scroll at a row — that correction snaps to the "
+                + "paragraph boundary, which is the flinch the first trim attempt died of"
+        )
+        // A spacer is only ever an estimate of what the container was giving the
+        // chapter — measured against a sweep of spacer heights, it holds a released
+        // chapter at about four fifths of what its own rows measure — so the collapse
+        // states the reader's place exactly instead of trusting the heights to match.
+        XCTAssertEqual(
+            model.scrollCorrection?.minY, 0,
+            "a collapse must state where the reader was, to the point"
+        )
+
+        // The way back: the chapter above re-inflates where it stands, so this too
+        // needs no correction — and only one chapter comes back per turn round, or a
+        // flick upward would rebuild the whole session at once.
+        _ = model.viewportChanged(
+            top: visible(chapterIndex: 3, paragraph: 5, minY: 0),
+            bottom: visible(chapterIndex: 3, paragraph: 15, minY: 400)
+        )
+        _ = model.viewportChanged(
+            top: visible(chapterIndex: 3, paragraph: 2, minY: 0),
+            bottom: visible(chapterIndex: 3, paragraph: 12, minY: 400)
+        )
+
+        XCTAssertNil(
+            model.loaded.first { $0.chapter.index == 2 }?.collapsedHeight,
+            "the chapter above a reader heading up must have its rows back before they arrive"
+        )
+        XCTAssertNotNil(
+            model.loaded.first { $0.chapter.index == 1 }?.collapsedHeight,
+            "the chapter beyond that stays collapsed until the reader keeps going"
+        )
+        XCTAssertNil(
+            model.scrollTarget,
+            "re-inflating must not snap to a paragraph either — it states the reader's "
+                + "place the same way the collapse does"
+        )
+    }
+
+    /// A chapter whose rows were never all measured cannot be priced — and must not
+    /// stop the chapters behind it from collapsing.
+    ///
+    /// This is the shape every real session has: a landing pulls the chapter before
+    /// it in (`loadStoredPrevious`) and the reader never scrolls back through it, so
+    /// its rows are never measured. While collapsed chapters were pooled into one
+    /// spacer at the head of the column, that unpriceable chapter stood at the front
+    /// of a queue and dammed everything behind it: a device trace of an ordinary
+    /// evening showed zero collapses, a window growing all session, and finally an
+    /// eviction whose correction slid the page backwards under the reader.
+    func testAnUnpriceableChapterDoesNotDamTheChaptersBehindIt() async throws {
+        let model = try await readForward(chapters: 5, unmeasured: [0])
+
+        XCTAssertNil(
+            model.loaded.first?.collapsedHeight,
+            "a chapter with unmeasured rows cannot be priced, so it keeps its own"
+        )
+        XCTAssertEqual(
+            model.loaded.filter { $0.collapsedHeight != nil }.map(\.chapter.index), [1, 2],
+            "every chapter behind it that *can* be priced must still collapse"
+        )
+        XCTAssertNil(
+            model.scrollTarget,
+            "and none of it may be paid for with a correction"
+        )
+    }
+
+    /// Reads forward through `chapters` chapters, reporting the frames the view would.
+    ///
+    /// Every row of a chapter passes through the frames as it is read (40pt each), and
+    /// each seam shows the 60pt title gap between the last row of one chapter and the
+    /// head of the next. Those heights are what the collapse sums — chapter heads are
+    /// never on screen together, so positions could never be compared directly.
+    ///
+    /// - Parameter unmeasured: chapters whose rows are never reported, standing in for
+    ///   a chapter the reader never scrolled through.
+    private func readForward(
+        chapters: Int, unmeasured: Set<Int> = []
+    ) async throws -> ReaderModel {
+        try env.repo.replaceCatalog(bookId: book.id, entries: (1...(chapters + 2)).map {
             (siteChapterId: "c\($0)", title: "第\($0)章", url: "https://alpha/\($0)")
         })
-        for chapter in 1...7 {
+        for chapter in 1...(chapters + 2) {
             try env.downloads.save(
                 paragraphs: (0..<30).map { "第\(chapter)章第\($0)段" },
                 book: book, siteChapterId: "c\(chapter)"
@@ -108,15 +201,12 @@ final class ReaderChapterAppendTests: XCTestCase {
         let model = ReaderModel(book: book, env: env)
         await model.start(at: .chapterStart("c1"))
 
-        // Read forward, reporting what the view would: every row of a chapter passes
-        // through the frames as it is read (40pt each), and each seam shows the 60pt
-        // title gap between the last row of one chapter and the head of the next.
-        // The heights are what the collapse sums — chapter heads are never on screen
-        // together, so positions could never be compared directly.
-        for index in 0..<5 {
-            model.noteFrames((0..<30).map {
-                visible(chapterIndex: index, paragraph: $0, minY: CGFloat($0) * 40)
-            })
+        for index in 0..<chapters {
+            if !unmeasured.contains(index) {
+                model.noteFrames((0..<30).map {
+                    visible(chapterIndex: index, paragraph: $0, minY: CGFloat($0) * 40)
+                })
+            }
             if index > 0 {
                 model.noteFrames([
                     visible(chapterIndex: index - 1, paragraph: 29, minY: 0),
@@ -129,43 +219,7 @@ final class ReaderChapterAppendTests: XCTestCase {
             )
             await model.loadNext()
         }
-
-        XCTAssertEqual(
-            model.loaded.map(\.chapter.index), [3, 4, 5],
-            "the window is the kept chapter, the current one and the frontier"
-        )
-        // 60pt of title plus thirty 40pt rows, three chapters over.
-        XCTAssertEqual(
-            model.readGapHeight, 3 * (60 + 30 * 40),
-            "collapsed chapters must stand in as exactly their measured height"
-        )
-        XCTAssertNil(
-            model.scrollTarget,
-            "a collapse preserves every height above the reader, so no correction may be aimed"
-        )
-
-        // The way back: a collapsed chapter re-inflates out of the gap — the spacer
-        // shortens by the height the chapter renders at, so this too needs no
-        // correction.
-        await model.loadPrevious(before: 3)
-        model.touch(down: true)
-        model.touch(down: false)
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while model.loaded.first?.chapter.index != 2, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        XCTAssertEqual(
-            model.loaded.first?.chapter.index, 2,
-            "a collapsed chapter must come back through the backtrack path"
-        )
-        XCTAssertEqual(
-            model.readGapHeight, 2 * (60 + 30 * 40),
-            "the gap must shorten by exactly the height the chapter takes back"
-        )
-        XCTAssertNil(
-            model.scrollTarget,
-            "re-inflating from the gap must not aim a correction either"
-        )
+        return model
     }
 
     private func visible(
