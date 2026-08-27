@@ -79,9 +79,6 @@ struct BookDetailView: View {
         .searchable(text: $query, placement: .navigationBarDrawer, prompt: Text("book.catalog.search"))
         .navigationTitle(current.shownName)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: ReadingTarget.self) { target in
-            ReaderView(book: target.book, position: target.position)
-        }
         .toolbar {
             // Hidden, not disabled, for an imported book: there is nowhere to
             // refresh a catalog from, and a permanently greyed-out button reads

@@ -46,8 +46,10 @@ struct LibraryView: View {
             // At the stack's root rather than on the shelf list, for the same reason
             // the history used to declare them at its root: the handoff lays both
             // path values down in one transaction, before any pushed screen — and
-            // its own destinations — exists. The book screen still declares
-            // `ReadingTarget` for the links it pushes one at a time.
+            // its own destinations — exists. Both types are declared here and
+            // nowhere deeper: a stack uses only the declaration closest to its root,
+            // so a second one on the book screen would be dead weight — which is
+            // exactly what it was, announced at every launch by the runtime.
             .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
             .navigationDestination(for: ReadingTarget.self) { target in
                 ReaderView(book: target.book, position: target.position)
