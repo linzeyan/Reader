@@ -50,6 +50,12 @@ struct ReaderView: View {
     }
     @State private var lastTouch = TouchLocation()
     var body: some View {
+        #if DEBUG
+        // Counted, not printed: this runs at frame rate whenever something in here
+        // reads per-frame state, and telling "body is re-running" from "the container
+        // is busy" is the first fork in every reader stall. See `ReaderProbe`.
+        let _ = ReaderProbe.body()
+        #endif
         ZStack {
             settings.theme.background.ignoresSafeArea()
             if let model {
@@ -93,6 +99,9 @@ struct ReaderView: View {
                 .presentationDetents([.medium])
         }
         .task {
+            #if DEBUG
+            ReaderProbe.start()
+            #endif
             guard model == nil else { return }
             let created = ReaderModel(book: book, env: env)
             model = created
@@ -146,6 +155,9 @@ struct ReaderView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             model?.stopReading()
+            #if DEBUG
+            ReaderProbe.stop()
+            #endif
         }
         // The position has to be on disk before the process can be taken away, and a
         // suspended app is killed without being told. `.inactive` rather than
@@ -1182,6 +1194,24 @@ final class ReaderModel {
         self.env = env
     }
 
+    /// Announces a structural change to the loaded window to the stall probe, so a
+    /// heartbeat gap has an event to be attributed to. A no-op in Release, where
+    /// `ReaderProbe` does not exist.
+    ///
+    /// `live` — the chapters still holding rows — rather than `loaded.count`, because
+    /// that is the number a transaction's bookkeeping scales with and the one the
+    /// collapse exists to cap. The message is an autoclosure so an unarmed run does not
+    /// even build the string.
+    private func probe(_ what: @autoclosure () -> String) {
+        #if DEBUG
+        guard ReaderProbe.isArmed else { return }
+        ReaderProbe.mutated(
+            what(), loaded: loaded.count,
+            live: loaded.filter { $0.collapsedHeight == nil }.count
+        )
+        #endif
+    }
+
     // MARK: Loading
 
     func start(at position: ReadingPosition) async {
@@ -1224,6 +1254,7 @@ final class ReaderModel {
         lastTop = nil
         lastShareBottom = nil
         loaded = []
+        probe("jump idx=\(index)")
         // The heights described a window that is being replaced. The title height
         // alone survives, because titles are styled the same everywhere in the book.
         recordedRowHeights = [:]
@@ -1411,6 +1442,7 @@ final class ReaderModel {
             }
             pendingPrevious = nil
             loaded.insert(pending, at: 0)
+            probe("insertAbove idx=\(pending.chapter.index) rows=\(pending.paragraphs.count)")
             contentAboveChangedAt = .now
             // Aimed back at where the reader was, which is also what stops the newly
             // arrived paragraphs from being recorded as progress on their way past.
@@ -1418,8 +1450,8 @@ final class ReaderModel {
         }
     }
 
-    /// Gives back the rows of every chapter the reader has scrolled well past, each
-    /// replaced by a spacer of the height it was measured at. Returns whether any did.
+    /// Gives back the rows of one chapter the reader has scrolled well past, replaced
+    /// by a spacer of the height it was measured at.
     ///
     /// `loaded` used to only grow, and a lazy stack never releases a row it has built —
     /// so every read chapter stayed in the container as live nodes. A device trace
@@ -1445,12 +1477,21 @@ final class ReaderModel {
     ///
     /// One chapter is kept whole above the current one, so a flick back stays free.
     ///
+    /// One chapter per call, like `reinflateChapterAbove` and for the same reason: this
+    /// hands a whole chapter's rows back to the container in a single transaction, and
+    /// a call that took every eligible chapter did as many of those as had come due at
+    /// once. Usually that is one — a chapter is read, a chapter falls behind — but the
+    /// title height is priced at the *first* seam of the session and nothing can be
+    /// collapsed before it exists, so the first collapse after that seam had every
+    /// chapter read so far waiting on it, in one frame. Throttled, the backlog drains a
+    /// chapter per `loadNext`, which is the rate it accrues at anyway.
+    ///
     /// The height is the sum of row heights recorded while the reader read the
     /// chapter (`noteFrames`), plus the one title height priced at a seam — never a
     /// difference of positions: two chapter heads are taller than a screen apart, so
     /// they are never reported in the same frame.
-    private func collapseReadChapters() -> Bool {
-        var collapsed = false
+    /// - Returns: whether a chapter was collapsed.
+    private func collapseOneReadChapter() -> Bool {
         // Stated before the mutation, from frames that still describe the screen the
         // reader is looking at.
         let held = correctionAnchor
@@ -1461,13 +1502,14 @@ final class ReaderModel {
                 continue
             }
             loaded[index].collapsedHeight = height
-            collapsed = true
+            probe("collapse idx=\(loaded[index].chapter.index)")
+            if held != nil {
+                correctionAnchor = held
+                holdPosition()
+            }
+            return true
         }
-        if collapsed, held != nil {
-            correctionAnchor = held
-            holdPosition()
-        }
-        return collapsed
+        return false
     }
 
     /// Puts the rows back into the collapsed chapter directly above the reader.
@@ -1486,6 +1528,7 @@ final class ReaderModel {
               position > 0, loaded[position - 1].collapsedHeight != nil
         else { return false }
         loaded[position - 1].collapsedHeight = nil
+        probe("reinflate idx=\(loaded[position - 1].chapter.index)")
         // The same bargain in reverse: the rows coming back do not occupy what the
         // spacer did, so the reader is held where they are rather than left to be
         // moved by the difference.
@@ -1593,7 +1636,7 @@ final class ReaderModel {
                 // device — the pause keeps it from merging with the first slice
                 // into one long stutter, and the settle re-checks that the pause
                 // itself was not spent scrolling.
-                if collapseReadChapters() {
+                if collapseOneReadChapter() {
                     try? await Task.sleep(for: .milliseconds(250))
                     await settleBeforeGrowingContent()
                     guard loaded.last?.chapter.index == chapter.index - 1 else { return }
@@ -1603,6 +1646,7 @@ final class ReaderModel {
                 return
             }
             loaded.append(LoadedChapter(chapter: chapter, paragraphs: text))
+            probe("append idx=\(chapter.index) rows=\(text.count)")
             startReadingAhead()
         } catch {
             // A challenge has to reach the shell so the sheet can be presented;
@@ -1672,6 +1716,7 @@ final class ReaderModel {
     private func appendInSlices(_ chapter: Chapter, text: [String]) async {
         var count = min(Self.appendSliceRows, text.count)
         loaded.append(LoadedChapter(chapter: chapter, paragraphs: Array(text.prefix(count))))
+        probe("slice idx=\(chapter.index) rows=\(count)/\(text.count)")
         while count < text.count {
             // Well more than the one runloop turn that keeps slices from coalescing
             // into a single transaction: on device each slice costs a fixed few
@@ -1686,6 +1731,7 @@ final class ReaderModel {
             loaded[loaded.count - 1] = LoadedChapter(
                 chapter: chapter, paragraphs: Array(text.prefix(count))
             )
+            probe("slice idx=\(chapter.index) rows=\(count)/\(text.count)")
         }
     }
 
@@ -2041,6 +2087,7 @@ final class ReaderModel {
         guard keep.count < loaded.count else { return }
         let droppedAbove = keep.lowerBound > 0
         loaded = Array(loaded[keep])
+        probe("drop keeping=\(keep.count)")
         guard droppedAbove else { return }
         contentAboveChangedAt = .now
         retarget()

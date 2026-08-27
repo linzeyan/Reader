@@ -177,6 +177,80 @@ final class ReaderChapterAppendTests: XCTestCase {
         )
     }
 
+    /// A backlog of collapsible chapters is paid off one per append, not all at once.
+    ///
+    /// Nothing can be collapsed until some seam has priced a title, and a session can
+    /// read several chapters before one does — the reader who opens mid-book and turns
+    /// pages forward crosses no seam at all until the first prefetched chapter lands.
+    /// The instant a seam does arrive, every chapter behind the reader becomes
+    /// collapsible together, and taking them together is one mutation handing several
+    /// chapters' rows back to the container in a single frame. That is the blink at the
+    /// seam this throttle exists for; `reinflateChapterAbove` has always had it, and
+    /// the way down was missing it.
+    ///
+    /// The ordinary case cannot see this at all — one chapter is read, one chapter
+    /// falls behind — which is why it needs a test of its own.
+    func testACollapseBacklogIsPaidOffOneChapterPerAppend() async throws {
+        let count = 10
+        try env.repo.replaceCatalog(bookId: book.id, entries: (1...count).map {
+            (siteChapterId: "c\($0)", title: "第\($0)章", url: "https://alpha/\($0)")
+        })
+        for chapter in 1...count {
+            try env.downloads.save(
+                paragraphs: (0..<30).map { "第\(chapter)章第\($0)段" },
+                book: book, siteChapterId: "c\(chapter)"
+            )
+        }
+        let model = ReaderModel(book: book, env: env)
+        await model.start(at: .chapterStart("c1"))
+
+        // Five chapters read with every row measured, but no seam ever reported: the
+        // heights are all on record and not one of them can be turned into a spacer.
+        for index in 0..<5 {
+            model.noteFrames((0..<30).map {
+                visible(chapterIndex: index, paragraph: $0, minY: CGFloat($0) * 40)
+            })
+            _ = model.viewportChanged(
+                top: visible(chapterIndex: index, paragraph: 0, minY: 0),
+                bottom: visible(chapterIndex: index, paragraph: 1, minY: 44)
+            )
+            await model.loadNext()
+        }
+        XCTAssertTrue(
+            model.loaded.allSatisfy { $0.collapsedHeight == nil },
+            "with no title priced, nothing can collapse however far behind it has fallen"
+        )
+
+        // The first seam of the session. Chapters 0, 1 and 2 all become collapsible in
+        // the same instant — three chapters' worth of rows, all due at once.
+        model.noteFrames([
+            visible(chapterIndex: 3, paragraph: 29, minY: 0),
+            visible(chapterIndex: 4, paragraph: 0, minY: 100),
+        ])
+        _ = model.viewportChanged(
+            top: visible(chapterIndex: 4, paragraph: 0, minY: 0),
+            bottom: visible(chapterIndex: 4, paragraph: 1, minY: 44)
+        )
+        await model.loadNext()
+
+        XCTAssertEqual(
+            model.loaded.filter { $0.collapsedHeight != nil }.map(\.chapter.index), [0],
+            "a backlog of three must cost one chapter's rows per append, not three"
+        )
+
+        // And the rest is not stranded: it drains at the rate it accrued.
+        _ = model.viewportChanged(
+            top: visible(chapterIndex: 4, paragraph: 2, minY: 0),
+            bottom: visible(chapterIndex: 4, paragraph: 3, minY: 44)
+        )
+        await model.loadNext()
+
+        XCTAssertEqual(
+            model.loaded.filter { $0.collapsedHeight != nil }.map(\.chapter.index), [0, 1],
+            "the backlog must drain one per append rather than sit there"
+        )
+    }
+
     /// Reads forward through `chapters` chapters, reporting the frames the view would.
     ///
     /// Every row of a chapter passes through the frames as it is read (40pt each), and

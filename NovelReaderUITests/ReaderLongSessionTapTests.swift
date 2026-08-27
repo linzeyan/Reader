@@ -107,7 +107,55 @@ final class ReaderLongSessionTapTests: XCTestCase {
         drive(turns: 6)
     }
 
-    private func launch(preloadChapters: Int) {
+    /// The probe run: a reader turning pages at reading pace, driven with no queries.
+    ///
+    /// Opt-in, because its verdict is not an assertion — it is the `[DEBUG-ap1]`
+    /// timeline in the unified log, and without the kit armed this is two minutes of
+    /// tapping that claims nothing the walks above do not already claim.
+    ///
+    /// Nothing here asks the app a question, which is the whole difference from
+    /// `drive`. An XCUI query takes an accessibility snapshot; a snapshot of this
+    /// book's long CJK paragraph tree blocks the app's main thread for seconds; and
+    /// main-thread stalls are precisely what the probe records. A walk that queried
+    /// between turns would spend the run logging itself.
+    ///
+    /// No preload, and that is the correction the first probe run bought. Driven with
+    /// `-reader.stressPreload 120` the log read `loaded=54 live=53` — a window that
+    /// could not collapse at all, because `measuredBlockHeight` needs every row of a
+    /// chapter to have passed through the viewport and preloaded chapters have never
+    /// been *read*. It also loads throughout: 313 of the run's 317 mutations were
+    /// preload slices, so the numbers described chapters arriving, not pages turning.
+    /// The inflated walk is the right shape for "does a tap still work"; it is the
+    /// wrong shape for "what does reading cost".
+    func testProbeRunAtReadingPace() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["NOVELREADER_PROBE"] == "1",
+            "The probe walk is opt-in: run `make test-probe`, then read the "
+                + "[DEBUG-ap1] lines out of the unified log."
+        )
+        launch(preloadChapters: 0, probe: true)
+        openReader()
+        Thread.sleep(forTimeInterval: 3)
+        // Far enough to cross several chapter seams: a turn moves fifteen to twenty-one
+        // of the stress book's ~200 paragraphs, and a chapter cannot collapse until the
+        // reader is two chapters past it.
+        driveSilently(turns: 60)
+    }
+
+    /// Taps on the same cadence as `drive`, and asks the app nothing until the end —
+    /// by which time the timeline being measured is already written.
+    private func driveSilently(turns: Int) {
+        for _ in 1...turns {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+        XCTAssertTrue(
+            app.otherElements["reader.text"].exists,
+            "the walk should end still inside the reader"
+        )
+    }
+
+    private func launch(preloadChapters: Int, probe: Bool = false) {
         // Renderer and tap zones from launch arguments, not Settings taps, so nothing
         // persists into the simulator for later tests — see ReaderPageTurnGestureTests
         // for why the flag is `1` and not `YES`.
@@ -116,6 +164,7 @@ final class ReaderLongSessionTapTests: XCTestCase {
             "-reader.mode", "scroll", "-reader.tapToTurnPage", "1",
             "-reader.stressPreload", String(preloadChapters),
         ]
+        if probe { app.launchArguments += ["-reader.probe", "1"] }
         // A/B arms arrive through the environment (TEST_RUNNER_ prefix on the
         // xcodebuild side), so both arms run the same build and the same walk.
         if let extra = ProcessInfo.processInfo.environment["READER_EXTRA_ARGS"] {

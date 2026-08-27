@@ -18,6 +18,14 @@ EXPORT    := $(DERIVED)/export
 BUNDLE_ID := com.zeyanlin.novelreader
 TEAM_ID   := NKJSLB6HBR
 SIMULATOR ?= iPhone 17
+# Heartbeat gap threshold for `make test-probe`, in milliseconds. Well under one 60fps
+# frame by default: at the kit's historical 25ms a run of many small transactions is
+# silent, and silence there is not the same as an idle main thread.
+PROBE_GAP ?= 8
+# Extra launch arguments for a probe run's A/B arm, e.g.
+#   make test-probe PROBE_ARGS="-reader.turnAnimation 0"
+# Both arms are the same build; the app logs the arm it came up under.
+PROBE_ARGS ?=
 IPAD      ?= iPad Pro 13-inch (M5)
 
 # Which screens to shoot, as `simulator name=output folder`, comma separated
@@ -38,7 +46,7 @@ SHOT_LANGS  ?= zh-Hant zh-Hans en
 SHOTS       ?= screenshots
 
 .DEFAULT_GOAL := help
-.PHONY: help setup generate build test test-ui test-ui-live test-live run run-iphone run-ipad open release archive ipa package clean screenshots shots-device
+.PHONY: help setup generate build test test-ui test-ui-live test-soak test-probe test-live run run-iphone run-ipad open release archive ipa package clean screenshots shots-device
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -102,6 +110,21 @@ test-soak: generate ## Run the half-hour tap walk (worth it only with a probe ki
 		-derivedDataPath $(DERIVED) \
 		-destination 'platform=iOS Simulator,name=$(SIMULATOR)' \
 		-only-testing:NovelReaderUITests/ReaderLongSessionTapTests/testAMultiHourReadingSessionCompressed
+
+test-probe: generate ## Run the probe walk with the [DEBUG-ap1] heartbeat kit armed
+	@# Drives taps with no XCUI queries between them — a query is an accessibility
+	@# snapshot, which blocks the app's main thread for seconds, which is the very
+	@# thing the probe measures. The verdict is the log, not the exit code:
+	@#   xcrun simctl spawn "$(SIMULATOR)" log show --style compact \
+	@#     --predicate 'eventMessage CONTAINS "[DEBUG-ap1]"' --last 15m
+	TEST_RUNNER_NOVELREADER_PROBE=1 \
+	TEST_RUNNER_READER_EXTRA_ARGS="-reader.probeGap $(PROBE_GAP) $(PROBE_ARGS)" \
+	xcodebuild test -project $(PROJECT) \
+		-scheme $(SCHEME) \
+		-configuration $(CONFIGURATION) \
+		-derivedDataPath $(DERIVED) \
+		-destination 'platform=iOS Simulator,name=$(SIMULATOR)' \
+		-only-testing:NovelReaderUITests/ReaderLongSessionTapTests/testProbeRunAtReadingPace
 
 test-live: generate ## Run the opt-in live site checks (needs a network; slow)
 	@# Excluded from `make test` on purpose: these fail on site redesigns and
