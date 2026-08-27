@@ -55,9 +55,9 @@ extension XCUIApplication {
     /// The label of the topmost paragraph with any part on screen — enough to tell whether
     /// the text moved at all, which is the one thing a tap that turned nothing looks like.
     ///
-    /// Filtered by frame rather than taken as the first match: a lazy stack keeps rows it
-    /// has scrolled past, so the first element in the tree is usually somewhere above the
-    /// window and says nothing about what the reader can see.
+    /// Filtered by frame rather than taken as the first match: the paragraph straddling
+    /// the top of the window is on screen and comes first in the tree, but its own top is
+    /// above the glass, so its frame alone says nothing about what the reader can see.
     func topParagraphLabel() -> String {
         let paragraphs = descendants(matching: .any).matching(identifier: "reader.paragraph")
         let window = windows.firstMatch.frame

@@ -327,16 +327,24 @@ final class HighlightTests: XCTestCase {
     func testTouchingAMarkedLineFindsACharacterInsideIt() throws {
         let paginator = ChapterPaginator(text: chapterText(longChapter()), pageSize: pageSize)
         paginator.paginateAll()
-        let page = 3
-        let middle = paginator.pages[page].range.location + paginator.pages[page].range.length / 2
-        let range = try XCTUnwrap(paginator.text.sentenceRange(from: middle, to: middle))
-        let rect = try XCTUnwrap(paginator.rects(for: range, onPage: page).first)
-
-        let touched = try XCTUnwrap(
-            paginator.offset(at: CGPoint(x: rect.midX, y: rect.midY), onPage: page)
-        )
-        XCTAssertTrue(
-            NSLocationInRange(touched, range),
+        // Swept rather than sampled at one page: this is a claim about the arithmetic,
+        // and a single sample only ever says that one geometry happened to work out.
+        var misses: [String] = []
+        for page in stride(from: 1, to: min(paginator.pages.count, 24), by: 1) {
+            let span = paginator.pages[page].range
+            let middle = span.location + span.length / 2
+            guard let range = paginator.text.sentenceRange(from: middle, to: middle),
+                  let rect = paginator.rects(for: range, onPage: page).first
+            else { continue }
+            let touched = paginator.offset(at: CGPoint(x: rect.midX, y: rect.midY), onPage: page)
+            guard let touched, NSLocationInRange(touched, range) else {
+                misses.append("page \(page): touched \(touched.map(String.init) ?? "nil") "
+                    + "outside \(range) for rect \(rect)")
+                continue
+            }
+        }
+        XCTAssertEqual(
+            misses, [],
             "a touch in the middle of a marked line must land inside the mark"
         )
     }

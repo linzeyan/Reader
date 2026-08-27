@@ -78,9 +78,8 @@ enum ReaderProbe {
     /// Structural mutations, for the "how much is this screen doing at all" question.
     private static var mutationCount = 0
     /// What the reader currently holds, for the "does the window stay capped" question
-    /// the collapse work exists to answer.
+    /// the memory half of a long session turns on.
     private static var loadedChapters = 0
-    private static var liveChapters = 0
 
     /// Starts the heartbeat. Idempotent — the reader can be entered more than once.
     static func start() {
@@ -113,21 +112,17 @@ enum ReaderProbe {
     ///
     /// - Parameters:
     ///   - what: the event, short enough to read a thousand of them.
-    ///   - loaded: how many chapters `loaded` holds after it.
-    ///   - live: how many of those still hold rows — the number the collapse caps and
-    ///     the one the per-transaction bookkeeping cost scales with.
-    static func mutated(_ what: String, loaded: Int, live: Int) {
+    ///   - loaded: how many chapters `loaded` holds after it. There is no longer a
+    ///     second count of "how many of those still hold rows": a chapter is a laid-out
+    ///     column now, and the container that would not release rows is gone.
+    static func mutated(_ what: String, loaded: Int) {
         guard isArmed else { return }
         let now = CACurrentMediaTime()
         lastMutationAt = now
         lastMutation = what
         loadedChapters = loaded
-        liveChapters = live
         mutationCount += 1
-        NSLog(
-            "[DEBUG-ap1] mutation %@ loaded=%d live=%d rss=%dMB",
-            what, loaded, live, residentMB()
-        )
+        NSLog("[DEBUG-ap1] mutation %@ loaded=%d rss=%dMB", what, loaded, residentMB())
     }
 
     /// Called from `ReaderView.body`. Cheap on purpose: an increment.
@@ -150,8 +145,8 @@ enum ReaderProbe {
             // anything this app explicitly did.
             let since = lastMutationAt.map { String(format: "%.0f", (now - $0) * 1000) } ?? "never"
             NSLog(
-                "[DEBUG-ap1] gap=%.0fms sinceMutation=%@ after=%@ loaded=%d live=%d",
-                gap, since, lastMutation, loadedChapters, liveChapters
+                "[DEBUG-ap1] gap=%.0fms sinceMutation=%@ after=%@ loaded=%d",
+                gap, since, lastMutation, loadedChapters
             )
         }
 
@@ -165,9 +160,9 @@ enum ReaderProbe {
         let lost = stallTotal / (window * 1000) * 100
         NSLog(
             "[DEBUG-ap1] summary bodyRate=%.1f/s stall=%.0fms/%ds n=%d lost=%.0f%% "
-                + "mutations=%d loaded=%d live=%d rss=%dMB",
+                + "mutations=%d loaded=%d rss=%dMB",
             rate, stallTotal, Int(window), stallCount, lost,
-            mutationCount, loadedChapters, liveChapters, residentMB()
+            mutationCount, loadedChapters, residentMB()
         )
         lastSummaryAt = now
         bodiesAtLastSummary = bodyCount

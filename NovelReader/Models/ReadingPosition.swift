@@ -18,12 +18,16 @@ struct TextAnchor: Codable, Hashable {
     /// aimed at works in `NSRange`; changing the unit later would mean re-resolving
     /// every stored anchor against text the app may no longer be able to fetch.
     ///
-    /// A scroll view can only report which paragraph came into view, so today this
-    /// is always 0. It is persisted anyway, because the anchor *is* the storage
-    /// format: adding the field later means a second migration over positions
-    /// nothing can re-derive. It is also the piece a paragraph index alone cannot
-    /// express — a highlight is a pair of these, which is why the anchor is a value
-    /// type of its own rather than two columns hung off `Book`.
+    /// Real in both renderers. It was 0 for every scrolled position until the reader
+    /// drew its own text: a lazy stack of `Text` knew only which paragraph had come
+    /// into view, so a scrolled position always named the *top of a paragraph* — and in
+    /// these books a paragraph routinely runs taller than a screen, which is how
+    /// switching modes mid-paragraph threw the reader pages backwards. A laid-out
+    /// column knows which character the top line of the window begins on.
+    ///
+    /// It is also the piece a paragraph index alone cannot express — a highlight is a
+    /// pair of these, which is why the anchor is a value type of its own rather than
+    /// two columns hung off `Book`.
     var characterOffset: Int
 
     static let start = TextAnchor(paragraph: 0, characterOffset: 0)
@@ -150,12 +154,11 @@ struct TextSelection: Equatable {
 extension TextSelection {
     /// The whole of one paragraph — the finest span the scrolling reader can name.
     ///
-    /// A lazy stack of `Text` knows which paragraph came into view and nothing about
-    /// where a character sits inside it; that is the same limit that keeps a scrolled
-    /// position's `characterOffset` at 0. So a mark made while scrolling covers the
-    /// paragraph the reader pressed, end to end, rather than a run of characters nobody
-    /// measured. Paged reading snaps to sentences instead, because there the layout can
-    /// say where each glyph is — `ChapterText.sentenceRange(from:to:)`.
+    /// A choice rather than a limit, now that both renderers lay their own text out. A
+    /// press while scrolling is a press on a *moving* surface — the same gesture that
+    /// starts a drag — so the finest thing it can honestly claim to have picked out is
+    /// the paragraph under the finger; a page is still, so a press there can be
+    /// sentence-precise (`ChapterText.sentenceRange(from:to:)`).
     ///
     /// The index is the chapter's own paragraph index, the one a `TextAnchor` stores, so
     /// a mark made here lands on the same characters when the same chapter is composed

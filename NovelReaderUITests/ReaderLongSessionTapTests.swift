@@ -31,9 +31,9 @@ final class ReaderLongSessionTapTests: XCTestCase {
 
     /// The frontier walk: no preload, tapped turns at reading pace, so `loadNext`
     /// fires the way it does in a real session — with the append landing a page or
-    /// two below the viewport, where the lazy stack realizes the new rows at once.
-    /// The preload curve above showed appends far below the fold cost nothing the
-    /// simulator can see; this is the other half of the device scenario.
+    /// two below the viewport, which is where an arriving chapter used to cost the
+    /// most. The preload curve above showed appends far below the fold cost nothing
+    /// the simulator can see; this is the other half of the device scenario.
     func testTapWalkAcrossTheFrontier() throws {
         launch(preloadChapters: 0)
         openReader()
@@ -120,13 +120,10 @@ final class ReaderLongSessionTapTests: XCTestCase {
     /// between turns would spend the run logging itself.
     ///
     /// No preload, and that is the correction the first probe run bought. Driven with
-    /// `-reader.stressPreload 120` the log read `loaded=54 live=53` — a window that
-    /// could not collapse at all, because `measuredBlockHeight` needs every row of a
-    /// chapter to have passed through the viewport and preloaded chapters have never
-    /// been *read*. It also loads throughout: 313 of the run's 317 mutations were
-    /// preload slices, so the numbers described chapters arriving, not pages turning.
-    /// The inflated walk is the right shape for "does a tap still work"; it is the
-    /// wrong shape for "what does reading cost".
+    /// `-reader.stressPreload 120` the run loads throughout — 313 of its 317 mutations
+    /// were the preload itself — so the numbers describe chapters arriving rather than
+    /// pages turning. The inflated walk is the right shape for "does a tap still work";
+    /// it is the wrong shape for "what does reading cost".
     func testProbeRunAtReadingPace() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["NOVELREADER_PROBE"] == "1",
@@ -136,9 +133,9 @@ final class ReaderLongSessionTapTests: XCTestCase {
         launch(preloadChapters: 0, probe: true)
         openReader()
         Thread.sleep(forTimeInterval: 3)
-        // Far enough to cross several chapter seams: a turn moves fifteen to twenty-one
-        // of the stress book's ~200 paragraphs, and a chapter cannot collapse until the
-        // reader is two chapters past it.
+        // Far enough to cross several chapter seams, which is where the cost of this
+        // renderer lands: a turn moves fifteen to twenty-one of the stress book's ~200
+        // paragraphs, so sixty of them is several whole chapters laid out and drawn.
         driveSilently(turns: 60)
     }
 

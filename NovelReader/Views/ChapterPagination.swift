@@ -56,15 +56,35 @@ struct ChapterText {
     /// characters dozens of times a second.
     private let characters: NSString
 
-    init(title: String, paragraphs: [String], typography: ReaderTypography) {
+    /// - Parameter alignment: how body text sits in its measure. Justified for a page,
+    ///   which has a visible right edge; ragged for the scrolling column, which has
+    ///   none and where justification would only stretch lines against an edge nobody
+    ///   can see. Defaults to the page's answer, so the paginated renderer reads the
+    ///   same as it always has.
+    init(
+        title: String,
+        paragraphs: [String],
+        typography: ReaderTypography,
+        alignment: NSTextAlignment = .justified
+    ) {
         let composed = NSMutableAttributedString()
         var ranges: [NSRange] = []
+
+        // What `paragraphSpacing` has to be set to for the reader to *get* the spacing
+        // they chose. TextKit lays the line spacing under a paragraph's last line as
+        // well as between its lines, and then adds the paragraph spacing on top — so
+        // asking for 14 with 9 of line spacing put 23 points between paragraphs, while
+        // the scrolling reader's `.padding(.bottom, 14)` put 14. That is the reported
+        // "same settings, different paragraph spacing between the two modes", measured:
+        // 23 against 14. Both renderers compose through here now, so subtracting the
+        // leading once is what makes the slider mean what it says in both.
+        let betweenParagraphs = max(0, typography.paragraphSpacing - typography.lineSpacing)
 
         let titleStyle = NSMutableParagraphStyle()
         titleStyle.lineSpacing = typography.lineSpacing
         // A heading needs more air under it than between two paragraphs, or the
         // first line of the chapter reads as part of the title.
-        titleStyle.paragraphSpacing = typography.paragraphSpacing + 8
+        titleStyle.paragraphSpacing = betweenParagraphs + 8
         composed.append(NSAttributedString(
             string: title,
             attributes: [
@@ -76,11 +96,12 @@ struct ChapterText {
 
         let bodyStyle = NSMutableParagraphStyle()
         bodyStyle.lineSpacing = typography.lineSpacing
-        bodyStyle.paragraphSpacing = typography.paragraphSpacing
-        // Justified, unlike the scrolling column: a fixed page has a visible right
-        // edge, and a ragged one reads as a rendering fault rather than as a choice.
-        // CJK text justifies without gaps because the glyphs are uniform width.
-        bodyStyle.alignment = .justified
+        bodyStyle.paragraphSpacing = betweenParagraphs
+        // Justified for a page: a fixed page has a visible right edge, and a ragged one
+        // reads as a rendering fault rather than as a choice. CJK text justifies without
+        // gaps because the glyphs are uniform width. The scrolling column asks for
+        // ragged — see the parameter.
+        bodyStyle.alignment = alignment
         let bodyAttributes: [NSAttributedString.Key: Any] = [
             .font: typography.body,
             .foregroundColor: typography.color,
@@ -148,9 +169,8 @@ extension ChapterText {
     /// The composed ranges one highlight covers, one per paragraph it touches.
     ///
     /// Per paragraph rather than a single run from start to end, so the separators
-    /// between paragraphs are left unpainted. The scrolling reader draws paragraphs as
-    /// separate views and has no separator to paint; painting one here would make the
-    /// same highlight look like a different shape in each mode.
+    /// between paragraphs are left unpainted: a band stretched across the gap between
+    /// two paragraphs reads as a mark on the whitespace rather than on the words.
     func ranges(of highlight: TextHighlight) -> [NSRange] {
         guard !paragraphRanges.isEmpty else { return [] }
         let lower = max(highlight.startParagraph, 0)
@@ -476,10 +496,9 @@ final class ChapterPaginator {
 
     /// The character under a point on a page, in the page's own coordinates.
     ///
-    /// The one thing only the paginated renderer can answer, and therefore the reason
-    /// only a page can mark a *sentence*: a scroll view of SwiftUI `Text` knows which
-    /// paragraph is on screen — so it marks one whole — while this knows which character
-    /// is under a finger.
+    /// Why only a page can mark a *sentence*: a page is still under the finger, so a
+    /// press on it means one position and nothing else. The scrolling reader marks a
+    /// paragraph whole because the surface it is pressed on is one that also scrolls.
     ///
     /// Clamped into the page rather than allowed to run off it, so a finger dragged
     /// past the bottom edge selects to the end of what the reader can see instead of
@@ -509,19 +528,28 @@ final class ChapterPaginator {
         let fragmentStart = offset(of: fragment.rangeInElement.location)
         guard fragmentStart != NSNotFound else { return page.range.location }
         let inLineIndex = line.characterIndex(for: inLine)
+        // Everything below is an index into the *fragment* — the whole paragraph — not
+        // into the line. `NSTextLineFragment` is created with the paragraph's string and
+        // `characterRange` is this line's span inside it, so `characterIndex(for:)`
+        // already counts the lines above. Adding `characterRange.location` on top of it
+        // was this method's off-by-a-line: a press anywhere but on a paragraph's *first*
+        // line resolved that many characters too far down, so the sentence a reader
+        // pressed on was rarely the sentence they got. Invisible to the one-sample test
+        // that used to guard this, because that sample landed on a first line.
+        //
         // An unplaceable point takes the end of the line it is past and the start of the
         // one it is short of, rather than one fixed end: the finger is somewhere with no
         // character of its own, and the nearest real position is the one that keeps a drag
         // moving in the direction the hand is moving.
-        let withinLine: Int
+        let inParagraph: Int
         if inLineIndex != NSNotFound {
-            withinLine = inLineIndex
+            inParagraph = inLineIndex
         } else if inLine.y < 0 || inLine.x < 0 {
-            withinLine = 0
+            inParagraph = line.characterRange.location
         } else {
-            withinLine = line.characterRange.length
+            inParagraph = NSMaxRange(line.characterRange)
         }
-        let offset = fragmentStart + line.characterRange.location + withinLine
+        let offset = fragmentStart + inParagraph
         return min(max(offset, page.range.location), NSMaxRange(page.range))
     }
 

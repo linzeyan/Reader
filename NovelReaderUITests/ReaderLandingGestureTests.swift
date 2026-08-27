@@ -2,15 +2,15 @@ import XCTest
 
 /// Where a book opens.
 ///
-/// A stored position names a paragraph part-way into a chapter, and landing on it is the
-/// one thing the scrolling reader cannot do in a single move: a lazy stack positions rows
-/// it has not built from estimates, so the first `scrollTo` lands somewhere near and the
-/// content then slides under it as the estimates are corrected. Whatever machinery is
-/// responsible for converging on the target, this is the claim it exists to keep.
+/// A stored position names a paragraph part-way into a chapter, and landing on it used to
+/// be the one thing the scrolling reader could not do in a single move: a lazy stack
+/// positioned rows it had not built from estimates, so the first `scrollTo` landed
+/// somewhere near and the content then slid under it as the estimates were corrected.
 ///
-/// Written before that machinery is replaced, so the replacement has something to answer
-/// to. Nothing offline in the model can check it — the anchor is right in every version
-/// of this bug; only the frame of the paragraph on screen knows where the reader ended up.
+/// Written before that machinery was replaced, so the replacement had something to answer
+/// to — a laid-out column has an exact height and the landing is one `contentOffset`.
+/// Nothing offline in the model can check it: the anchor is right in every version of this
+/// bug; only the frame of the paragraph on screen knows where the reader ended up.
 final class ReaderLandingGestureTests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -61,8 +61,9 @@ final class ReaderLandingGestureTests: XCTestCase {
         // The top third, not the top edge. A landing can only put its target at the very
         // top when there is a screenful of text below it, and the demo chapter is under
         // two screens long — so the scroll clamps against the end of what is loaded and
-        // stops a couple of paragraphs short (measured: 188pt). That is the documented
-        // end-of-content exit in `ReaderModel.hasArrived`, not a miss.
+        // stops a couple of paragraphs short (measured: 188pt). That is
+        // `ReaderTextScrollView.setReadingOffset` refusing to scroll past the content,
+        // not a miss.
         //
         // A landing that failed is nowhere near this band: fourteen paragraphs of CJK
         // text is about 1200pt, well past the fold and usually not even built.

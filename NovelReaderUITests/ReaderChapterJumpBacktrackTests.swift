@@ -56,7 +56,8 @@ final class ReaderChapterJumpBacktrackTests: XCTestCase {
 
         // The heading of the chapter the jump landed in: the one thing on screen whose
         // travel says how far the drag actually took the reader. Named rather than taken
-        // by index — the lazy stack's realised set moves under an index, and asking
+        // by index — the reader's accessibility elements are built from what is on
+        // screen, so an index names a different heading after every move, and asking
         // XCUITest for an off-screen element scrolls it into view, which is the very
         // state under test (`docs/PITFALLS.md`).
         //

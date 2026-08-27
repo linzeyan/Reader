@@ -23,7 +23,7 @@ SIMULATOR ?= iPhone 17
 # silent, and silence there is not the same as an idle main thread.
 PROBE_GAP ?= 8
 # Extra launch arguments for a probe run's A/B arm, e.g.
-#   make test-probe PROBE_ARGS="-reader.turnAnimation 0"
+#   make test-probe PROBE_ARGS="-reader.mode paginated"
 # Both arms are the same build; the app logs the arm it came up under.
 PROBE_ARGS ?=
 IPAD      ?= iPad Pro 13-inch (M5)

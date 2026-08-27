@@ -107,8 +107,9 @@ final class ReaderPageTurnGestureTests: XCTestCase {
             // Nobody touches the app. Any movement now is the reader moving itself.
             Thread.sleep(forTimeInterval: 1.2)
 
-            // Found again rather than held: the reader is a lazy stack, so the index a row
-            // answered to before the wait is not the row it answers to after one.
+            // Found again rather than held: the reader builds its accessibility elements
+            // from what is on screen, so the index a paragraph answered to before the
+            // wait is not the paragraph it answers to after one.
             let again = app.descendants(matching: .any)
                 .matching(identifier: "reader.paragraph")
                 .matching(NSPredicate(format: "label == %@", label))

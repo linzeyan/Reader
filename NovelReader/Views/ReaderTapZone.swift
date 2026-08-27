@@ -66,8 +66,10 @@ enum ReaderTapZone {
 
     /// A page turn expressed as a scroll destination.
     ///
-    /// A window's worth of text, named by a paragraph rather than by a distance, because
-    /// `ScrollViewProxy` can only be pointed at a view. Going on aims at the last
+    /// A window's worth of text, named by a paragraph rather than by a distance, so the
+    /// rule is about text and not about pixels: a turn that moved exactly one viewport
+    /// would routinely cut a line in half, and half a line is the one thing a reader
+    /// cannot skim past. Going on aims at the last
     /// paragraph that *starts* on screen and puts it at the top, so the one the reader
     /// could only half see arrives whole rather than being skipped. Going back aims the
     /// first visible paragraph at the bottom, which lands a window earlier and keeps the
@@ -103,23 +105,6 @@ enum ReaderTapZone {
         }
     }
 
-    /// The first and the last paragraph with any part inside the window.
-    ///
-    /// What turns the frames the scroll view reports into a reading position: the top of
-    /// the span is where the text on screen begins, which is what the position stores,
-    /// and the bottom is what edge-prefetch measures from. One function for both ends so
-    /// they cannot be computed against two different ideas of "visible".
-    static func visibleSpan(
-        of visible: [VisibleParagraph], viewport: CGFloat
-    ) -> (top: VisibleParagraph, bottom: VisibleParagraph)? {
-        guard viewport > 0 else { return nil }
-        let onScreen = visible
-            .filter { $0.maxY > 0 && $0.minY < viewport }
-            .sorted { $0.minY < $1.minY }
-        guard let first = onScreen.first, let last = onScreen.last else { return nil }
-        return (top: first, bottom: last)
-    }
-
     /// A move that stays inside one paragraph, for the case where it is taller than the
     /// window and there is no other paragraph to aim at.
     ///
@@ -135,23 +120,5 @@ enum ReaderTapZone {
         guard span > 0 else { return nil }
         let anchor = min(max((delta - paragraph.minY) / span, 0), 1)
         return PageScroll(id: paragraph.id, anchor: UnitPoint(x: 0, y: anchor))
-    }
-}
-
-/// Collects the paragraphs on screen, which is how the scrolling reader knows where
-/// the reader is — and, when tap-to-turn is on, where a tapped page should scroll to.
-///
-/// Always attached, no longer gated on the tap-to-turn setting: the reading position
-/// is derived from these frames, and every reader has a position. The cost is one
-/// `GeometryReader` behind each paragraph the lazy stack has actually built, which the
-/// tap-to-turn feature was already paying.
-struct VisibleParagraphsKey: PreferenceKey {
-    static var defaultValue: [ReaderTapZone.VisibleParagraph] = []
-
-    static func reduce(
-        value: inout [ReaderTapZone.VisibleParagraph],
-        nextValue: () -> [ReaderTapZone.VisibleParagraph]
-    ) {
-        value.append(contentsOf: nextValue())
     }
 }

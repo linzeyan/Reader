@@ -120,40 +120,4 @@ final class ReaderTapZoneTests: XCTestCase {
         XCTAssertNil(ReaderTapZone.pageScroll(.controls, over: visible, viewport: 800))
         XCTAssertNil(ReaderTapZone.pageScroll(.next, over: [], viewport: 800))
     }
-
-    // MARK: - Visible span
-
-    /// The preference key keeps reporting paragraphs the scroll has passed; a span that
-    /// counted them would put the reading position on text nobody is looking at.
-    func testTheSpanIsTheFirstAndLastParagraphOnScreen() {
-        let visible = [
-            paragraph("gone", minY: -900, maxY: -100),
-            paragraph("top", minY: -100, maxY: 200),
-            paragraph("middle", minY: 200, maxY: 600),
-            paragraph("bottom", minY: 600, maxY: 900),
-            paragraph("later", minY: 900, maxY: 1200),
-        ]
-        let span = ReaderTapZone.visibleSpan(of: visible, viewport: 800)
-        XCTAssertEqual(span?.top.id, "top")
-        XCTAssertEqual(span?.bottom.id, "bottom")
-    }
-
-    /// A scroll view mid-rebuild reports nothing visible, and an unlaid-out window
-    /// measures against nothing — neither may move the stored position.
-    func testNothingVisibleIsNoSpan() {
-        XCTAssertNil(ReaderTapZone.visibleSpan(of: [], viewport: 800))
-        XCTAssertNil(ReaderTapZone.visibleSpan(
-            of: [paragraph("a", minY: 0, maxY: 400)], viewport: 0
-        ))
-    }
-
-    /// One paragraph filling the window is both ends of the span: the position and the
-    /// prefetch have to agree that the reader is in it.
-    func testASingleParagraphIsBothEndsOfTheSpan() {
-        let span = ReaderTapZone.visibleSpan(
-            of: [paragraph("only", minY: 100, maxY: 400)], viewport: 800
-        )
-        XCTAssertEqual(span?.top.id, "only")
-        XCTAssertEqual(span?.bottom.id, "only")
-    }
 }
