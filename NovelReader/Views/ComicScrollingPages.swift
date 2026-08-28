@@ -87,8 +87,8 @@ final class ComicScrollCoordinator {
     /// let go. Only the ones that would move them: a page growing *below* the reader
     /// changes nothing they can see and is applied straight away.
     private var heldCorrections: [(chapterId: String, page: Int, size: CGSize)] = []
-    /// A landing that the content was too short to reach, kept so it can be reached once
-    /// it is not. See `scroll(toPage:inChapter:animated:)`.
+    /// The page a restored position asked for, held until the reader takes over.
+    /// See `scroll(toPage:inChapter:animated:)`.
     private var pendingLanding: (chapterIndex: Int, page: Int)?
 
     /// The seam between chapters. Wide enough to read as a break in a medium that has
@@ -192,7 +192,13 @@ final class ComicScrollCoordinator {
             }
             inserted = true
         }
-        if inserted { refreshVisible() }
+        guard inserted else { return }
+        // A chapter arriving below can be the content a landing was short of. The last
+        // page of a chapter cannot sit at the top of the window while it is the last
+        // thing loaded — there is not a screen of anything under it — so a position
+        // left at a chapter boundary is only restorable once the next chapter is back.
+        retryLanding()
+        refreshVisible()
     }
 
     private func dropChaptersNoLongerLoaded(_ config: ComicScrollingPages) {
@@ -367,24 +373,29 @@ final class ComicScrollCoordinator {
         reportPlace()
     }
 
-    /// Puts a page at the top of the window, or remembers that it could not.
+    /// Puts a page at the top of the window, and keeps it there until the reader moves.
     ///
-    /// A scroll view cannot show an offset it has no content for, and a chapter that has
-    /// just been opened is nearly all estimates — near its end there is often less than a
-    /// screen of estimated content below the page being aimed at, so the offset is
-    /// clamped and the reader lands a page early. The images then arrive, the pages grow,
-    /// and nothing goes back for the landing: that is what reopening the app one page
-    /// short of where it was left looked like.
+    /// Setting the offset once is not enough, and this is the whole reason: a chapter
+    /// that has just been opened is nearly all estimates, and every image that lands
+    /// replaces one. A page that comes back *shorter* than its estimate — the common
+    /// case, since a printed page runs about 1.4 times its width against an estimate of
+    /// 1.5 — shrinks the content below the reader, and a `UIScrollView` whose content
+    /// becomes shorter than its offset pulls the offset back without telling anyone.
+    /// Near the end of a chapter there is not much below to lose, so the pull is a
+    /// whole page: that is what reopening the app one page above where it was left
+    /// actually was.
     ///
-    /// So an unreachable landing is kept and retried as the real heights arrive. It is
-    /// dropped the moment the reader touches the glass — at that point where they are is
-    /// their decision, not a position being restored.
+    /// So the landing is held and re-asserted after every correction, rather than aimed
+    /// at once and hoped for. It is dropped the moment the reader touches the glass or
+    /// taps to turn — from there where they are is their decision, not a position being
+    /// restored — and addressed by chapter and page rather than by offset, so a chapter
+    /// arriving above it does not make it mean somewhere else.
     func scroll(toPage page: Int, inChapter index: Int, animated: Bool) {
         guard let view, let chapter = placed.first(where: { $0.chapterIndex == index })
         else { return }
-        let wanted = chapter.top + chapter.column.top(ofPage: page)
-        view.setReadingOffset(wanted, animated: animated)
-        pendingLanding = !animated && view.readingOffset < wanted - 0.5 ? (index, page) : nil
+        view.setReadingOffset(chapter.top + chapter.column.top(ofPage: page), animated: animated)
+        // Not for an animated move: that is a reader-initiated jump, already theirs.
+        pendingLanding = animated ? nil : (index, page)
         refreshVisible()
     }
 
@@ -401,6 +412,12 @@ final class ComicScrollCoordinator {
     /// stops a panel being split across two taps with no part of it fully seen.
     func turnPage(_ zone: ReaderTapZone.Zone) {
         guard let view, let config else { return }
+        // The reader has moved themselves, so a restored landing is no longer the
+        // answer to where they are — re-asserting it after the next correction would
+        // pull them back off the page they just turned to. Deliberately here and not in
+        // `handleTap`: a tap on the middle band only shows the controls, and someone
+        // checking which page they are on has not asked to be moved.
+        pendingLanding = nil
         if zone == .previous, view.readingOffset <= 0 { config.onNeedsPrevious() }
         let step = view.visibleHeight - min(view.visibleHeight * 0.12, 64)
         switch zone {

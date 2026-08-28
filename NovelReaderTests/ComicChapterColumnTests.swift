@@ -99,6 +99,29 @@ final class ComicChapterColumnTests: XCTestCase {
     /// What decides which images are decoded and which have their bitmaps released. Too
     /// few and the reader scrolls into blank pages; too many and a comic holds a chapter
     /// of full-size bitmaps, which is the memory ceiling this architecture exists under.
+    /// The bug this pins is silent and compounds. A landing sets the offset to a page's
+    /// exact top; the scroll view rounds that to the nearest pixel and hands back a
+    /// third of a point less; the page reported is then the one *above*, and that report
+    /// is what gets written down as the reading position — so every reopen loses another
+    /// page. Nothing about the screen looks wrong while it happens.
+    func testAHairAboveAPageTopIsStillThatPage() {
+        let column = ComicChapterColumn(pageCount: 3, width: width)
+        let second = column.top(ofPage: 1)
+
+        XCTAssertEqual(column.page(atY: second), 1)
+        XCTAssertEqual(column.page(atY: second - 1 / 3), 1, "a pixel short of the top is that page")
+        XCTAssertEqual(column.page(atY: second + 1 / 3), 1)
+    }
+
+    /// The tolerance must stay far too small to name a page the reader has not reached.
+    func testTheToleranceDoesNotRoundPastAPageTheReaderHasNotSeen() {
+        let column = ComicChapterColumn(pageCount: 3, width: width)
+        let second = column.top(ofPage: 1)
+
+        XCTAssertEqual(column.page(atY: second - 1), 0)
+        XCTAssertEqual(column.page(atY: second - 10), 0)
+    }
+
     func testTheVisibleRangeIsEveryPageTheWindowTouches() {
         let column = ComicChapterColumn(pageCount: 5, width: width)
 

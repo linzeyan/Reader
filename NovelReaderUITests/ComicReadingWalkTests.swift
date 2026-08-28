@@ -82,10 +82,8 @@ final class ComicReadingWalkTests: XCTestCase {
 
         crossIntoTheNextChapter()
         scrollBackIntoThePreviousChapter()
-        let place = settledCapsuleText()
+        let place = killAndReopen()
         XCTAssertFalse(place.isEmpty, "The capsule should say which chapter and page this is")
-
-        killAndReopen()
         openTheComicShelf()
         openTheBook()
         XCTAssertTrue(page.waitForExistence(timeout: 120), "The comic should open again")
@@ -213,11 +211,19 @@ final class ComicReadingWalkTests: XCTestCase {
     /// The pause matters: the position is written when the scene leaves the foreground,
     /// and terminating the same instant would be killing the app mid-write rather than
     /// testing that what it wrote survives.
-    private func killAndReopen() {
+    ///
+    /// - Returns: what the capsule said as the app went away. Read here rather than by
+    ///   the caller a few steps earlier, because what gets written down is the position
+    ///   at the moment of backgrounding — anything read before that is a position the
+    ///   app was still free to move off.
+    @discardableResult
+    private func killAndReopen() -> String {
+        let place = settledCapsuleText()
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 2)
         app.terminate()
         app.launch()
+        return place
     }
 
     // MARK: - Reading the screen

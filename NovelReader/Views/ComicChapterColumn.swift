@@ -116,20 +116,33 @@ final class ComicChapterColumn {
         CGRect(x: 0, y: top(ofPage: index), width: width, height: height(ofPage: index))
     }
 
+    /// How close to a page's top counts as being on it.
+    ///
+    /// Half a point, and it is load-bearing. The round trip through the scroll view is
+    /// not exact: an offset set to a page's exact top comes back rounded to the nearest
+    /// pixel, a third of a point short of it on a 3x screen. Without a tolerance the
+    /// landing is visually right and reports itself one page early — and that report is
+    /// what gets written down as the reading position, so reopening the book lands a
+    /// page earlier again, every time. A sliver of the page above showing at the very
+    /// top of the screen is not a page anybody is reading.
+    private static let boundaryTolerance: CGFloat = 0.5
+
     /// Which page a height in this column falls on.
     ///
     /// The last page starting at or before `y`, so a height inside a page names that
     /// page rather than the next one — the same rule `ChapterColumn.offset(atY:)` keeps,
     /// and for the same reason: a reading position must never round forward into a page
-    /// the reader has not reached.
+    /// the reader has not reached. "At" is generous by `boundaryTolerance`, which is far
+    /// too small to round anyone forward past a page they have not seen.
     func page(atY y: CGFloat) -> Int {
         guard pageCount > 0 else { return 0 }
+        let target = y + Self.boundaryTolerance
         var low = 0
         var high = pageCount - 1
         var found = 0
         while low <= high {
             let mid = (low + high) / 2
-            if tops[mid] <= y {
+            if tops[mid] <= target {
                 found = mid
                 low = mid + 1
             } else {
