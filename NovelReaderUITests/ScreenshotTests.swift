@@ -104,6 +104,48 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(app.textViews["derive.url"].waitForExistence(timeout: 10)
                       || app.textFields["derive.url"].waitForExistence(timeout: 2))
         capture("07-derive")
+
+        // Relaunched again, and for the same reason as before: this walk is inside a
+        // sheet on a pushed screen, and unwinding it by hand is several taps that only
+        // exist in one language.
+        app.terminate()
+        app.launch()
+
+        // 8. The comic shelf. Its own shelf rather than more rows on the novel one,
+        // which is the product decision this shot exists to show.
+        app.openLibraryTab()
+        let comics = app.buttons["library.mode.comic"]
+        XCTAssertTrue(comics.waitForExistence(timeout: 20))
+        comics.tap()
+        let comic = app.descendants(matching: .any).matching(identifier: "library.book").firstMatch
+        XCTAssertTrue(comic.waitForExistence(timeout: 20), "The demo comics should be seeded")
+        capture("08-comic-library")
+
+        // 9. The comic reader, on a chapter that is already on the device — a
+        // screenshot run has no network, and the fixture's first row is the book whose
+        // pages are seeded for exactly this reason.
+        comic.tap()
+        let openComic = app.descendants(matching: .any).matching(identifier: "book.read").firstMatch
+        XCTAssertTrue(openComic.waitForExistence(timeout: 20))
+        openComic.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(identifier: "comic.page")
+                .firstMatch.waitForExistence(timeout: 20),
+            "The downloaded chapter should lay its pages out"
+        )
+        // The first page is drawn before its bytes are decoded — the column stacks on
+        // estimates and corrects them — so a shot taken the instant a page element
+        // exists can be a shot of an empty frame.
+        Thread.sleep(forTimeInterval: 2)
+        // With the chapter capsule and the control bar showing. The comic reader gets
+        // one slot rather than the novel's two, and pages alone could be a gallery —
+        // "第 2 話 · 4 / 6" over them is what says this is a reader.
+        app.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(identifier: "comic.chapterTitle")
+                .firstMatch.waitForExistence(timeout: 10)
+        )
+        capture("09-comic-reader")
     }
 
     /// Full-screen, device-resolution captures, kept in the result bundle so the

@@ -324,7 +324,7 @@ final class ComicPageView: UIView {
 
     func show(image: UIImage?, number: Int, failed: Bool) {
         imageView.image = image
-        if let image {
+        if image != nil {
             label.text = nil
             accessibilityLabel = String(localized: "comic.page \(number)")
             isAccessibilityElement = true

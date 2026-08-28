@@ -261,6 +261,6 @@ final class ComicPageStore {
     /// stops a webtoon strip — which can be twenty times its own width — from being
     /// decoded at a resolution nobody can see. A capped strip is drawn softer than it
     /// could be; an uncapped one is a bitmap the size of the chapter.
-    private static let longEdgeAllowance: CGFloat = 3
+    nonisolated private static let longEdgeAllowance: CGFloat = 3
 
 }

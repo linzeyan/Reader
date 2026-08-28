@@ -59,7 +59,8 @@ enum DemoSeed {
     private struct Source {
         let id: String
         let name: String
-        var ruleJSON: Data { Data(DemoSeed.ruleJSON(id: id, name: name).utf8) }
+        var kind: SiteRule.Kind = .novel
+        var ruleJSON: Data { Data(DemoSeed.ruleJSON(id: id, name: name, kind: kind).utf8) }
     }
 
     private struct DemoBook {
@@ -68,10 +69,17 @@ enum DemoSeed {
         let title: String
         let author: String
         let chapterCount: Int
-        /// How many chapters have local text, so the download UI has something
-        /// to show and the storage screen reports a real size.
+        /// How many chapters are on disk, so the download UI has something to show and
+        /// the storage screen reports a real size. Text for a novel, page images for a
+        /// comic — the two shelves are seeded by the same field because the thing being
+        /// staged is the same one.
         let downloaded: Int
         let readingChapter: Int?
+        var kind: SiteRule.Kind = .novel
+        /// How many pages a downloaded comic chapter carries. Six: enough that the
+        /// reader has somewhere to scroll in a screenshot, few enough that seeding the
+        /// fixtures does not draw a hundred images at every launch.
+        var pagesPerChapter: Int = 6
         /// How many copies of the demo text one chapter carries. The screenshot
         /// books stay at one; the stress book matches a real serial's ~200
         /// paragraphs, because the cost being rebuilt — the scrolling reader's
@@ -83,6 +91,8 @@ enum DemoSeed {
     private static let sources = [
         Source(id: "demo.example.com", name: "示範書城"),
         Source(id: "books.example.org", name: "範例文庫"),
+        Source(id: "comics.example.net", name: "示範漫畫館", kind: .comic),
+        Source(id: "manga.example.org", name: "範例畫室", kind: .comic),
     ]
 
     /// Seeded in this order; the library sorts newest-first, so the last one
@@ -98,6 +108,22 @@ enum DemoSeed {
                  author: "沈聞舟", chapterCount: 128, downloaded: 12, readingChapter: 3),
         DemoBook(siteId: "books.example.org", bookId: "5513", title: "霧都舊事",
                  author: "林可昀", chapterCount: 64, downloaded: 0, readingChapter: nil),
+        // The comic shelf, which is a different shelf rather than more rows on the same
+        // one — so these do not disturb a single pixel of the novel screenshots. Two of
+        // them, because a shelf with one book on it says nothing about being a shelf.
+        //
+        // The one with chapters on disk goes last for the reason given above: the
+        // screenshot walk opens the shelf's first row, and a screenshot run has no
+        // network, so the book it opens has to be the one that needs none.
+        DemoBook(siteId: "manga.example.org", bookId: "31", title: "白鳥列車",
+                 author: "岑野", chapterCount: 12, downloaded: 0, readingChapter: nil,
+                 kind: .comic),
+        DemoBook(siteId: "comics.example.net", bookId: "104", title: "木盒與海",
+                 author: "余晚", chapterCount: 20, downloaded: 0, readingChapter: nil,
+                 kind: .comic),
+        DemoBook(siteId: "comics.example.net", bookId: "77", title: "霜降之城",
+                 author: "白川青", chapterCount: 48, downloaded: 3, readingChapter: 1,
+                 kind: .comic),
     ]
 
     /// Every chapter on disk, so a scroll can cross a hundred and fifty seams without
@@ -111,39 +137,97 @@ enum DemoSeed {
 
     private static func seed(_ demo: DemoBook, into env: AppEnvironment) {
         guard let book = try? env.repo.bookmark(
-            siteId: demo.siteId, siteBookId: demo.bookId,
+            siteId: demo.siteId, siteBookId: demo.bookId, kind: demo.kind,
             title: demo.title, author: demo.author
         ) else { return }
 
         let entries = (1...demo.chapterCount).map { index in
             (siteChapterId: "\(index)",
-             title: "第\(index)章　\(chapterTitles[(index - 1) % chapterTitles.count])",
+             title: chapterTitle(demo, chapter: index),
              url: "https://\(demo.siteId)/book/\(demo.bookId)/\(index)")
         }
         try? env.repo.replaceCatalog(bookId: book.id, entries: entries)
 
         for index in 0..<demo.downloaded {
-            try? env.downloads.save(
-                paragraphs: chapterText(demo, chapter: index + 1),
-                book: book,
-                siteChapterId: "\(index + 1)"
-            )
+            let chapter = index + 1
+            switch demo.kind {
+            case .novel:
+                try? env.downloads.save(
+                    paragraphs: chapterText(demo, chapter: chapter),
+                    book: book, siteChapterId: "\(chapter)"
+                )
+            case .comic:
+                try? env.downloads.save(
+                    pages: pageImages(demo, chapter: chapter),
+                    book: book, siteChapterId: "\(chapter)"
+                )
+            }
         }
+        // A shelf row is mostly its cover, so a demo shelf of grey rectangles would be a
+        // screenshot of the placeholder rather than of the shelf. Written to the cover
+        // store, which is where `CoverService` looks first — so nothing reaches for a
+        // network that a screenshot run deliberately does not have.
+        try? env.coverFiles.save(
+            DemoArt.cover(
+                title: demo.title, author: demo.author, kind: demo.kind, seed: seedNumber(demo)
+            ),
+            for: book
+        )
         if let chapter = demo.readingChapter {
             // The field is a place in reading order; the ids seeded above run from 1.
-            let text = chapterText(demo, chapter: chapter + 1)
-            // Part-way into the chapter, not at its head: the shelf and the reader both
-            // say how far in the reader got, and a fixture parked at 0% would put that
-            // in a store screenshot with nothing to show. The share is measured against
-            // this same text, exactly the way the reader measures it, so the number on
-            // the shelf and the one in the reader's capsule are the same number.
-            let anchor = TextAnchor(paragraph: text.count / 2, characterOffset: 0)
-            try? env.repo.updateProgress(
-                bookId: book.id,
-                position: ReadingPosition(siteChapterId: "\(chapter + 1)", anchor: anchor),
-                fraction: anchor.fraction(in: text)
+            let siteChapterId = "\(chapter + 1)"
+            // Part-way in, not at the head: the shelf and the reader both say how far
+            // the reader got, and a fixture parked at 0% would put that in a store
+            // screenshot with nothing to show. Both media measure the share the way
+            // their own renderer does, so the number on the shelf and the one in the
+            // reader's capsule are the same number.
+            switch demo.kind {
+            case .novel:
+                let text = chapterText(demo, chapter: chapter + 1)
+                let anchor = TextAnchor(paragraph: text.count / 2, characterOffset: 0)
+                try? env.repo.updateProgress(
+                    bookId: book.id,
+                    position: ReadingPosition(siteChapterId: siteChapterId, anchor: anchor),
+                    fraction: anchor.fraction(in: text)
+                )
+            case .comic:
+                // A comic's anchor names a page, and its share is the page's foot over
+                // the chapter — see `Book.lastReadParagraph` and `ComicReaderModel`.
+                let page = demo.pagesPerChapter / 2
+                try? env.repo.updateProgress(
+                    bookId: book.id,
+                    position: ReadingPosition(
+                        siteChapterId: siteChapterId,
+                        anchor: TextAnchor(paragraph: page, characterOffset: 0)
+                    ),
+                    fraction: Double(page + 1) / Double(demo.pagesPerChapter)
+                )
+            }
+        }
+    }
+
+    private static func chapterTitle(_ demo: DemoBook, chapter: Int) -> String {
+        switch demo.kind {
+        // No episode names: comic catalogs on the surveyed sites are numbered and
+        // nothing else, and inventing titles would be staging a catalog no site has.
+        case .comic: return "第 \(chapter) 話"
+        case .novel: return "第\(chapter)章　\(chapterTitles[(chapter - 1) % chapterTitles.count])"
+        }
+    }
+
+    /// One comic chapter's pages, drawn on the spot.
+    private static func pageImages(_ demo: DemoBook, chapter: Int) -> [Data] {
+        (0..<demo.pagesPerChapter).map {
+            DemoArt.comicPage(
+                chapter: seedNumber(demo) + chapter, page: $0, of: demo.pagesPerChapter
             )
         }
+    }
+
+    /// What makes one demo book's art differ from another's. The id is a number in
+    /// every fixture here; the fallback only keeps this total.
+    private static func seedNumber(_ demo: DemoBook) -> Int {
+        Int(demo.bookId) ?? demo.title.count
     }
 
     private static let chapterTitles = [
@@ -203,12 +287,13 @@ enum DemoSeed {
     /// A minimally complete rule: enough for the source list, the book screen and
     /// the reader to render. Nothing here ever hits the network in a demo run —
     /// every chapter these books point at is already on disk.
-    private nonisolated static func ruleJSON(id: String, name: String) -> String {
+    private nonisolated static func ruleJSON(id: String, name: String, kind: SiteRule.Kind) -> String {
         """
         {
           "id": "\(id)",
           "name": "\(name)",
           "host": "\(id)",
+          "kind": "\(kind.rawValue)",
           "urls": {
             "book": "https://\(id)/book/{bookId}",
             "catalog": "https://\(id)/book/{bookId}/",
@@ -231,9 +316,20 @@ enum DemoSeed {
             "contentSelectors": ["#content"],
             "stripSelectors": ["script"]
           },
+        \(kind == .comic ? comicImagesJSON : "")
           "notes": ["Fictional source used for App Store screenshots."]
         }
         """
     }
+
+    /// A comic rule is refused without one (`SiteStore`), and rightly: a comic source
+    /// that cannot say where a page's images are is a source that can list chapters and
+    /// open none of them. The demo never reads it — every page these books point at is
+    /// already on disk — so the plainest selector any site would use will do.
+    private nonisolated static let comicImagesJSON = """
+          "images": {
+            "strategies": [{ "type": "dom", "selector": "img.page", "attributes": ["src"] }]
+          },
+    """
 }
 #endif
