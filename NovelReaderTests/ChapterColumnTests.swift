@@ -210,6 +210,106 @@ final class ChapterColumnTests: XCTestCase {
         )
     }
 
+    // MARK: - Drawing
+
+    private func render(_ column: ChapterColumn, window: CGRect) -> Data? {
+        UIGraphicsImageRenderer(size: window.size).pngData { context in
+            column.draw(window, in: context.cgContext)
+        }
+    }
+
+    /// Drawing must not be a second layout pass.
+    ///
+    /// The report this exists for: on a device the reader painted about one line per
+    /// scrolled frame, fell behind the finger, and then went blank until the next
+    /// chapter — while the simulator was perfect. `NSTextLayoutManager` lays out to a
+    /// viewport and is free to throw away what is outside one; a phone does, a simulator
+    /// with memory to spare does not. A fragment whose layout has been freed answers
+    /// `layoutFragmentFrame` with a zero rect, so asking it at draw time drew the whole
+    /// rest of the chapter stacked above the window, once per frame.
+    ///
+    /// Invalidating by hand is the only way to make a machine with memory to spare
+    /// behave like the phone that found this.
+    func testDrawingSurvivesTheLayoutManagerThrowingItsWorkAway() {
+        let column = column(paragraphs())
+        // Deep enough that nothing here is the first screen, which is the one place the
+        // broken version was still right.
+        let window = CGRect(x: 0, y: 1200, width: 350, height: 600)
+        let blank = UIGraphicsImageRenderer(size: window.size).pngData { _ in }
+
+        let before = render(column, window: window)
+        XCTAssertNotEqual(before, blank, "the window has to have text in it to be worth comparing")
+
+        column.discardLayoutManagerWork()
+
+        XCTAssertEqual(
+            render(column, window: window), before,
+            "the same window must draw the same pixels after the layout manager has "
+                + "dropped its work — otherwise drawing depends on layout the reader's "
+                + "device is entitled to free"
+        )
+    }
+
+    /// The same claim for the bands a mark is drawn in, which are the one thing left that
+    /// still asks the layout manager at draw time. If they move when it drops its work, a
+    /// highlight lands on words the reader never marked.
+    func testAMarksBandsSurviveTheLayoutManagerThrowingItsWorkAway() {
+        let column = column(paragraphs())
+        let range = column.text.paragraphRanges[12]
+        let before = column.rects(for: range)
+        XCTAssertFalse(before.isEmpty, "a real paragraph has to have bands to compare")
+
+        column.discardLayoutManagerWork()
+
+        XCTAssertEqual(
+            column.rects(for: range), before,
+            "a mark's bands must not move when the layout manager drops its work"
+        )
+    }
+
+    /// A window past the foot of the text draws nothing rather than the last paragraph
+    /// over and over: the footer lives down there, and the reader scrolls into it.
+    func testAWindowBelowTheColumnDrawsNothing() {
+        let column = column(paragraphs())
+        let window = CGRect(x: 0, y: column.height + 50, width: 350, height: 600)
+        let blank = UIGraphicsImageRenderer(size: window.size).pngData { _ in }
+
+        XCTAssertEqual(render(column, window: window), blank)
+    }
+
+    /// Ink has to land where the recorded geometry says it does.
+    ///
+    /// Everything else in this file measures the geometry, and drawing is told where to
+    /// put each line from that same record — so a constant offset between the two (a
+    /// baseline taken for a top edge, say) would leave every other test here green while
+    /// the reader saw text sitting between the lines it is supposed to be on. Strips
+    /// rather than whole windows, because a whole window has ink either way.
+    func testTextIsDrawnOnTheLinesTheColumnSaysItIsOn() {
+        let column = column(paragraphs())
+        func hasInk(from y: CGFloat, height: CGFloat) -> Bool {
+            let window = CGRect(x: 0, y: y, width: 350, height: height)
+            let blank = UIGraphicsImageRenderer(size: window.size).pngData { _ in }
+            return render(column, window: window) != blank
+        }
+
+        for frame in column.paragraphFrames.prefix(12) {
+            XCTAssertTrue(
+                hasInk(from: frame.minY + 1, height: 4),
+                "paragraph \(frame.paragraph) must have ink at its own top edge"
+            )
+        }
+        // And the air between two paragraphs is air. Taken from the middle of the gap so
+        // that a descender or an antialiased edge is not what this reads.
+        for (above, below) in zip(column.paragraphFrames, column.paragraphFrames.dropFirst())
+        where below.minY - above.maxY > 6 {
+            let middle = (above.maxY + below.minY) / 2
+            XCTAssertFalse(
+                hasInk(from: middle - 1, height: 2),
+                "the gap under paragraph \(above.paragraph) must be empty"
+            )
+        }
+    }
+
     // MARK: - Degenerate input
 
     /// A column is built before the reader's window has been measured, and a zero width

@@ -60,6 +60,35 @@ final class ChapterColumn {
 
     private var lines: [Line] = []
 
+    /// One laid-out paragraph, held rather than asked for again.
+    ///
+    /// `NSTextLayoutManager` lays out to a *viewport* and does not promise to keep what
+    /// it has already done — on a real phone it frees fragments nobody is looking at,
+    /// while a simulator with memory to spare keeps everything and looks perfect. Asking
+    /// it per drawn frame therefore made the reader on a device paint one line at a time
+    /// and then nothing at all: a fragment whose layout had been freed answers
+    /// `layoutFragmentFrame` with a zero rect, which drew every remaining paragraph of
+    /// the chapter on top of each other, above the window, once per frame.
+    ///
+    /// Holding the fragment holds its line fragments, and the frame is recorded from the
+    /// one pass that laid the whole chapter out in order. Drawing is then drawing.
+    private struct PlacedFragment {
+        let fragment: NSTextLayoutFragment
+        /// The fragment's own lines, held separately because `textLineFragments` is
+        /// emptied when the layout manager drops its work — holding the fragment is not
+        /// enough to hold what it was made of.
+        let lineFragments: [NSTextLineFragment]
+        let origin: CGPoint
+        let maxY: CGFloat
+        /// The paragraph's span in the composed chapter, so a mark stated in the
+        /// chapter's own offsets can be resolved without asking the layout manager
+        /// where anything is.
+        let start: Int
+        let end: Int
+    }
+
+    private var fragments: [PlacedFragment] = []
+
     init(text: ChapterText, width: CGFloat) {
         self.text = text
         self.width = width
@@ -88,7 +117,7 @@ final class ChapterColumn {
     /// Affordable because it does not run on the main thread. Call it on the background
     /// queue that built the column, before handing it over.
     func layOut() {
-        guard width > 0, lines.isEmpty else { return }
+        guard width > 0, fragments.isEmpty else { return }
         let start = contentStorage.documentRange.location
         _ = layoutManager.enumerateTextLayoutFragments(
             from: start, options: [.ensuresLayout]
@@ -109,6 +138,13 @@ final class ChapterColumn {
         let fragmentStart = offset(of: fragment.rangeInElement.location)
         let fragmentEnd = offset(of: fragment.rangeInElement.endLocation)
         let frame = fragment.layoutFragmentFrame
+        // Recorded here, in the one pass that walks the chapter in order, because this
+        // is the only moment the frame is answered by layout that has just happened.
+        fragments.append(PlacedFragment(
+            fragment: fragment, lineFragments: fragment.textLineFragments,
+            origin: frame.origin, maxY: frame.maxY,
+            start: fragmentStart, end: fragmentEnd
+        ))
         for line in fragment.textLineFragments {
             let start = min(
                 max(fragmentStart + line.characterRange.location, fragmentStart), fragmentEnd
@@ -228,17 +264,42 @@ final class ChapterColumn {
 
     /// Rects covering a character range, in column coordinates. One per line, so a
     /// passage that wraps is marked as the lines a reader sees.
+    ///
+    /// Built from the held fragments rather than from `enumerateTextSegments`, for the
+    /// same reason drawing is — see `PlacedFragment`. Measured: after the layout manager
+    /// drops its work, the segment enumeration puts a paragraph's bands 1600 points from
+    /// where the text it marks is actually drawn.
     func rects(for range: NSRange) -> [CGRect] {
-        guard range.length > 0,
-              let start = location(at: range.location),
-              let end = location(at: NSMaxRange(range)),
-              let textRange = NSTextRange(location: start, end: end)
-        else { return [] }
-        layoutManager.ensureLayout(for: textRange)
+        guard range.length > 0 else { return [] }
+        let lower = range.location
+        let upper = NSMaxRange(range)
         var rects: [CGRect] = []
-        layoutManager.enumerateTextSegments(in: textRange, type: .highlight) { _, rect, _, _ in
-            if !rect.isEmpty { rects.append(rect) }
-            return true
+        for placed in fragments where placed.end > lower && placed.start < upper {
+            for line in placed.lineFragments {
+                // The line's span in the chapter's offsets. A line fragment's own
+                // `characterRange` counts from the start of its paragraph, which is what
+                // `locationForCharacter(at:)` indexes as well.
+                let lineStart = placed.start + line.characterRange.location
+                let lineEnd = placed.start + NSMaxRange(line.characterRange)
+                let from = max(lineStart, lower)
+                let to = min(lineEnd, upper)
+                guard to > from else { continue }
+                let bounds = line.typographicBounds
+                // The ends of the line are taken from its own bounds rather than asked
+                // for by character: the index one past a line is the paragraph's length
+                // on its last line, which is not a character anyone can be asked about.
+                let x1 = from <= lineStart
+                    ? bounds.minX
+                    : bounds.minX + line.locationForCharacter(at: from - placed.start).x
+                let x2 = to >= lineEnd
+                    ? bounds.maxX
+                    : bounds.minX + line.locationForCharacter(at: to - placed.start).x
+                let rect = CGRect(
+                    x: min(x1, x2), y: bounds.minY,
+                    width: abs(x2 - x1), height: bounds.height
+                ).offsetBy(dx: placed.origin.x, dy: placed.origin.y)
+                if !rect.isEmpty { rects.append(rect) }
+            }
         }
         return rects
     }
@@ -251,26 +312,62 @@ final class ChapterColumn {
     /// A paragraph straddling the top edge is drawn whole and cut by the caller's clip:
     /// TextKit lays a paragraph out as one fragment, and asking for half of one would
     /// mean laying it out twice with two different results.
+    ///
+    /// Every position here comes from `fragments`, never from the layout manager — see
+    /// `PlacedFragment` for what asking it again per frame cost.
+    ///
+    /// Line by line rather than `NSTextLayoutFragment.draw(at:in:)`, for the same
+    /// reason: a fragment whose lines the layout manager has taken back rebuilds them to
+    /// be drawn, which is a paragraph laid out per visible paragraph per frame. A held
+    /// line fragment draws itself and asks nobody anything.
     func draw(_ columnRect: CGRect, in context: CGContext) {
-        guard !lines.isEmpty,
-              let start = location(at: offset(atY: columnRect.minY))
-        else { return }
         context.saveGState()
         context.translateBy(x: 0, y: -columnRect.minY)
-        _ = layoutManager.enumerateTextLayoutFragments(
-            from: start, options: [.ensuresLayout]
-        ) { fragment in
-            fragment.draw(at: fragment.layoutFragmentFrame.origin, in: context)
-            return fragment.layoutFragmentFrame.maxY < columnRect.maxY
+        for placed in drawList(in: columnRect.minY..<columnRect.maxY) {
+            for line in placed.lineFragments {
+                let bounds = line.typographicBounds
+                line.draw(
+                    at: CGPoint(
+                        x: placed.origin.x + bounds.minX, y: placed.origin.y + bounds.minY
+                    ),
+                    in: context
+                )
+            }
         }
         context.restoreGState()
     }
 
-    // MARK: - Offsets
-
-    private func location(at offset: Int) -> NSTextLocation? {
-        contentStorage.location(contentStorage.documentRange.location, offsetBy: offset)
+    /// The fragments with any part inside a vertical range, in reading order.
+    private func drawList(in range: Range<CGFloat>) -> ArraySlice<PlacedFragment> {
+        guard !fragments.isEmpty else { return [] }
+        var low = 0
+        var high = fragments.count - 1
+        var first = fragments.count
+        while low <= high {
+            let mid = (low + high) / 2
+            if fragments[mid].maxY > range.lowerBound {
+                first = mid
+                high = mid - 1
+            } else {
+                low = mid + 1
+            }
+        }
+        guard first < fragments.count else { return [] }
+        var last = first
+        while last + 1 < fragments.count, fragments[last + 1].origin.y < range.upperBound {
+            last += 1
+        }
+        return fragments[first...last]
     }
+
+    /// Throws away everything the layout manager has computed, the way a device short of
+    /// memory does on its own. Nothing this type promises may notice — see
+    /// `PlacedFragment`, which exists because drawing used to.
+    func discardLayoutManagerWork() {
+        layoutManager.invalidateLayout(for: contentStorage.documentRange)
+    }
+
+    // MARK: - Offsets
 
     private func offset(of location: NSTextLocation) -> Int {
         contentStorage.offset(from: contentStorage.documentRange.location, to: location)
