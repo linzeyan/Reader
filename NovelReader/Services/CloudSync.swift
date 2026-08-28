@@ -31,6 +31,18 @@ final class CloudSync {
     private struct Record: Codable {
         var siteId: String
         var siteBookId: String
+        /// What the book is, carried rather than looked up.
+        ///
+        /// A merge *creates* book rows on the other device, and that device may not have
+        /// the rule this book names: rules travel by hand, one file at a time, so the
+        /// normal case is a library that syncs before its sources do. A kind looked up
+        /// locally would come back nil there, filing a comic under novels and opening it
+        /// in the text reader until the day its rule arrives.
+        ///
+        /// Optional, and absent reads as `.novel`. A record written before comics existed
+        /// describes a book that could not have been anything else, so there is nothing
+        /// to guess — unlike `position`, where an old shape had to be refused outright.
+        var kind: SiteRule.Kind?
         var title: String
         var displayName: String?
         var author: String?
@@ -189,7 +201,7 @@ final class CloudSync {
     private func write(_ book: Book) {
         guard !book.isLocal else { return }
         let record = Record(
-            siteId: book.siteId, siteBookId: book.siteBookId, title: book.title,
+            siteId: book.siteId, siteBookId: book.siteBookId, kind: book.kind, title: book.title,
             displayName: book.displayName, author: book.author, coverURL: book.coverURL,
             addedAt: book.addedAt, updatedAt: book.updatedAt,
             position: book.readingPosition, fraction: book.lastReadFraction
@@ -227,7 +239,7 @@ final class CloudSync {
 
     private func apply(_ record: Record, id: String) throws {
         try repo.bookmark(
-            siteId: record.siteId, siteBookId: record.siteBookId,
+            siteId: record.siteId, siteBookId: record.siteBookId, kind: record.kind ?? .novel,
             title: record.title, author: record.author, coverURL: record.coverURL,
             now: record.updatedAt
         )

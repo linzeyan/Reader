@@ -331,7 +331,7 @@ final class RecentReadingTests: XCTestCase {
     private func entry(chapterIndex: Int?, of count: Int, fraction: Double?) -> RecentRead {
         var book = Book(
             id: "demo|\(chapterIndex ?? -1)|\(count)", siteId: "demo", siteBookId: "1",
-            title: "書", displayName: nil, author: nil, coverURL: nil,
+            kind: .novel, title: "書", displayName: nil, author: nil, coverURL: nil,
             addedAt: epoch, updatedAt: epoch,
             lastReadSiteChapterId: "\((chapterIndex ?? 0) + 1)", lastReadParagraph: 0,
             lastReadCharacterOffset: 0, lastReadFraction: fraction,

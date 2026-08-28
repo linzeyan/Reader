@@ -54,8 +54,8 @@ final class DownloadManagerTests: XCTestCase {
 
     private func makeBook() -> Book {
         Book(
-            id: "book", siteId: "demo", siteBookId: "1", title: "t", displayName: nil,
-            author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
+            id: "book", siteId: "demo", siteBookId: "1", kind: .novel, title: "t",
+            displayName: nil, author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
             lastReadCharacterOffset: nil, lastReadFraction: nil, lastReadAt: nil, catalogUpdatedAt: nil
         )

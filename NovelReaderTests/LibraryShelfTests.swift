@@ -231,8 +231,9 @@ final class LibraryShelfTests: XCTestCase {
         updatedAt: Date = Date(timeIntervalSince1970: 0)
     ) -> Book {
         Book(
-            id: id, siteId: "alpha", siteBookId: id, title: title, displayName: nil,
-            author: nil, coverURL: nil, addedAt: addedAt, updatedAt: updatedAt,
+            id: id, siteId: "alpha", siteBookId: id, kind: .novel, title: title,
+            displayName: nil, author: nil, coverURL: nil,
+            addedAt: addedAt, updatedAt: updatedAt,
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
             lastReadCharacterOffset: nil, lastReadFraction: nil,
             lastReadAt: nil, catalogUpdatedAt: nil

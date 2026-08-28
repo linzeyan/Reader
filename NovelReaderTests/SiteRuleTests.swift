@@ -113,8 +113,8 @@ final class SiteRuleTests: XCTestCase {
     private func makeBook(siteId: String, siteBookId: String) -> Book {
         Book(
             id: Book.makeId(siteId: siteId, siteBookId: siteBookId),
-            siteId: siteId, siteBookId: siteBookId, title: "t", displayName: nil,
-            author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
+            siteId: siteId, siteBookId: siteBookId, kind: .novel, title: "t",
+            displayName: nil, author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
             lastReadCharacterOffset: nil, lastReadFraction: nil, lastReadAt: nil, catalogUpdatedAt: nil
         )

@@ -374,6 +374,28 @@ final class AppDatabase {
                 """)
         }
 
+        // What the book is: a novel of text, or a comic of pages. It decides which reader
+        // opens it and which shelf it appears on.
+        //
+        // On the book rather than read back from its rule, because the rule is not always
+        // there to read: an iCloud merge *creates* book rows on a device that may never
+        // have installed the rule they came from, rules travelling by hand one file at a
+        // time. A row that cannot say what it is would be a row no screen can draw.
+        //
+        // `NOT NULL DEFAULT 'novel'` is a backfill and not a guess. Until this release the
+        // app could not add anything but a novel — a rule had no way to say otherwise —
+        // so every row in existence when this runs *is* one, and the default states that
+        // fact rather than assuming it. Nothing here is left null, unlike v2, v3 and v7:
+        // those had nothing to say about the old rows, and this one does.
+        //
+        // The string is spelled out rather than taken from `SiteRule.Kind`, for the reason
+        // v6 gives: a migration converts to the shape it converted to the day it shipped.
+        migrator.registerMigration("v9.bookKind") { db in
+            try db.alter(table: Book.databaseTableName) { t in
+                t.add(column: "kind", .text).notNull().defaults(to: "novel")
+            }
+        }
+
         return migrator
     }
 }

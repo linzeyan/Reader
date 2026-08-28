@@ -12,10 +12,21 @@ struct LibraryRepo {
     /// Adds a bookmark, or refreshes the site-provided fields of an existing one.
     /// A re-bookmark must never clobber the user's custom name or reading
     /// position — those are theirs, not the site's.
+    ///
+    /// - Parameter kind: what the source publishes, taken from its rule. Defaulted
+    ///   because the callers that pass nothing are the ones that could not be anything
+    ///   else — a book imported from a text file on this device, and the demo shelf. The
+    ///   one caller holding a rule passes `rule.kind`, and an incoming iCloud record
+    ///   passes the kind it travelled with.
+    ///
+    ///   Refreshed on an existing row like the title, because it is the source's to say
+    ///   in the same way: a rule corrected from novel to comic has to be able to put its
+    ///   book right, and re-adding the book is the gesture a reader would make to do it.
     @discardableResult
     func bookmark(
         siteId: String,
         siteBookId: String,
+        kind: SiteRule.Kind = .novel,
         title: String,
         author: String? = nil,
         coverURL: String? = nil,
@@ -24,6 +35,7 @@ struct LibraryRepo {
         try writer.write { db in
             let id = Book.makeId(siteId: siteId, siteBookId: siteBookId)
             if var existing = try Book.fetchOne(db, key: id) {
+                existing.kind = kind
                 existing.title = title
                 existing.author = author ?? existing.author
                 existing.coverURL = coverURL ?? existing.coverURL
@@ -32,7 +44,7 @@ struct LibraryRepo {
                 return existing
             }
             let book = Book(
-                id: id, siteId: siteId, siteBookId: siteBookId, title: title,
+                id: id, siteId: siteId, siteBookId: siteBookId, kind: kind, title: title,
                 displayName: nil, author: author, coverURL: coverURL,
                 addedAt: now, updatedAt: now,
                 lastReadSiteChapterId: nil, lastReadParagraph: nil,
