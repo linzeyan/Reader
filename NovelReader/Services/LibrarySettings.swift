@@ -32,6 +32,22 @@ final class LibrarySettings {
         didSet { defaults.set(onlyWithNewChapters, forKey: Keys.onlyWithNewChapters) }
     }
 
+    /// Which screen a launch opens on. See `HomeScreen`.
+    var home: HomeScreen {
+        didSet { defaults.set(home.rawValue, forKey: Keys.home) }
+    }
+
+    /// Which shelf a launch opens on — novels or comics.
+    ///
+    /// The *default*, not the last one used, and that is the whole design: the mode
+    /// switch is one tap away on the shelf itself, so remembering the last choice would
+    /// leave this setting with nothing to do. What it says is "this is what I read", and
+    /// every launch starting there is what makes that true. `AppEnvironment.mediaMode`
+    /// is where the session's answer lives; nothing writes back to here.
+    var defaultMediaMode: MediaMode {
+        didSet { defaults.set(defaultMediaMode.rawValue, forKey: Keys.defaultMediaMode) }
+    }
+
     /// How many books the reading history shows.
     ///
     /// Five by default: the history exists to answer "what was I reading", and that is
@@ -101,6 +117,8 @@ final class LibrarySettings {
         static let sort = "library.sort"
         static let groupBySource = "library.groupBySource"
         static let onlyWithNewChapters = "library.onlyWithNewChapters"
+        static let home = "library.home"
+        static let defaultMediaMode = "library.defaultMediaMode"
         static let catalogDescending = "library.catalogDescending"
         static let recentReadingCount = "library.recentReadingCount"
     }
@@ -115,6 +133,9 @@ final class LibrarySettings {
         sort = defaults.string(forKey: Keys.sort).flatMap(LibrarySort.init(rawValue:)) ?? .added
         groupBySource = defaults.object(forKey: Keys.groupBySource) as? Bool ?? true
         onlyWithNewChapters = defaults.object(forKey: Keys.onlyWithNewChapters) as? Bool ?? false
+        home = defaults.string(forKey: Keys.home).flatMap(HomeScreen.init(rawValue:)) ?? .automatic
+        defaultMediaMode =
+            defaults.string(forKey: Keys.defaultMediaMode).flatMap(MediaMode.init(rawValue:)) ?? .novel
         catalogDescending = defaults.dictionary(forKey: Keys.catalogDescending) as? [String: Bool] ?? [:]
         // `integer(forKey:)` answers 0 for a key that was never written, which is not
         // a length anyone chose — hence the object check before the clamp.

@@ -225,7 +225,7 @@ final class RecentReadingTests: XCTestCase {
             entry(chapterIndex: 3, of: 40, fraction: 0.2),
         ]
 
-        XCTAssertEqual(RootTab.home(recent: history), .recent)
+        XCTAssertEqual(RootTab.home(recent: history, preference: .automatic), .recent)
     }
 
     /// And the reason it is not always: a history of nothing but finished books is a
@@ -237,14 +237,14 @@ final class RecentReadingTests: XCTestCase {
             entry(chapterIndex: 199, of: 200, fraction: 1),
         ]
 
-        XCTAssertEqual(RootTab.home(recent: history), .library)
+        XCTAssertEqual(RootTab.home(recent: history, preference: .automatic), .library)
     }
 
     /// A fresh install, and a reader who has just cleared the history. Neither has
     /// anything to resume, and the history's own empty state points at the shelf — so
     /// opening there directly is the same answer without the extra tap.
     func testAnEmptyHistoryOpensOnTheLibrary() {
-        XCTAssertEqual(RootTab.home(recent: []), .library)
+        XCTAssertEqual(RootTab.home(recent: [], preference: .automatic), .library)
     }
 
     /// The rule reads the list *as shown*. A book pushed off the end of a five-row list
@@ -256,8 +256,18 @@ final class RecentReadingTests: XCTestCase {
             entry(chapterIndex: 2, of: 30, fraction: 0.1),
         ]
 
-        XCTAssertEqual(RootTab.home(recent: Array(history.prefix(1))), .library)
-        XCTAssertEqual(RootTab.home(recent: history), .recent)
+        XCTAssertEqual(RootTab.home(recent: Array(history.prefix(1)), preference: .automatic), .library)
+        XCTAssertEqual(RootTab.home(recent: history, preference: .automatic), .recent)
+    }
+
+    /// The two explicit answers, which say where the reader wants to land rather than
+    /// what is waiting there. A reader who has chosen the shelf gets the shelf even with
+    /// three books half-read — otherwise the setting would be a suggestion.
+    func testAChosenScreenIsNotOverruledByWhatIsOnTheHistory() {
+        let history = [entry(chapterIndex: 3, of: 40, fraction: 0.2)]
+
+        XCTAssertEqual(RootTab.home(recent: history, preference: .library), .library)
+        XCTAssertEqual(RootTab.home(recent: [], preference: .recent), .recent)
     }
 
     // MARK: - The length setting

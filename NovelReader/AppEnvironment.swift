@@ -63,6 +63,14 @@ final class AppEnvironment {
     /// round trip per tap, and a list that grows one row at a time as the number climbs.
     /// `visibleRecentReads` is what the screen draws.
     private(set) var recentReads: [RecentRead] = []
+    /// Whether the app is currently about novels or comics — what the shelf shows,
+    /// what the search asks, how the sources list is split.
+    ///
+    /// Session state, deliberately not persisted: it starts at the reader's chosen
+    /// default every launch, and the switch on the shelf changes it for as long as the
+    /// app is open. Remembering it instead would mean the "default shelf" setting only
+    /// ever applied on the day it was changed. See `LibrarySettings.defaultMediaMode`.
+    var mediaMode: MediaMode
     /// Set when a site demands an interactive challenge; drives the sheet that
     /// hands the web view to the user.
     var challenge: ChallengeRequest?
@@ -124,7 +132,9 @@ final class AppEnvironment {
         self.monitor = monitor
         let downloadSettings = DownloadSettings()
         self.downloadSettings = downloadSettings
-        self.librarySettings = LibrarySettings()
+        let librarySettings = LibrarySettings()
+        self.librarySettings = librarySettings
+        self.mediaMode = librarySettings.defaultMediaMode
         let backgroundDownloads = BackgroundDownloads(
             downloader: downloader,
             settings: downloadSettings,
@@ -220,14 +230,27 @@ final class AppEnvironment {
         reloadLibrary()
     }
 
-    /// Books grouped by source, in the rule order the settings screen shows.
+    /// Every book, both media, grouped by source.
+    ///
+    /// Unfiltered on purpose, unlike the shelf: the one screen that reads this asks
+    /// what is on the disk, and a shelf mode is about what the reader wants to look
+    /// at — hiding half the downloads behind it would leave space unaccounted for.
+    var booksBySite: [LibrarySource] { sources(of: books) }
+
+    /// The books the shelf is currently about.
+    ///
+    /// Also what "the shelf is empty" means: an empty comic shelf in a library full of
+    /// novels has to say so, and offer the way to add the first comic.
+    var shelfBooks: [Book] { books.filter { $0.kind == mediaMode } }
+
+    /// Groups books by source, in the rule order the settings screen shows.
     /// Bookmarks for a source whose rule was removed still appear, under their
     /// raw site id, rather than vanishing from the library.
     ///
     /// Imported books land in that same trailing group, because no rule will ever
     /// match `Book.localSiteId` — but they are not orphans, so the name comes from
     /// `SiteStore.name(ofSite:)`, which knows the one source that has no file.
-    var booksBySite: [LibrarySource] {
+    private func sources(of books: [Book]) -> [LibrarySource] {
         let grouped = Dictionary(grouping: books, by: \.siteId)
         let known = sites.rules.compactMap { rule -> LibrarySource? in
             guard let group = grouped[rule.id], !group.isEmpty else { return nil }
@@ -239,8 +262,8 @@ final class AppEnvironment {
         }
     }
 
-    /// The shelf exactly as the library draws it: `booksBySite` put through the
-    /// reader's sort, grouping and filter choices.
+    /// The shelf exactly as the library draws it: this mode's books, grouped by
+    /// source, put through the reader's sort, grouping and filter choices.
     ///
     /// Computed rather than stored so it cannot go stale against either input —
     /// the books reload on every mutation and the settings change from a menu, and
@@ -248,7 +271,7 @@ final class AppEnvironment {
     /// is nothing next to drawing them.
     var shelf: [LibrarySection] {
         LibraryShelf.sections(
-            from: booksBySite,
+            from: sources(of: shelfBooks),
             sort: librarySettings.sort,
             groupBySource: librarySettings.groupBySource,
             onlyWithNewChapters: librarySettings.onlyWithNewChapters,

@@ -43,10 +43,19 @@ struct RecentReadingView: View {
                     // is comparing forty books against each other; here there is one
                     // question — is this the bit I remember — and the chapter's own title
                     // answers it where a number never could.
-                    chapterName(entry)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    //
+                    // The medium's icon rides on this line rather than beside the title,
+                    // which wraps to two lines and would leave the icon floating. This
+                    // list is the one screen that mixes novels and comics — everywhere
+                    // else the shelf mode has already answered the question — so it is
+                    // the one screen that has to say which it is looking at.
+                    HStack(spacing: 4) {
+                        Image(systemName: entry.book.kind.icon)
+                        chapterName(entry)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                     detail(entry)
                 }
                 Spacer()

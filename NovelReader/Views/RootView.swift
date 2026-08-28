@@ -23,7 +23,11 @@ struct RootView: View {
     init() {
         let env = AppEnvironment.makeShared()
         _env = State(initialValue: env)
-        _tab = State(initialValue: RootTab.home(recent: env.visibleRecentReads))
+        _tab = State(
+            initialValue: RootTab.home(
+                recent: env.visibleRecentReads, preference: env.librarySettings.home
+            )
+        )
     }
 
     var body: some View {

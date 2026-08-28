@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// One row of the reading history: a book, and where the reader stopped in it.
 ///
@@ -66,19 +67,46 @@ enum RootTab: Hashable {
     case settings
 }
 
+/// Which screen the reader wants a launch to open on.
+///
+/// Stored in `LibrarySettings`. `automatic` is kept and kept first because it is what
+/// the app did before there was anything to choose — someone who never opens settings
+/// must not be able to tell this was added.
+enum HomeScreen: String, CaseIterable, Identifiable {
+    case automatic
+    case recent
+    case library
+
+    var id: String { rawValue }
+
+    var nameKey: LocalizedStringKey {
+        switch self {
+        case .automatic: return "settings.home.automatic"
+        case .recent: return "tab.recent"
+        case .library: return "tab.library"
+        }
+    }
+}
+
 extension RootTab {
     /// Which tab a launch opens on.
     ///
-    /// The history first, because "carry on where I was" is what someone opens a
-    /// reader for. But only while it has something to carry on with: a reader whose
-    /// every recent book is finished would be shown a screen of dead ends, and what
-    /// they came for is the next book — which is the bookshelf.
+    /// The reader's choice, and where they have not made one, the history first —
+    /// because "carry on where I was" is what someone opens a reader for. But only
+    /// while it has something to carry on with: a reader whose every recent book is
+    /// finished would be shown a screen of dead ends, and what they came for is the
+    /// next book, which is the bookshelf.
     ///
     /// - Parameter recent: the history *as the screen shows it*, already cut to the
     ///   reader's chosen length. A book pushed off the end of a five-row list is not
     ///   something they can tap, so it cannot be the reason the list counts as having
-    ///   something left in it.
-    static func home(recent: [RecentRead]) -> RootTab {
-        recent.contains { !$0.isFinished } ? .recent : .library
+    ///   something left in it. Read only by `automatic`; the other two answers are
+    ///   about where the reader wants to land, not about what is waiting there.
+    static func home(recent: [RecentRead], preference: HomeScreen) -> RootTab {
+        switch preference {
+        case .recent: return .recent
+        case .library: return .library
+        case .automatic: return recent.contains { !$0.isFinished } ? .recent : .library
+        }
     }
 }

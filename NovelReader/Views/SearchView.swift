@@ -21,16 +21,21 @@ struct SearchView: View {
         case site(String)
     }
 
-    private var searchable: [SiteRule] { env.sites.searchableRules }
+    /// This mode's searchable sources. Searching novel sites for a comic title
+    /// answers with a list of novels that happen to share a name, which is worse than
+    /// answering with nothing — so the shelf's mode decides here too.
+    private var searchable: [SiteRule] {
+        env.sites.searchableRules.filter { $0.kind == env.mediaMode }
+    }
 
     var body: some View {
         NavigationStack {
             Group {
-                if env.sites.rules.isEmpty {
+                if env.sites.rules(of: env.mediaMode).isEmpty {
                     ContentUnavailableView(
-                        "library.empty.title",
+                        env.mediaMode.noSourcesTitleKey,
                         systemImage: "magnifyingglass",
-                        description: Text("library.empty.needSource")
+                        description: Text(env.mediaMode.noSourcesHintKey)
                     )
                 } else if searchable.isEmpty {
                     ContentUnavailableView(
@@ -43,9 +48,18 @@ struct SearchView: View {
                 }
             }
             .navigationTitle("tab.search")
+            // The same switch the shelf has, setting the same app-wide value: someone
+            // who came here to look for a comic should not have to go back to the
+            // shelf to say so.
+            .toolbar { ToolbarItem(placement: .topBarLeading) { MediaModePicker() } }
             .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
             .searchable(text: $query, prompt: Text("search.prompt"))
             .onSubmit(of: .search) { start() }
+            // Results name the sites they came from, and those sites are all of the
+            // other medium now. Cleared rather than re-run: the query was typed for
+            // the shelf the reader has just left, and re-running it would spend every
+            // comic source on a novel title nobody asked them about.
+            .onChange(of: env.mediaMode) { _, _ in clear() }
             .onDisappear { task?.cancel() }
         }
     }
@@ -101,6 +115,16 @@ struct SearchView: View {
     }
 
     // MARK: - Actions
+
+    /// Drops the results and stops whatever is still arriving, back to the state the
+    /// screen has before the first search.
+    private func clear() {
+        task?.cancel()
+        outcomes = []
+        pending = []
+        hasSearched = false
+        scope = .all
+    }
 
     private func start() {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)

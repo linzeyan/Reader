@@ -31,7 +31,7 @@ struct LibraryView: View {
         NavigationStack(path: $path) {
             Group {
                 let sections = env.shelf
-                if env.books.isEmpty {
+                if env.shelfBooks.isEmpty {
                     emptyState
                 } else if sections.isEmpty {
                     // Reachable only through the filter, and it has to offer the
@@ -63,9 +63,19 @@ struct LibraryView: View {
                 //
                 // Hidden on an empty shelf, where there is nothing to arrange and
                 // the two ways to add a book are the only thing worth looking at.
-                if !env.books.isEmpty {
+                if !env.shelfBooks.isEmpty {
                     ToolbarItem(placement: .topBarLeading) { arrangeMenu }
                 }
+                // Never hidden, unlike the menu above it: switching modes is how
+                // someone gets *off* an empty comic shelf and back to the novels they
+                // have, so it is the one control that has to be there when there is
+                // nothing else on the screen.
+                //
+                // Beside the large title rather than tucked against it. Nothing places
+                // a control on the title's own line without giving the large title up,
+                // and the shelf keeping the same heading as the other three tabs was
+                // worth more than the last few points of proximity.
+                ToolbarItem(placement: .topBarLeading) { MediaModePicker() }
                 // Two buttons rather than one menu: the ways in are not
                 // interchangeable — adding by URL needs an installed rule while
                 // importing a file needs nothing at all — so a fresh install with
@@ -80,14 +90,20 @@ struct LibraryView: View {
                     .accessibilityIdentifier("library.add")
                     .disabled(env.sites.rules.isEmpty || importProgress != nil)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        picking = true
-                    } label: {
-                        Label("library.import", systemImage: "square.and.arrow.down")
+                // Only on the novel shelf. A `.txt` or an `.epub` is text, so an
+                // import always produces a novel — offered here it would take a file,
+                // succeed, and put the result on the shelf the reader is not looking
+                // at, which is indistinguishable from having failed.
+                if env.mediaMode == .novel {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            picking = true
+                        } label: {
+                            Label("library.import", systemImage: "square.and.arrow.down")
+                        }
+                        .accessibilityIdentifier("library.import")
+                        .disabled(importProgress != nil)
                     }
-                    .accessibilityIdentifier("library.import")
-                    .disabled(importProgress != nil)
                 }
             }
             .overlay(alignment: .top) { importBanner }
@@ -306,23 +322,41 @@ struct LibraryView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label(
-                env.sites.rules.isEmpty ? "library.empty.title" : "library.empty.books",
-                systemImage: "books.vertical"
-            )
+        let copy = emptyCopy
+        return ContentUnavailableView {
+            Label(copy.heading, systemImage: env.mediaMode.icon)
         } description: {
-            Text(env.sites.rules.isEmpty ? "library.empty.needSource" : "library.empty.hint")
+            Text(copy.body)
         } actions: {
-            if env.sites.rules.isEmpty {
+            if copy.needsSource {
                 Text("library.empty.gotoSettings").font(.footnote).foregroundStyle(.secondary)
             } else {
                 Button("library.add") { adding = true }.buttonStyle(.borderedProminent)
             }
             // Offered even with no sources installed: a file on the device is a
             // book this app can read today, and it is the only such book a fresh
-            // install has.
-            Button("library.import") { picking = true }.buttonStyle(.bordered)
+            // install has. Novels only, for the reason the toolbar button gives.
+            if env.mediaMode == .novel {
+                Button("library.import") { picking = true }.buttonStyle(.bordered)
+            }
+        }
+    }
+
+    /// What an empty shelf says, and whether the way out of it is installing a source.
+    ///
+    /// Both questions are per mode. "No sources yet" has to mean no *comic* sources
+    /// when the comic shelf is on screen, since a novel rule is no help to someone
+    /// pasting a comic address — and comics get their own wording for the other case
+    /// too, because "書櫃是空的" in front of a library full of novels reads as though
+    /// they had all gone missing, when what is empty is the half being looked at.
+    private var emptyCopy: (heading: LocalizedStringKey, body: LocalizedStringKey, needsSource: Bool) {
+        let mode = env.mediaMode
+        guard !env.sites.rules(of: mode).isEmpty else {
+            return (mode.noSourcesTitleKey, mode.noSourcesHintKey, true)
+        }
+        switch mode {
+        case .novel: return ("library.empty.books", "library.empty.hint", false)
+        case .comic: return ("library.empty.comic.books", "library.empty.comic.hint", false)
         }
     }
 

@@ -2416,6 +2416,102 @@
         }
       }
     },
+    "library.empty.comic.books" : {
+      "comment" : "Placeholder when comic sources exist but no comic has been added.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No comics yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "漫画柜是空的"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "漫畫櫃是空的"
+          }
+        }
+      }
+    },
+    "library.empty.comic.hint" : {
+      "comment" : "Says how to add the first comic.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search, or paste a link, to add your first comic."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用搜寻或贴上网址加入第一本漫画。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用搜尋或貼上網址加入第一本漫畫。"
+          }
+        }
+      }
+    },
+    "library.empty.comic.needSource" : {
+      "comment" : "Tells the reader where comic sources are installed.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import a comic site rule file in Settings → Sources first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先在「设定 → 来源」加入漫画站台规则档。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先在「設定 → 來源」加入漫畫站台規則檔。"
+          }
+        }
+      }
+    },
+    "library.empty.comic.title" : {
+      "comment" : "Placeholder on the comic shelf before any comic source is added.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No comic sources yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未加入漫画来源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未加入漫畫來源"
+          }
+        }
+      }
+    },
     "library.empty.gotoSettings" : {
       "comment" : "Points at the settings tab.",
       "extractionState" : "manual",
@@ -2800,6 +2896,30 @@
         }
       }
     },
+    "library.mode" : {
+      "comment" : "Accessibility label for the switch between the novel and comic shelves.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shelf"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "书柜类型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書櫃類型"
+          }
+        }
+      }
+    },
     "library.newChapters %@" : {
 
     },
@@ -3124,6 +3244,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "標記"
+          }
+        }
+      }
+    },
+    "media.comic" : {
+      "comment" : "The comic half of the shelf, on the mode switch and in settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comics"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "漫画"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "漫畫"
+          }
+        }
+      }
+    },
+    "media.novel" : {
+      "comment" : "The novel half of the shelf, on the mode switch and in settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Novels"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "小说"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "小說"
           }
         }
       }
@@ -5020,6 +5188,30 @@
         }
       }
     },
+    "settings.defaultMode" : {
+      "comment" : "Picks which shelf a launch opens on.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default shelf"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预设书柜"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預設書櫃"
+          }
+        }
+      }
+    },
     "settings.downloadNetwork" : {
       "comment" : "Which connections chapter downloads may use.",
       "extractionState" : "manual",
@@ -5112,6 +5304,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "僅 Wi-Fi"
+          }
+        }
+      }
+    },
+    "settings.home" : {
+      "comment" : "Picks which screen a launch opens on.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opening screen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "首页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "首頁"
+          }
+        }
+      }
+    },
+    "settings.home.automatic" : {
+      "comment" : "The launch screen the app chose for itself before this setting existed.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動"
           }
         }
       }
@@ -5568,6 +5808,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不支援搜尋"
+          }
+        }
+      }
+    },
+    "settings.start" : {
+      "comment" : "Header of the section deciding what the app opens on.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On launch"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启 App 时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟 App 時"
+          }
+        }
+      }
+    },
+    "settings.start.footer" : {
+      "comment" : "Explains that both choices only apply when the app is launched.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Both apply when the app launches. The switch on the shelf changes it any time."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "两者都只在开启 App 时生效；书柜上的切换随时可以改。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兩者都只在開啟 App 時生效；書櫃上的切換隨時可以改。"
           }
         }
       }

@@ -98,6 +98,13 @@ final class SiteStore {
     /// Sites that declare a `search` block, in the order the UI should try them.
     var searchableRules: [SiteRule] { rules.filter { $0.search != nil } }
 
+    /// The sources that publish one medium, in installed order.
+    ///
+    /// Every screen that shows sources is about one medium at a time — the shelf's
+    /// mode, the search's mode, the two sections the settings list is split into — so
+    /// the filter is written once here rather than as a `filter` at each of them.
+    func rules(of kind: SiteRule.Kind) -> [SiteRule] { rules.filter { $0.kind == kind } }
+
     // MARK: - Import / remove
 
     @discardableResult

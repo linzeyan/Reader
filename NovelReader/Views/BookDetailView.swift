@@ -93,7 +93,12 @@ struct BookDetailView: View {
                     .disabled(isRefreshing || rule == nil)
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) { exportMenu }
+            // Novels only. Both formats this writes are text — a `.txt` of a comic
+            // would be a file of nothing, and an `.epub` of one is a different feature
+            // (see docs/COMICS.md, which does not have it).
+            if current.kind == .novel {
+                ToolbarItem(placement: .topBarTrailing) { exportMenu }
+            }
         }
         // Asked *before* the file is written, not reported after: someone
         // exporting a book to read elsewhere needs the chance to download the
@@ -129,6 +134,16 @@ struct BookDetailView: View {
         .task { await loadChapters() }
     }
 
+    /// Whether this book has a reader to open.
+    ///
+    /// Comics do not, yet: phase 1 of comic support is the shelf, the sources, the
+    /// catalog and the downloads, and the reader is phase 2 (docs/COMICS.md). Disabled
+    /// rather than hidden, unlike the marks row, because it *is* coming — a row that
+    /// disappears and comes back between two builds is harder to make sense of than one
+    /// that is plainly not ready. Only reachable at all in a Debug build with a comic
+    /// rule installed, which is where this half-built state is meant to live.
+    private var hasReader: Bool { current.kind == .novel }
+
     // MARK: - Sections
 
     private var header: some View {
@@ -162,7 +177,7 @@ struct BookDetailView: View {
             )
         }
         .accessibilityIdentifier("book.read")
-        .disabled(chapters.isEmpty)
+        .disabled(chapters.isEmpty || !hasReader)
 
         // Always present, and with no count on it. A row that appears only once the
         // feature has been used is a feature nobody finds, and a count cached here
@@ -171,12 +186,17 @@ struct BookDetailView: View {
         //
         // One row for both kinds of mark: see `ReadingMarksView` for why they share a
         // screen rather than growing a row each.
-        NavigationLink {
-            ReadingMarksView(book: current)
-        } label: {
-            Label("marks.title", systemImage: "bookmark")
+        // Novels only: a bookmark and a highlight are both anchored to text, and a
+        // comic has none to anchor to. Hidden rather than disabled because this one is
+        // not coming back — it is not a feature a comic is waiting for.
+        if current.kind == .novel {
+            NavigationLink {
+                ReadingMarksView(book: current)
+            } label: {
+                Label("marks.title", systemImage: "bookmark")
+            }
+            .accessibilityIdentifier("book.marks")
         }
-        .accessibilityIdentifier("book.marks")
 
         // One entry point rather than "download all" and "delete all" buttons:
         // both of those live on the management screen now, next to the
@@ -218,6 +238,7 @@ struct BookDetailView: View {
                     ) {
                         ChapterRow(chapter: chapter, lastReadIndex: lastRead)
                     }
+                    .disabled(!hasReader)
                 }
             }
         } header: {
@@ -262,6 +283,7 @@ struct BookDetailView: View {
             }
         }
         .accessibilityIdentifier("book.lastRead")
+        .disabled(!hasReader)
     }
 
     /// Which end of the book the catalog starts at, remembered for this book alone —

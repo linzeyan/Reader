@@ -9,7 +9,11 @@ struct SiteRule: Codable, Identifiable, Hashable {
     /// What this source publishes, which decides how a chapter is read: a novel
     /// chapter is text pulled out by `chapter`, a comic chapter is a list of
     /// image URLs pulled out by `images`.
-    enum Kind: String, Codable {
+    ///
+    /// `CaseIterable` because this is also what the shelf switches between — see
+    /// `MediaMode`. Declared here rather than in that extension because the compiler
+    /// only synthesises `allCases` alongside the enum itself.
+    enum Kind: String, Codable, CaseIterable {
         case novel
         case comic
     }

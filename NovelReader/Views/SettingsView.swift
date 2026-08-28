@@ -7,6 +7,7 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var cloud = env.cloud
         @Bindable var downloadSettings = env.downloadSettings
+        @Bindable var librarySettings = env.librarySettings
 
         NavigationStack {
             Form {
@@ -46,6 +47,28 @@ struct SettingsView: View {
                 Section {
                     NavigationLink("settings.storage") { StorageView() }
                         .accessibilityIdentifier("settings.storage")
+                }
+
+                // Both answers to "what do I see when I open this app", so one
+                // section: which screen, and — because the shelf is two shelves now —
+                // which of them.
+                Section {
+                    Picker("settings.home", selection: $librarySettings.home) {
+                        ForEach(HomeScreen.allCases) { screen in
+                            Text(screen.nameKey).tag(screen)
+                        }
+                    }
+                    .accessibilityIdentifier("settings.home")
+                    Picker("settings.defaultMode", selection: $librarySettings.defaultMediaMode) {
+                        ForEach(MediaMode.allCases) { mode in
+                            Label(mode.nameKey, systemImage: mode.icon).tag(mode)
+                        }
+                    }
+                    .accessibilityIdentifier("settings.defaultMode")
+                } header: {
+                    Text("settings.start")
+                } footer: {
+                    Text("settings.start.footer")
                 }
 
                 // Next to the appearance controls rather than up with the sources and
@@ -206,26 +229,17 @@ struct SiteListView: View {
                     Text("settings.sources.empty").foregroundStyle(.secondary)
                 }
             }
-            ForEach(env.sites.rules) { rule in
-                NavigationLink {
-                    SiteDetailView(siteId: rule.id)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(rule.name)
-                        Text(rule.host).font(.caption).foregroundStyle(.secondary)
-                        if rule.search == nil {
-                            Text("settings.sources.noSearch")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-                .accessibilityIdentifier("sources.row")
-                .swipeActions {
-                    Button(role: .destructive) {
-                        remove(rule)
-                    } label: {
-                        Label("common.delete", systemImage: "trash")
+            // Split by medium, and headed even when only one medium is installed:
+            // which shelf a source feeds is the thing a reader wants to check here,
+            // and a rule file does not say it anywhere the list would otherwise show.
+            // Empty sections are dropped rather than drawn as a header over nothing.
+            ForEach(MediaMode.allCases) { mode in
+                let installed = env.sites.rules(of: mode)
+                if !installed.isEmpty {
+                    Section {
+                        ForEach(installed) { row($0) }
+                    } header: {
+                        Label(mode.nameKey, systemImage: mode.icon)
                     }
                 }
             }
@@ -288,6 +302,30 @@ struct SiteListView: View {
                             .disabled(pasted.isEmpty)
                         }
                     }
+            }
+        }
+    }
+
+    private func row(_ rule: SiteRule) -> some View {
+        NavigationLink {
+            SiteDetailView(siteId: rule.id)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(rule.name)
+                Text(rule.host).font(.caption).foregroundStyle(.secondary)
+                if rule.search == nil {
+                    Text("settings.sources.noSearch")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .accessibilityIdentifier("sources.row")
+        .swipeActions {
+            Button(role: .destructive) {
+                remove(rule)
+            } label: {
+                Label("common.delete", systemImage: "trash")
             }
         }
     }
