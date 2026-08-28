@@ -115,6 +115,19 @@ final class SiteStore {
         guard rule.id != Book.localSiteId else {
             throw ImportError.malformed("the source id \"\(Book.localSiteId)\" is reserved")
         }
+        // A rule that cannot read a chapter is refused here rather than installed
+        // and discovered later. The reader has nowhere honest to go with it: the
+        // block is missing, so there is nothing to fall back to and nothing to
+        // tell the user beyond "this chapter is empty". Caught while they are
+        // looking at an import sheet, the same fact is actionable.
+        switch rule.kind {
+        case .novel where rule.chapter == nil:
+            throw ImportError.malformed("a novel source needs a \"chapter\" block")
+        case .comic where rule.images == nil:
+            throw ImportError.malformed("a comic source needs an \"images\" block")
+        default:
+            break
+        }
         let target = directory.appendingPathComponent(
             ChapterFileStore.safeComponent(rule.id)
         ).appendingPathExtension("json")

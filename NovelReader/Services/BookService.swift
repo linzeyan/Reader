@@ -57,36 +57,65 @@ final class BookService {
 
     // MARK: - Catalog
 
+    /// One row of the chapter index, as the catalog says it.
+    typealias CatalogEntry = (siteChapterId: String, title: String, url: String)
+
     /// Fetches the catalog and writes it over the book's chapter index.
-    ///
-    /// Links are filtered through `idPatterns.chapterId` rather than trusted
-    /// wholesale: a CSS selector broad enough to catch every chapter (several of
-    /// these catalogs have no container of their own) also catches navigation,
-    /// "latest chapters" teasers and cross-links to other books. The id pattern is
-    /// the only thing that actually says "this is a chapter of this book".
     @discardableResult
     func refreshCatalog(rule: SiteRule, book: Book) async throws -> [Chapter] {
         guard let url = rule.catalogURL(bookId: book.siteBookId) else { throw ServiceError.badURL }
         let script = try ExtractorScript.catalog(rule)
         let payload = try await fetcher.fetch(url, extracting: script, as: ExtractorScript.CatalogPayload.self)
 
-        var seen = Set<String>()
-        var entries: [(siteChapterId: String, title: String, url: String)] = []
-        for entry in payload.entries {
-            guard let entryURL = URL(string: entry.url),
-                  let chapterId = rule.chapterId(from: entryURL)
-            else { continue }
-            // A chapter URL that carries a *different* book id belongs to another
-            // book; one that carries none is accepted, since not every site puts
-            // the book id in its chapter path.
-            if let owner = rule.bookId(from: entryURL), owner != book.siteBookId { continue }
-            guard seen.insert(chapterId).inserted else { continue }
-            entries.append((chapterId, entry.title, entry.url))
-        }
+        let entries = Self.entries(from: payload, rule: rule, siteBookId: book.siteBookId)
         guard !entries.isEmpty else { throw ServiceError.emptyCatalog }
 
         try repo.replaceCatalog(bookId: book.id, entries: entries)
         return try repo.chapters(bookId: book.id)
+    }
+
+    /// Turns what the extractor found on a catalog page into chapter index rows.
+    ///
+    /// Links are filtered through `idPatterns.chapterId` rather than trusted
+    /// wholesale: a CSS selector broad enough to catch every chapter (several of
+    /// these catalogs have no container of their own) also catches navigation,
+    /// "latest chapters" teasers and cross-links to other books. The id pattern is
+    /// the only thing that actually says "this is a chapter of this book".
+    ///
+    /// Pure — `nonisolated` so the whole filter is testable without a network, the
+    /// same arrangement `dropping(_:from:)` uses.
+    nonisolated static func entries(
+        from payload: ExtractorScript.CatalogPayload, rule: SiteRule, siteBookId: String
+    ) -> [CatalogEntry] {
+        var seen = Set<String>()
+        var entries: [CatalogEntry] = []
+        for entry in payload.entries {
+            // `entry.url` is the link's href unless the rule named an attribute, in
+            // which case it is that attribute's raw contents — a JavaScript call on
+            // the one site that needs it. Matched as text either way, because that
+            // raw form is not a URL and `URL(string:)` would either refuse it or
+            // invent one.
+            guard let chapterId = rule.chapterId(inLinkText: entry.url) else { continue }
+            // A chapter link that carries a *different* book id belongs to another
+            // book; one that carries none is accepted, since not every site puts
+            // the book id in its chapter path.
+            if let owner = rule.bookId(inLinkText: entry.url), owner != siteBookId { continue }
+            // The site's own link wins where there is one — some of these templates
+            // do not round-trip through `{bookId}/{chapterId}`. Where the catalog
+            // links nowhere, the template is the only address there is.
+            let url: String
+            if rule.catalog.linkAttribute == nil {
+                guard URL(string: entry.url) != nil else { continue }
+                url = entry.url
+            } else {
+                guard let rebuilt = rule.chapterURL(bookId: siteBookId, chapterId: chapterId)
+                else { continue }
+                url = rebuilt.absoluteString
+            }
+            guard seen.insert(chapterId).inserted else { continue }
+            entries.append((chapterId, entry.title, url))
+        }
+        return entries
     }
 
     // MARK: - Chapter text
@@ -112,7 +141,7 @@ final class BookService {
         guard let url = URL(string: chapter.url) else { throw ServiceError.badURL }
         let script = try ExtractorScript.chapter(rule)
         let payload = try await fetcher.fetch(url, extracting: script, as: ExtractorScript.ChapterPayload.self)
-        let paragraphs = Self.dropping(rule.chapter.dropParagraphPatterns, from: payload.paragraphs)
+        let paragraphs = Self.dropping(rule.chapter?.dropParagraphPatterns, from: payload.paragraphs)
         guard !paragraphs.isEmpty else { throw ServiceError.emptyChapter }
         // The page names the chapter too, and names it in full where the catalog
         // truncated. Written here because this is the only moment both halves are in

@@ -12,6 +12,14 @@ enum ExtractorScript {
         /// Surfaced rather than silently returning nothing: an "all sites"
         /// search must be able to tell the user which sources it skipped.
         case searchUnsupported
+        /// A chapter was asked to be read the wrong way round for its source: text
+        /// from a rule with no `chapter`, or images from one with no `images`.
+        ///
+        /// Import refuses both shapes (`SiteStore.importRule`), so reaching this
+        /// means the caller routed a comic into the novel reader or the reverse —
+        /// a bug here, not a bad rule file, and one that should surface rather
+        /// than extract nothing and read as an empty chapter.
+        case wrongKind(SiteRule.Kind)
     }
 
     // MARK: - Extracted shapes (mirrored by the JS below)
@@ -42,6 +50,19 @@ enum ExtractorScript {
         let matchedSelector: String?
     }
 
+    struct ComicImagesPayload: Decodable {
+        /// Absolute, in page order. One entry per page of the chapter.
+        let imageURLs: [String]
+        /// Best effort, and only ever used to *lengthen* a catalog-truncated name
+        /// (`Chapter.fullerTitle`), whose prefix guard is what makes a wrong guess
+        /// harmless rather than a rename.
+        let title: String?
+        /// Which `images.strategies` entry fired, for the same reason
+        /// `matchedSelector` exists: a rule surviving on its fallback should be
+        /// visible and tightenable, not silently permanent.
+        let matchedStrategy: String?
+    }
+
     // MARK: - Builders
 
     static func book(_ rule: SiteRule) throws -> String {
@@ -66,7 +87,12 @@ enum ExtractorScript {
           var root = document.querySelector(c.container) || document;
           var links = Array.prototype.slice.call(root.querySelectorAll(c.linkSelector));
           var entries = links.map(function (a) {
-            return { title: clean(a.textContent), url: a.href };
+            // `url` carries whatever the chapter is identified by, which is the
+            // href unless the rule names an attribute — see `Catalog.linkAttribute`.
+            // Swift is what pattern-matches it and rebuilds the address; here it is
+            // only ever read and passed on.
+            var link = c.linkAttribute ? a.getAttribute(c.linkAttribute) : a.href;
+            return { title: clean(a.textContent), url: link ? String(link).trim() : '' };
           }).filter(function (e) { return e.title && e.url; });
           // Dedupe by URL: catalogs often repeat the newest chapters in a header.
           var seen = {}, unique = [];
@@ -81,7 +107,10 @@ enum ExtractorScript {
         """
     }
 
-    static func chapter(_ rule: SiteRule) throws -> String { try chapter(rule.chapter) }
+    static func chapter(_ rule: SiteRule) throws -> String {
+        guard let config = rule.chapter else { throw BuildError.wrongKind(rule.kind) }
+        return try chapter(config)
+    }
 
     /// The chapter extractor built from the config alone, for content that has
     /// no site behind it: an imported EPUB document is read by exactly this
@@ -157,6 +186,118 @@ enum ExtractorScript {
             nextURL: next ? next.href : null,
             matchedSelector: matched
           };
+        })()
+        """
+    }
+
+    /// Reads one comic chapter's page images.
+    ///
+    /// Parallel to `chapter` rather than folded into it: a comic chapter's pages
+    /// are named by the site's own scripts, or by an attribute of the site's
+    /// choosing, and none of that is expressible as "find the text node".
+    ///
+    /// The whole list has to come back from this single evaluation. The fetcher
+    /// parks on `about:blank` the moment extraction returns
+    /// (`WebFetcher.parkAfterExtraction`), so the page's globals are gone
+    /// afterwards and there is no fetching the rest of the pages later.
+    static func comicImages(_ rule: SiteRule) throws -> String {
+        guard let images = rule.images else { throw BuildError.wrongKind(rule.kind) }
+        let cfg = try json(images)
+        return """
+        (function () {
+          \(helpers)
+          var c = \(cfg);
+          function absolute(u) {
+            var s = (u === null || u === undefined) ? '' : String(u).trim();
+            if (!s) return null;
+            try { return new URL(s, location.href).href; } catch (e) { return null; }
+          }
+          // Entity decoding through a detached <textarea>: its content model is raw
+          // text, so assigning innerHTML resolves character references and can
+          // never turn the value into markup, let alone a running script.
+          function decodeEntities(s) {
+            var box = document.createElement('textarea');
+            box.innerHTML = s;
+            return box.value;
+          }
+          // Property access, one dot-separated segment at a time. A rule file
+          // travels between users and is read inside the web view holding every
+          // cookie they own, so the path it names is walked — never evaluated.
+          function walk(path) {
+            if (!path) return undefined;
+            var node = window, parts = String(path).split('.');
+            for (var i = 0; i < parts.length; i++) {
+              if (node === null || node === undefined) return undefined;
+              node = node[parts[i]];
+            }
+            return node;
+          }
+          // A site states its CDN query either already built ('e=1&m=2') or as the
+          // object it was built from. Both are accepted because both are what
+          // these pages actually hold.
+          function queryString(v) {
+            if (v === null || v === undefined) return '';
+            if (typeof v === 'string') {
+              var s = v.trim();
+              if (!s) return '';
+              return s.charAt(0) === '?' ? s : '?' + s;
+            }
+            if (typeof v !== 'object') return '';
+            var parts = [];
+            for (var k in v) {
+              if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+              parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v[k]));
+            }
+            return parts.length ? '?' + parts.join('&') : '';
+          }
+          function fromGlobal(s) {
+            var list = walk(s.arrayPath);
+            if (!list || typeof list.length !== 'number') return [];
+            var prefix = s.prefixPath ? walk(s.prefixPath) : '';
+            if (typeof prefix !== 'string') prefix = '';
+            var base = (s.baseURL || '') + prefix;
+            var query = queryString(s.queryPath ? walk(s.queryPath) : null);
+            var out = [];
+            for (var i = 0; i < list.length; i++) {
+              var entry = list[i];
+              if (typeof entry !== 'string' || !entry) continue;
+              var u = absolute(base + entry + query);
+              if (u) out.push(u);
+            }
+            return out;
+          }
+          function fromDom(s) {
+            if (!s.selector) return [];
+            var nodes = Array.prototype.slice.call(document.querySelectorAll(s.selector));
+            var attrs = (s.attributes && s.attributes.length) ? s.attributes : ['src'];
+            var out = [];
+            for (var i = 0; i < nodes.length; i++) {
+              var raw = null;
+              for (var j = 0; j < attrs.length && !raw; j++) {
+                var v = nodes[i].getAttribute(attrs[j]);
+                if (v && v.trim()) raw = v.trim();
+              }
+              if (!raw) continue;
+              if (s.unescape) raw = decodeEntities(raw);
+              var u = absolute(raw);
+              if (u) out.push(u);
+            }
+            return out;
+          }
+          // Duplicates are kept: the page count is the chapter, and a site that
+          // genuinely repeats an image has repeated a page.
+          var urls = [], matched = null;
+          for (var i = 0; i < c.strategies.length && !urls.length; i++) {
+            var s = c.strategies[i];
+            var found = s.type === 'global' ? fromGlobal(s) : (s.type === 'dom' ? fromDom(s) : []);
+            if (found.length) {
+              urls = found;
+              matched = s.type + ':' + (s.arrayPath || s.selector || '');
+            }
+          }
+          var heading = document.querySelector('h1');
+          var title = clean(heading ? heading.textContent : document.title);
+          return { imageURLs: urls, title: title || null, matchedStrategy: matched };
         })()
         """
     }

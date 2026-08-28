@@ -148,7 +148,7 @@ final class RuleDeriver {
         // Confirmation: run the rule that will be saved against a real chapter.
         // Anything short of this only proves the probes agreed with themselves.
         var paragraphs = try await extractChapter(with: rule, at: firstChapterURL)
-        if Self.joined(paragraphs).count < 100, !rule.chapter.contentSelectors.isEmpty {
+        if Self.joined(paragraphs).count < 100, rule.chapter?.contentSelectors.first != nil {
             // The named selector matched an empty or near-empty node. The
             // heuristic is the better bet at that point — it is what found the
             // text during the probe.
@@ -158,7 +158,7 @@ final class RuleDeriver {
         guard Self.joined(paragraphs).count >= 100 else { throw DeriveError.emptyChapter }
 
         var warnings: [String] = []
-        if rule.chapter.contentSelectors.isEmpty {
+        if rule.chapter?.contentSelectors.first == nil {
             warnings.append(String(localized: "derive.warning.heuristicContent"))
         }
         warnings.append(String(localized: "derive.warning.noSearch"))
@@ -267,16 +267,19 @@ final class RuleDeriver {
     }
 
     private static func replacingContentSelectors(in rule: SiteRule, with selectors: [String]) -> SiteRule {
-        SiteRule(
+        // Derivation only ever assembles novel rules, so the block is always there;
+        // a rule without one has no content selectors to replace either way.
+        guard let chapter = rule.chapter else { return rule }
+        return SiteRule(
             id: rule.id, name: rule.name, host: rule.host, urls: rule.urls,
             idPatterns: rule.idPatterns, search: rule.search, book: rule.book, catalog: rule.catalog,
             chapter: SiteRule.Chapter(
-                titleSelectors: rule.chapter.titleSelectors,
+                titleSelectors: chapter.titleSelectors,
                 contentSelectors: selectors,
-                stripSelectors: rule.chapter.stripSelectors,
-                dropParagraphPatterns: rule.chapter.dropParagraphPatterns,
-                prevSelector: rule.chapter.prevSelector,
-                nextSelector: rule.chapter.nextSelector
+                stripSelectors: chapter.stripSelectors,
+                dropParagraphPatterns: chapter.dropParagraphPatterns,
+                prevSelector: chapter.prevSelector,
+                nextSelector: chapter.nextSelector
             ),
             notes: rule.notes
         )
