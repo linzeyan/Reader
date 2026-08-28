@@ -78,6 +78,14 @@ final class WebFetcher: NSObject {
     /// text has been extracted must not resume — or fail — a fetch that started
     /// afterwards.
     private var navigatingView: WKWebView?
+    /// Whether the navigation being waited on has actually taken over the web view.
+    ///
+    /// Load it and look, and for the first moments you are looking at the *previous*
+    /// page — which on this web view is whatever the last fetch left behind, and is
+    /// perfectly capable of being complete, full of text, and entirely the wrong
+    /// document. Nothing that reads the page while a navigation is in flight may do
+    /// so before this is true.
+    private var navigationHasCommitted = false
     /// Serialises fetches: each waits for the previous one to finish.
     private var queueTail: Task<Void, Never> = Task {}
     /// The isolated web view imported files are loaded into. See `extract`.
@@ -124,7 +132,7 @@ final class WebFetcher: NSObject {
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
-            try await self.navigate(timeout: timeout, in: self.webView) {
+            try await self.navigate(timeout: timeout, in: self.webView, settlingWhenReadable: true) {
                 self.webView.load(URLRequest(url: url))
             }
             try await self.failIfChallenged()
@@ -151,12 +159,12 @@ final class WebFetcher: NSObject {
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
-            try await self.navigate(timeout: timeout, in: self.webView) {
+            try await self.navigate(timeout: timeout, in: self.webView, settlingWhenReadable: true) {
                 self.webView.load(URLRequest(url: url))
             }
             try await self.failIfChallenged()
             try await self.failIfTurnedAway(by: signIn, timeout: timeout)
-            try await self.navigate(timeout: timeout, in: self.webView) {
+            try await self.navigate(timeout: timeout, in: self.webView, settlingWhenReadable: true) {
                 self.webView.evaluateJavaScript(submitScript, completionHandler: nil)
             }
             try await self.failIfChallenged()
@@ -395,17 +403,33 @@ final class WebFetcher: NSObject {
     /// report the resulting navigation. `trigger` must be what causes it — the
     /// continuation is armed first so a fast navigation cannot be missed.
     ///
+    /// `settlingWhenReadable` adds a second way out: once the document has parsed
+    /// and has text in it, stop waiting for the load to finish. Off by default and
+    /// on only for the navigation a fetch is actually about, because two callers
+    /// here are waiting for something else entirely — parking on `about:blank`,
+    /// and watching for the redirect a sign-in gate started — and for those,
+    /// "the page you already have is readable" is not the answer to the question.
+    ///
     /// Not private so a test can drive it with a trigger that navigates nowhere:
     /// "this call always finishes" is the invariant the whole fetch queue rests
     /// on, and it is not reachable through the public surface without a network.
-    func navigate(timeout: Duration, in view: WKWebView, trigger: @escaping () -> Void) async throws {
+    func navigate(
+        timeout: Duration,
+        in view: WKWebView,
+        settlingWhenReadable: Bool = false,
+        trigger: @escaping () -> Void
+    ) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { @MainActor in
                 try await withCheckedThrowingContinuation { continuation in
                     self.navigationContinuation = continuation
                     self.navigatingView = view
+                    self.navigationHasCommitted = false
                     trigger()
                 }
+            }
+            if settlingWhenReadable {
+                group.addTask { @MainActor in try await self.settleWhenReadable(in: view) }
             }
             group.addTask {
                 try await Task.sleep(for: timeout)
@@ -428,6 +452,84 @@ final class WebFetcher: NSObject {
         navigationContinuation?.resume(throwing: FetchError.timedOut)
         navigationContinuation = nil
         navigatingView = nil
+    }
+
+    /// Resumes the waiter as though WebKit had reported the navigation finished.
+    private func settleAsFinished() {
+        navigationContinuation?.resume()
+        navigationContinuation = nil
+        navigatingView = nil
+    }
+
+    /// Stops waiting for a load that has already given us everything, and is not
+    /// going to end.
+    ///
+    /// "Finished" means every subresource has settled, and on an ad-heavy page that
+    /// can be much later than the document being complete — or never. Measured
+    /// against the four comic sources: 8comic's chapter page is readable at 1.5s
+    /// and finishes at 2.5s, mycomic's at 0.5s and 1.0s, while manhuagui's is fully
+    /// readable at 1.5s — title, scripts and all — and was still loading thirty
+    /// seconds later, every time. The fetch timeout was the only thing ending it,
+    /// and it ended it with nothing.
+    ///
+    /// So the load event stays the normal signal, and this is the escape: readable
+    /// and still loading, for long enough that finishing was clearly not imminent.
+    /// The grace is what keeps this from changing anything that works today — every
+    /// site measured finishes within about a second of becoming readable, so none
+    /// of them ever reaches it.
+    ///
+    /// Readable deliberately requires text in the body, not just a parsed document.
+    /// A page whose `<head>` script redirected has `readyState` complete and an
+    /// empty body, and settling on that husk would hand the extractor a document
+    /// that is on its way out — the exact failure `failIfTurnedAway` exists to
+    /// catch, arrived at from the other direction.
+    private func settleWhenReadable(in view: WKWebView) async throws {
+        var readableSince: ContinuousClock.Instant?
+        while true {
+            try await Task.sleep(for: Self.readabilityPollInterval)
+            // Until the navigation commits, the document being inspected is the one
+            // the *last* fetch left behind.
+            guard navigationHasCommitted, await documentIsReadable(in: view) else {
+                readableSince = nil
+                continue
+            }
+            guard let since = readableSince else {
+                readableSince = .now
+                continue
+            }
+            guard ContinuousClock.now - since >= Self.graceAfterReadable else { continue }
+            settleAsFinished()
+            return
+        }
+    }
+
+    private static let readabilityPollInterval: Duration = .milliseconds(400)
+    /// Comfortably longer than the gap between readable and finished on every site
+    /// that has been measured, so only a page that is not going to finish waits it
+    /// out.
+    private static let graceAfterReadable: Duration = .seconds(5)
+
+    /// A challenge page is text, and a parsed document, and emphatically not the
+    /// page we asked for.
+    ///
+    /// It is also the one page whose whole purpose is served by waiting: the
+    /// non-interactive check clears itself by running JS and navigating on, and
+    /// the load event is what that arrives as. Settling early on it would trade a
+    /// site that works after a short pause for one that asks the reader to prove
+    /// they are human every time.
+    private func documentIsReadable(in view: WKWebView) async -> Bool {
+        struct Probe: Decodable { let readable: Bool }
+        let script = """
+        (function () {
+          return {
+            readable: document.readyState !== 'loading'
+              && !!document.body
+              && (document.body.textContent || '').trim().length > 0
+              && !(\(Self.challengeMarkers))
+          };
+        })()
+        """
+        return (try? await evaluate(script, as: Probe.self, in: view))?.readable ?? false
     }
 
     private func evaluate<T: Decodable>(
@@ -453,13 +555,23 @@ final class WebFetcher: NSObject {
     ///
     /// Detection is deliberately shallow — we only need to know *that* we were
     /// challenged so we can hand control to the user.
+    /// What a Cloudflare challenge looks like, as a JavaScript expression.
+    ///
+    /// One definition, because two callers need the same answer for opposite
+    /// reasons — one to stop the fetch, one to keep waiting — and a copy that
+    /// drifted would leave the second silently settling on the page the first is
+    /// still looking for.
+    private static let challengeMarkers = """
+    !!window._cf_chl_opt \
+    || !!document.querySelector('script[src*="challenges.cloudflare.com"]') \
+    || !!document.querySelector('#challenge-form, #cf-challenge-running')
+    """
+
     private func detectChallenge() async throws -> URL? {
         let probe = """
         (function () {
           return {
-            challenged: !!window._cf_chl_opt
-              || !!document.querySelector('script[src*="challenges.cloudflare.com"]')
-              || !!document.querySelector('#challenge-form, #cf-challenge-running'),
+            challenged: \(Self.challengeMarkers),
             url: location.href
           };
         })()
@@ -495,11 +607,16 @@ extension WebFetcher: WKNavigationDelegate {
         decisionHandler(isLocal ? .allow : .cancel)
     }
 
+    /// The moment the new document takes over the web view. Before it, anything
+    /// read from the page belongs to the page before.
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard webView === navigatingView else { return }
+        navigationHasCommitted = true
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard webView === navigatingView else { return }
-        navigationContinuation?.resume()
-        navigationContinuation = nil
-        navigatingView = nil
+        settleAsFinished()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
