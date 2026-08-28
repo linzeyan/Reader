@@ -101,7 +101,17 @@ enum ExtractorScript {
             seen[entries[i].url] = true;
             unique.push(entries[i]);
           }
-          if (c.order === 'descending') unique.reverse();
+          // The rule's `order` is the site's habit; `descendingWhen` is the site
+          // saying what it did with *this* book. Where the page defines the flag it
+          // wins, and where it does not the habit still holds.
+          var descending = c.order === 'descending';
+          if (c.descendingWhen) {
+            var flag = walkPath(window, c.descendingWhen.path);
+            if (flag !== null && flag !== undefined) {
+              descending = String(flag) === String(c.descendingWhen.equals);
+            }
+          }
+          if (descending) unique.reverse();
           return { entries: unique };
         })()
         """
@@ -212,29 +222,20 @@ enum ExtractorScript {
             if (!s) return null;
             try { return new URL(s, location.href).href; } catch (e) { return null; }
           }
-          // Entity decoding through a detached <textarea>: its content model is raw
-          // text, so assigning innerHTML resolves character references and can
-          // never turn the value into markup, let alone a running script.
-          function decodeEntities(s) {
-            var box = document.createElement('textarea');
-            box.innerHTML = s;
-            return box.value;
-          }
-          // Property access, one dot-separated segment at a time. A rule file
-          // travels between users and is read inside the web view holding every
-          // cookie they own, so the path it names is walked — never evaluated.
-          function walk(path) {
-            if (!path) return undefined;
-            var node = window, parts = String(path).split('.');
-            for (var i = 0; i < parts.length; i++) {
-              if (node === null || node === undefined) return undefined;
-              node = node[parts[i]];
-            }
-            return node;
+          // `unescape` is percent decoding, not HTML entity decoding: the site that
+          // needs it stores each address as JavaScript `escape()` output
+          // ("%2f%2fimg9%2e38comic.com%2f…") and calls `unescape()` on it before
+          // use. A malformed sequence throws — the raw value is a better answer to
+          // that than nothing, and it is what a `%uXXXX` escape (the one thing
+          // `escape` emits that this cannot read) would fall through to.
+          function decodePercent(s) {
+            try { return decodeURIComponent(s); } catch (e) { return s; }
           }
           // A site states its CDN query either already built ('e=1&m=2') or as the
-          // object it was built from. Both are accepted because both are what
-          // these pages actually hold.
+          // object it was built from. Both are accepted because both are what these
+          // pages hold — and the object is joined raw, exactly as the site joins it.
+          // This query is a signature the CDN checks: encoding it "properly" changes
+          // the bytes and the signature stops matching.
           function queryString(v) {
             if (v === null || v === undefined) return '';
             if (typeof v === 'string') {
@@ -246,17 +247,17 @@ enum ExtractorScript {
             var parts = [];
             for (var k in v) {
               if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
-              parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v[k]));
+              parts.push(k + '=' + v[k]);
             }
             return parts.length ? '?' + parts.join('&') : '';
           }
           function fromGlobal(s) {
-            var list = walk(s.arrayPath);
+            var list = walkPath(window, s.arrayPath);
             if (!list || typeof list.length !== 'number') return [];
-            var prefix = s.prefixPath ? walk(s.prefixPath) : '';
+            var prefix = s.prefixPath ? walkPath(window, s.prefixPath) : '';
             if (typeof prefix !== 'string') prefix = '';
             var base = (s.baseURL || '') + prefix;
-            var query = queryString(s.queryPath ? walk(s.queryPath) : null);
+            var query = queryString(s.queryPath ? walkPath(window, s.queryPath) : null);
             var out = [];
             for (var i = 0; i < list.length; i++) {
               var entry = list[i];
@@ -278,7 +279,7 @@ enum ExtractorScript {
                 if (v && v.trim()) raw = v.trim();
               }
               if (!raw) continue;
-              if (s.unescape) raw = decodeEntities(raw);
+              if (s.unescape) raw = decodePercent(raw);
               var u = absolute(raw);
               if (u) out.push(u);
             }
@@ -435,6 +436,19 @@ enum ExtractorScript {
         function clean(s) {
           return (s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
         }
+        // Walks a dot path by property access, one segment at a time, starting from
+        // `node`. A rule file travels between users and is read inside the web view
+        // holding every cookie they own, so a path a rule names is walked — never
+        // evaluated.
+        function walkPath(node, path) {
+          if (!path) return undefined;
+          var parts = String(path).split('.');
+          for (var i = 0; i < parts.length; i++) {
+            if (node === null || node === undefined) return undefined;
+            node = node[parts[i]];
+          }
+          return node;
+        }
         // Last resort when a rule's contentSelectors all miss. Several of these
         // sites are table-layout era markup where the chapter body has no id or
         // class at all, and the only stable selector would be positional
@@ -465,6 +479,13 @@ enum ExtractorScript {
           }
           return best;
         }
+        // Attributes HTML itself defines as URLs. Their values are resolved against
+        // the document, because a cover published as "/pics/0/103.jpg" or
+        // "//cdn.example.com/1.jpg" is not an address anything outside the page can
+        // use — and two of the comic sites publish theirs exactly that way, where
+        // the shelf would simply draw nothing. An already-absolute value is
+        // unchanged, so the sites that were always fine stay fine.
+        var URL_ATTRIBUTES = { src: 1, href: 1, poster: 1, 'data-src': 1, 'data-original': 1 };
         function readField(f) {
           if (!f) return null;
           if (f.meta) {
@@ -473,7 +494,11 @@ enum ExtractorScript {
           }
           if (f.selector) {
             var el = document.querySelector(f.selector);
-            if (el) return clean(f.attribute ? el.getAttribute(f.attribute) : el.textContent);
+            if (!el) return null;
+            if (!f.attribute) return clean(el.textContent);
+            var raw = clean(el.getAttribute(f.attribute));
+            if (!raw || !URL_ATTRIBUTES[f.attribute]) return raw;
+            try { return new URL(raw, location.href).href; } catch (e) { return raw; }
           }
           return null;
         }

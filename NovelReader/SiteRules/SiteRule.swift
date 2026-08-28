@@ -139,12 +139,36 @@ struct SiteRule: Codable, Identifiable, Hashable {
         /// The attribute's contents are matched by `idPatterns.chapterId` as a
         /// plain string, never parsed as a URL and never executed.
         let linkAttribute: String?
+        /// The site's own sort control, for a site that remembers it per book.
+        ///
+        /// `order` is a claim about the site, and on one of the comic sites there is
+        /// no such claim to make: it ships a reverse button and stores the choice
+        /// against the book, so a fixed answer reads four books in eleven backwards.
+        /// When this resolves it decides; when the page does not define it at all,
+        /// `order` still does.
+        let descendingWhen: Condition?
 
-        init(container: String, linkSelector: String, order: Order, linkAttribute: String? = nil) {
+        /// A value on the page compared against an expected one.
+        struct Condition: Codable, Hashable {
+            /// Dot path from `window`, walked exactly as an image strategy's paths are.
+            let path: String
+            /// Compared as text: a site writes this kind of flag as a bare number in
+            /// one place and a quoted one in another, and the difference means nothing.
+            let equals: String
+        }
+
+        init(
+            container: String,
+            linkSelector: String,
+            order: Order,
+            linkAttribute: String? = nil,
+            descendingWhen: Condition? = nil
+        ) {
             self.container = container
             self.linkSelector = linkSelector
             self.order = order
             self.linkAttribute = linkAttribute
+            self.descendingWhen = descendingWhen
         }
     }
 
