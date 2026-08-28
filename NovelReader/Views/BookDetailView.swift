@@ -134,16 +134,6 @@ struct BookDetailView: View {
         .task { await loadChapters() }
     }
 
-    /// Whether this book has a reader to open.
-    ///
-    /// Comics do not, yet: phase 1 of comic support is the shelf, the sources, the
-    /// catalog and the downloads, and the reader is phase 2 (docs/COMICS.md). Disabled
-    /// rather than hidden, unlike the marks row, because it *is* coming — a row that
-    /// disappears and comes back between two builds is harder to make sense of than one
-    /// that is plainly not ready. Only reachable at all in a Debug build with a comic
-    /// rule installed, which is where this half-built state is meant to live.
-    private var hasReader: Bool { current.kind == .novel }
-
     // MARK: - Sections
 
     private var header: some View {
@@ -177,7 +167,7 @@ struct BookDetailView: View {
             )
         }
         .accessibilityIdentifier("book.read")
-        .disabled(chapters.isEmpty || !hasReader)
+        .disabled(chapters.isEmpty)
 
         // Always present, and with no count on it. A row that appears only once the
         // feature has been used is a feature nobody finds, and a count cached here
@@ -238,7 +228,6 @@ struct BookDetailView: View {
                     ) {
                         ChapterRow(chapter: chapter, lastReadIndex: lastRead)
                     }
-                    .disabled(!hasReader)
                 }
             }
         } header: {
@@ -283,7 +272,6 @@ struct BookDetailView: View {
             }
         }
         .accessibilityIdentifier("book.lastRead")
-        .disabled(!hasReader)
     }
 
     /// Which end of the book the catalog starts at, remembered for this book alone —

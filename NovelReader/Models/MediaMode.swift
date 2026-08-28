@@ -92,8 +92,11 @@ struct MediaModePicker: View {
                 // The trait, not a suffix on the label: VoiceOver has its own word for
                 // "this one is on", and it is the word its users are listening for.
                 .accessibilityAddTraits(isOn ? [.isSelected] : [])
+                // Per side rather than one identifier on the pair: a walk that wants the
+                // comic shelf has to be able to say so, and "the second button" is not a
+                // thing a test should have to know.
+                .accessibilityIdentifier("library.mode.\(mode.rawValue)")
             }
         }
-        .accessibilityIdentifier("library.mode")
     }
 }

@@ -51,8 +51,14 @@ struct LibraryView: View {
             // so a second one on the book screen would be dead weight — which is
             // exactly what it was, announced at every launch by the runtime.
             .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
+            // The one place a book turns into a reader, which is why the history's
+            // handoff works across media without knowing anything about either: it lays
+            // down a route and this decides what the end of it is.
             .navigationDestination(for: ReadingTarget.self) { target in
-                ReaderView(book: target.book, position: target.position)
+                switch target.book.kind {
+                case .novel: ReaderView(book: target.book, position: target.position)
+                case .comic: ComicReaderView(book: target.book, position: target.position)
+                }
             }
             .onAppear { consumeHandoff() }
             .onChange(of: env.readingHandoff) { _, _ in consumeHandoff() }

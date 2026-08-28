@@ -949,6 +949,78 @@
         }
       }
     },
+    "comic.page %lld" : {
+      "comment" : "Accessibility label for one page of a comic.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 頁"
+          }
+        }
+      }
+    },
+    "comic.page.failed %lld" : {
+      "comment" : "Stands in for a comic page whose image could not be fetched.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page %lld failed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 页载入失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 頁載入失敗"
+          }
+        }
+      }
+    },
+    "comic.pageOf %lld %lld" : {
+      "comment" : "Which page of the chapter the reader is on.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld / %2$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld / %2$lld 页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld / %2$lld 頁"
+          }
+        }
+      }
+    },
     "common.back" : {
       "comment" : "Reader control accessibility label.",
       "extractionState" : "manual",
@@ -3460,6 +3532,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已經是最後一章"
+          }
+        }
+      }
+    },
+    "reader.error.badURL" : {
+      "comment" : "Shown when a chapter's stored address cannot be parsed.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This chapter's address could not be read."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这一章的网址无法解析。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這一章的網址無法解析。"
           }
         }
       }
