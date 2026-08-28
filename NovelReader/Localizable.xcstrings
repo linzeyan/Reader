@@ -853,6 +853,54 @@
         }
       }
     },
+    "comic.image.error.http %lld %lld" : {
+      "comment" : "A comic page's image could not be downloaded; the whole chapter fails.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page %1$lld could not be downloaded (HTTP %2$lld)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld 页下载失败（HTTP %2$lld）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld 頁下載失敗（HTTP %2$lld）。"
+          }
+        }
+      }
+    },
+    "comic.image.error.notImage %lld" : {
+      "comment" : "The site answered a comic page's image request with something that is not an image.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page %lld came back as something that is not an image."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 页返回的不是图片。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 頁回傳的不是圖片。"
+          }
+        }
+      }
+    },
     "common.back" : {
       "comment" : "Reader control accessibility label.",
       "extractionState" : "manual",
