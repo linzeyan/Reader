@@ -2272,6 +2272,30 @@
         }
       }
     },
+    "library.add.failed %lld" : {
+      "comment" : "Says how many pasted addresses were not added, after a batch ends.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld not added"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个网址没有加入"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 個網址沒有加入"
+          }
+        }
+      }
+    },
     "library.add.hint" : {
       "comment" : "Explains what kind of URL is accepted.",
       "extractionState" : "manual",
@@ -2279,19 +2303,43 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Paste a book or catalog page URL. It is matched against your installed sources."
+            "value" : "One URL per line. Novels and comics can be mixed — each is matched against your installed sources."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "粘贴书籍页或目录页的网址，App 会自动匹配已安装的来源。"
+            "value" : "一行一个网址，小说与漫画可以混贴；App 会逐一比对已安装的来源。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "貼上書籍頁或目錄頁的網址，App 會自動比對已安裝的來源。"
+            "value" : "一行一個網址，小說與漫畫可以混貼；App 會逐一比對已安裝的來源。"
+          }
+        }
+      }
+    },
+    "library.add.progress %lld %lld" : {
+      "comment" : "How far a batch of pasted addresses has got.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld of %lld done"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成 %lld / %lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成 %lld / %lld"
           }
         }
       }
@@ -2320,6 +2368,30 @@
         }
       }
     },
+    "library.add.stop" : {
+      "comment" : "Stops a batch of pasted addresses part way through.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止"
+          }
+        }
+      }
+    },
     "library.add.url" : {
       "comment" : "Text field placeholder.",
       "extractionState" : "manual",
@@ -2327,19 +2399,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Paste a book URL"
+            "value" : "Paste book URLs, one per line"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "粘贴书籍网址"
+            "value" : "贴上书籍网址，一行一个"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "貼上書籍網址"
+            "value" : "貼上書籍網址，一行一個"
           }
         }
       }
