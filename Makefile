@@ -136,7 +136,8 @@ test-live: generate ## Run the opt-in live site checks (needs a network; slow)
 		-configuration $(CONFIGURATION) \
 		-derivedDataPath $(DERIVED) \
 		-destination 'platform=iOS Simulator,name=$(SIMULATOR)' \
-		-only-testing:NovelReaderTests/LiveSiteTests
+		-only-testing:NovelReaderTests/LiveSiteTests \
+		-only-testing:NovelReaderTests/LiveComicSiteTests
 
 run: build ## Build, then install & launch on BOTH the iPhone and iPad simulators
 	@# Target devices by name (not "booted") so both can run side by side.

@@ -153,6 +153,37 @@ final class BookService {
         return paragraphs
     }
 
+    // MARK: - Chapter images
+
+    /// Reads one comic chapter's page images, in reading order.
+    ///
+    /// Only the addresses. The bytes are `ImageFetcher`'s job, over `URLSession`,
+    /// because holding the app's single web view for 15–50 images would stop
+    /// everything else the reader could be doing.
+    ///
+    /// The list is worth exactly this read and must not be stored: on these CDNs the
+    /// address carries an expiry and a signature, so a list written down today is a
+    /// column of 403s tomorrow. That is also why it all has to come back from one
+    /// extraction — the fetcher parks the page on `about:blank` the moment this
+    /// returns, and the globals it was read from go with it.
+    func chapterImageURLs(rule: SiteRule, chapter: Chapter) async throws -> [URL] {
+        guard let url = URL(string: chapter.url) else { throw ServiceError.badURL }
+        let script = try ExtractorScript.comicImages(rule)
+        let payload = try await fetcher.fetch(
+            url, extracting: script, as: ExtractorScript.ComicImagesPayload.self
+        )
+        let urls = payload.imageURLs.compactMap { URL(string: $0) }
+        guard !urls.isEmpty else { throw ServiceError.emptyChapter }
+        // Same repair as the text path, and for the same reason: the catalog is
+        // where a chapter is named, and some of these catalogs truncate their own
+        // link text. Swallowed on failure — a tidier name is never worth failing
+        // to open a chapter for.
+        if let fuller = Chapter.fullerTitle(payload.title, extending: chapter.title) {
+            try? repo.updateChapterTitle(chapterId: chapter.id, to: fuller)
+        }
+        return urls
+    }
+
     /// Applies a rule's `dropParagraphPatterns`.
     ///
     /// Filtered in Swift rather than inside the extractor so the patterns use the

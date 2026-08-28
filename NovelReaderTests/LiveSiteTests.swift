@@ -12,6 +12,10 @@ import XCTest
 /// only way to turn those into "CONFIRMED" is to drive the real pipeline. The
 /// test discovers a book from each site's own homepage rather than hardcoding
 /// ids, so it also proves `idPatterns` can recover ids from real links.
+///
+/// Novel sources only. A comic chapter has no text to extract and derivation is
+/// novel-only by design, so a comic rule reaching either would fail for saying so
+/// — see `LiveComicSiteTests`, which drives the other half of the same pipeline.
 @MainActor
 final class LiveSiteTests: XCTestCase {
     /// One site's journey through the whole pipeline.
@@ -353,6 +357,59 @@ final class LiveSiteTests: XCTestCase {
     /// rule can read a book id from — while rejecting chapter links, which on
     /// several of these sites also match the book pattern.
     private func discoverBookId(rule: SiteRule, fetcher: WebFetcher) async throws -> String? {
+        try await LiveSiteRules.discoverBookId(rule: rule, fetcher: fetcher)
+    }
+
+    // MARK: - Fixtures
+
+    /// The seeded rules this suite can drive.
+    private func loadSeededRules() throws -> [SiteRule] {
+        try LiveSiteRules.seeded().filter { $0.kind == .novel }
+    }
+}
+
+/// Puts the fetcher's web view in a real window.
+///
+/// Not optional: WKWebView never completes layout-dependent work — including the
+/// JS that clears a non-interactive Cloudflare challenge — while it has no
+/// window, so a windowless fetch against these hosts times out every time.
+@MainActor
+final class HeadlessHost {
+    private let window: UIWindow
+
+    init(webView: UIView) {
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.isHidden = false
+        window.addSubview(webView)
+    }
+
+    func tearDown() {
+        window.subviews.forEach { $0.removeFromSuperview() }
+        window.isHidden = true
+    }
+}
+
+extension String {
+    func padded(to width: Int) -> String {
+        count >= width ? self : self + String(repeating: " ", count: width - count)
+    }
+}
+
+/// The rules the Debug build phase copied into the app bundle.
+///
+/// The test bundle is hosted by the app, so `Bundle.main` is the app. Shared with
+/// the comic live checks: both suites read the same seeded folder and each takes
+/// the kinds it can drive.
+enum LiveSiteRules {
+    /// Reads every link on a site's front page and returns the first the rule can
+    /// read a book id from — while rejecting chapter links, which on several of
+    /// these sites also match the book pattern.
+    ///
+    /// Discovering the book rather than hardcoding one is what makes these suites
+    /// also a test of `idPatterns`: the ids come out of links the site published
+    /// today, not out of a fixture written when the rule was.
+    @MainActor
+    static func discoverBookId(rule: SiteRule, fetcher: WebFetcher) async throws -> String? {
         struct Links: Decodable { let hrefs: [String] }
         guard let home = URL(string: "https://\(rule.host)/") else { return nil }
         let script = """
@@ -372,11 +429,7 @@ final class LiveSiteTests: XCTestCase {
         return nil
     }
 
-    // MARK: - Fixtures
-
-    /// The rules the Debug build phase copied into the app bundle. The test
-    /// bundle is hosted by the app, so `Bundle.main` is the app.
-    private func loadSeededRules() throws -> [SiteRule] {
+    static func seeded() throws -> [SiteRule] {
         guard let folder = Bundle.main.url(forResource: "DevSiteRules", withExtension: nil) else {
             return []
         }
@@ -386,32 +439,5 @@ final class LiveSiteTests: XCTestCase {
             .filter { $0.pathExtension == "json" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .map { try decoder.decode(SiteRule.self, from: try Data(contentsOf: $0)) }
-    }
-}
-
-/// Puts the fetcher's web view in a real window.
-///
-/// Not optional: WKWebView never completes layout-dependent work — including the
-/// JS that clears a non-interactive Cloudflare challenge — while it has no
-/// window, so a windowless fetch against these hosts times out every time.
-@MainActor
-private final class HeadlessHost {
-    private let window: UIWindow
-
-    init(webView: UIView) {
-        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        window.isHidden = false
-        window.addSubview(webView)
-    }
-
-    func tearDown() {
-        window.subviews.forEach { $0.removeFromSuperview() }
-        window.isHidden = true
-    }
-}
-
-private extension String {
-    func padded(to width: Int) -> String {
-        count >= width ? self : self + String(repeating: " ", count: width - count)
     }
 }
