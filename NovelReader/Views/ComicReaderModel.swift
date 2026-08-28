@@ -178,16 +178,26 @@ final class ComicReaderModel {
     /// sheet can show; everything else becomes the reader's own inline failure, which
     /// has a retry and a way out on it.
     private func fetch(_ chapter: Chapter, generation mine: Int) async -> LoadedChapter? {
-        guard let rule = env.sites.rule(id: book.siteId) else {
-            error = String(localized: "book.missingRule")
-            return nil
-        }
         guard let page = URL(string: chapter.url) else {
             error = String(localized: "reader.error.badURL")
             return nil
         }
         isLoading = true
         defer { isLoading = false }
+        // Local pages win, and are looked for before the site rule is: a downloaded
+        // chapter must open with no network at all — the entire point of downloading it
+        // — and that has to hold for a book whose rule this device never installed.
+        // `ComicPageStore` reads whichever kind of address it is handed, so nothing
+        // above this line knows which happened.
+        let stored = await storedPages(of: chapter)
+        guard mine == generation else { return nil }
+        if !stored.isEmpty {
+            return LoadedChapter(chapter: chapter, imageURLs: stored, chapterPage: page)
+        }
+        guard let rule = env.sites.rule(id: book.siteId) else {
+            error = String(localized: "book.missingRule")
+            return nil
+        }
         do {
             let urls = try await env.bookService.chapterImageURLs(rule: rule, chapter: chapter)
             guard mine == generation else { return nil }
@@ -197,6 +207,30 @@ final class ComicReaderModel {
             report(error)
             return nil
         }
+    }
+
+    /// A downloaded chapter's pages, listed off the main actor.
+    ///
+    /// The listing is one directory read, but it lands in the middle of the scroll that
+    /// asked for it — the reader is at the seam between two chapters when this runs —
+    /// and a filesystem hit on the main thread there is a stutter they can see. Only the
+    /// file store crosses over, which is a path and a `FileManager`; the database is not
+    /// touched, because "is it downloaded" was answered by the row already in hand.
+    /// `ReaderView.storedParagraphs` does the same for text.
+    ///
+    /// The flag is checked *and* the disk is looked at, and it is the disk that decides:
+    /// a chapter whose files went missing — deleted from the storage screen while its
+    /// row was being rewritten — reads as not downloaded and is fetched, rather than
+    /// opening as a chapter of no pages.
+    private func storedPages(of chapter: Chapter) async -> [URL] {
+        guard chapter.isDownloaded else { return [] }
+        let files = env.files
+        let siteId = book.siteId
+        let siteBookId = book.siteBookId
+        let siteChapterId = chapter.siteChapterId
+        return await Task.detached(priority: .userInitiated) {
+            files.pageURLs(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId)
+        }.value
     }
 
     func retry() async {

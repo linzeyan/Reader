@@ -121,11 +121,8 @@ final class ComicPageStore {
         let url = urls[page]
         fetching[page] = Task { [weak self] in
             guard let self else { return }
-            let jar = await self.jar()
             do {
-                let data = try await self.fetcher.image(
-                    at: url, chapterPage: self.chapterPage, page: page + 1, cookies: jar
-                )
+                let data = try await self.bytes(of: url, page: page)
                 self.received(data, page: page)
             } catch is CancellationError {
                 // The reader left. Not a failure, and nothing to report.
@@ -135,6 +132,29 @@ final class ComicPageStore {
                 self.onFailure?(page, error)
             }
         }
+    }
+
+    /// One page's bytes, from wherever that page is.
+    ///
+    /// A downloaded chapter arrives here as file addresses — see
+    /// `ComicReaderModel.storedPages` — and the branch is on the address itself rather
+    /// than on a flag passed down, so there is no way for the two to disagree. Neither
+    /// the cookie jar nor the referer means anything to a file, and reading one through
+    /// `URLSession` to keep a single code path would pay a main-actor hop into WebKit's
+    /// cookie store for every page of a chapter that needs no network at all.
+    private func bytes(of url: URL, page: Int) async throws -> Data {
+        guard url.isFileURL else {
+            return try await fetcher.image(
+                at: url, chapterPage: chapterPage, page: page + 1, cookies: await jar()
+            )
+        }
+        // Off the main actor: the read is small but it lands mid-scroll, and it is a
+        // whole page's bytes. Copied rather than memory-mapped — the storage screen can
+        // delete these files while the chapter is open, and a mapped file that goes away
+        // under a decode takes the app with it.
+        return try await Task.detached(priority: .userInitiated) {
+            try Data(contentsOf: url)
+        }.value
     }
 
     /// The cookie jar, read once and shared by every page of the chapter.
