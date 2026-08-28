@@ -226,7 +226,10 @@ final class LiveSiteTests: XCTestCase {
         }
 
         do {
-            let draft = try await RuleDeriver(fetcher: fetcher).derive(from: bookURL)
+            // Nothing installed: this run is measuring what derivation alone can
+            // work out. Handing it the known rule would only make it refuse.
+            let draft = try await RuleDeriver(fetcher: fetcher, installed: [])
+                .derive(from: bookURL)
             report.title = draft.preview.bookTitle
             report.chapterCount = draft.preview.chapterCount
             report.paragraphCount = draft.preview.excerpt.count

@@ -1045,6 +1045,30 @@
         }
       }
     },
+    "derive.error.alreadyCovered %@" : {
+      "comment" : "Error: the pasted URL belongs to a site that already has a source.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This site already has a source, “%@”. Add the book from the library instead, or remove that source first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个网站已经有来源「%@」。请直接从书柜加书，或先移除那个来源。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個網站已經有來源「%@」。請直接從書櫃加書，或先移除那個來源。"
+          }
+        }
+      }
+    },
     "derive.error.badURL" : {
       "comment" : "Error: the pasted text is not a usable web address.",
       "extractionState" : "manual",

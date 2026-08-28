@@ -18,6 +18,7 @@ import Foundation
 final class RuleDeriver {
     enum DeriveError: LocalizedError {
         case badURL
+        case alreadyCovered(String)
         case noChapterLinks
         case noTitle
         case emptyChapter
@@ -25,6 +26,8 @@ final class RuleDeriver {
         var errorDescription: String? {
             switch self {
             case .badURL: return String(localized: "derive.error.badURL")
+            case .alreadyCovered(let name):
+                return String(localized: "derive.error.alreadyCovered \(name)")
             case .noChapterLinks: return String(localized: "derive.error.noChapterLinks")
             case .noTitle: return String(localized: "derive.error.noTitle")
             case .emptyChapter: return String(localized: "derive.error.emptyChapter")
@@ -50,8 +53,23 @@ final class RuleDeriver {
 
     private let fetcher: WebFetcher
 
-    init(fetcher: WebFetcher) {
+    /// The sources already installed, so a site that has one is not given a second.
+    ///
+    /// A derived rule is identified by its host while a written rule names itself,
+    /// so the two never collide on disk and never replace one another — they both
+    /// stay, and the site is split in two. A pasted link then resolves through
+    /// `SiteStore.rule(matching:)`, which takes whichever rule sorts first by name,
+    /// and the same book bookmarked under each id becomes two books with two
+    /// reading positions and two sets of downloaded chapters. Only one of the two
+    /// can be shared, because a derived rule exists on the device that derived it.
+    ///
+    /// Refusing is also the cheaper answer: a derivation is several requests
+    /// against a host that throttles them.
+    private let installed: [SiteRule]
+
+    init(fetcher: WebFetcher, installed: [SiteRule]) {
         self.fetcher = fetcher
+        self.installed = installed
     }
 
     // MARK: - Derivation
@@ -59,6 +77,11 @@ final class RuleDeriver {
     func derive(from pastedURL: URL) async throws -> Draft {
         guard let host = pastedURL.host(), pastedURL.scheme?.hasPrefix("http") == true else {
             throw DeriveError.badURL
+        }
+        // Before anything is fetched: nothing good comes of a second rule for a
+        // site that already has one. See `installed`.
+        if let existing = installed.first(where: { $0.matches(pastedURL) }) {
+            throw DeriveError.alreadyCovered(existing.name)
         }
 
         // The identifier in the pasted URL, known before anything has been loaded.

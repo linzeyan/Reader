@@ -107,7 +107,8 @@ struct DeriveRuleView: View {
         draft = nil
         defer { isWorking = false }
         do {
-            draft = try await RuleDeriver(fetcher: env.fetcher).derive(from: url)
+            draft = try await RuleDeriver(fetcher: env.fetcher, installed: env.sites.rules)
+                .derive(from: url)
         } catch {
             // Routed through the environment as well as shown inline: a Cloudflare
             // challenge has to reach the challenge sheet, and once the user clears
