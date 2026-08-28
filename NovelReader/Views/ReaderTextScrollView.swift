@@ -99,6 +99,12 @@ final class ReaderTextScrollView: UIScrollView {
         guard contentSize.height != height || contentSize.width != bounds.width else { return }
         contentSize = CGSize(width: bounds.width, height: height)
         positionCanvas()
+        #if DEBUG
+        ColumnProbe.viewport(
+            bounds: bounds, offset: contentOffset.y,
+            contentHeight: contentSize.height, canvas: canvas.frame
+        )
+        #endif
     }
 
     func redraw() {
@@ -255,6 +261,17 @@ final class ReaderTextCanvas: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext(), let coordinator else { return }
+        #if DEBUG
+        // The dirty rect UIKit asked for, against the bounds this draws all of. A
+        // partial invalidation would leave the rest of the canvas holding whatever it
+        // held when it was somewhere else — see `ColumnProbe`.
+        if rect != bounds {
+            NSLog(
+                "[DEBUG-col] partial dirty rect=%.0f..%.0f of bounds h=%.0f",
+                rect.minY, rect.maxY, bounds.height
+            )
+        }
+        #endif
         coordinator.draw(
             CGRect(x: 0, y: columnOrigin, width: bounds.width, height: bounds.height),
             in: context

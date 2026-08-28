@@ -321,9 +321,16 @@ final class ChapterColumn {
     /// be drawn, which is a paragraph laid out per visible paragraph per frame. A held
     /// line fragment draws itself and asks nobody anything.
     func draw(_ columnRect: CGRect, in context: CGContext) {
+        let list = drawList(in: columnRect.minY..<columnRect.maxY)
+        #if DEBUG
+        ColumnProbe.drew(
+            window: columnRect, drawn: list.count, of: fragments.count,
+            firstY: list.first?.origin.y, lastY: list.last?.maxY, height: height
+        )
+        #endif
         context.saveGState()
         context.translateBy(x: 0, y: -columnRect.minY)
-        for placed in drawList(in: columnRect.minY..<columnRect.maxY) {
+        for placed in list {
             for line in placed.lineFragments {
                 let bounds = line.typographicBounds
                 line.draw(
@@ -366,6 +373,20 @@ final class ChapterColumn {
     func discardLayoutManagerWork() {
         layoutManager.invalidateLayout(for: contentStorage.documentRange)
     }
+
+    #if DEBUG
+    /// What the one layout pass actually produced. A chapter is laid out once, so this
+    /// is a handful of lines a session — see `ColumnProbe`.
+    var layoutReport: String {
+        String(
+            format: "chars=%d width=%.0f height=%.0f fragments=%d(noLines=%d) "
+                + "lines=%d paragraphs=%d lastMaxY=%.0f",
+            text.attributed.length, width, height, fragments.count,
+            fragments.filter(\.lineFragments.isEmpty).count,
+            lines.count, paragraphFrames.count, fragments.last?.maxY ?? -1
+        )
+    }
+    #endif
 
     // MARK: - Offsets
 

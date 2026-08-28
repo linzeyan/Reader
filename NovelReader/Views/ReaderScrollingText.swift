@@ -266,6 +266,9 @@ final class ReaderScrollCoordinator {
         let anchor = view.flatMap { chapter(atY: $0.readingOffset) }
         let anchorTop = anchor?.top
 
+        #if DEBUG
+        ColumnProbe.placed(index, report: column.layoutReport)
+        #endif
         let entry = PlacedColumn(
             chapterIndex: index, chapterId: id, siteChapterId: siteChapterId,
             column: column, top: 0
