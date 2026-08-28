@@ -118,6 +118,23 @@ final class ImageFetcher {
         return collected.sorted { $0.index < $1.index }.map(\.bytes)
     }
 
+    /// One page's bytes.
+    ///
+    /// What online reading uses, where `chapterImages` is what downloading uses. The
+    /// difference is not the request — that is the same headers through the same
+    /// method below — it is who decides the order and when to stop. A download wants
+    /// the whole chapter and nothing less; a reader wants the page they are looking at
+    /// first, and may well never scroll to page 40. Waiting for all fifty before
+    /// drawing the first is twenty megabytes of staring at a blank screen.
+    ///
+    /// - Parameter page: 1-based, and only used to name the page in an error.
+    func image(at url: URL, chapterPage: URL, page: Int, cookies: [HTTPCookie]) async throws -> Data {
+        try await Self.load(
+            Self.request(for: url, chapterPage: chapterPage, cookies: cookies),
+            page: page, in: session
+        )
+    }
+
     private static func request(for url: URL, chapterPage: URL, cookies: [HTTPCookie]) -> URLRequest {
         var request = URLRequest(url: url)
         // The chapter page, always. Three of the four surveyed sites answer 403

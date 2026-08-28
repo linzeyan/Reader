@@ -15,6 +15,10 @@ final class AppEnvironment {
     let repo: LibraryRepo
     let downloads: DownloadStore
     let fetcher: WebFetcher
+    /// The comic reader's and the comic downloader's way onto the network. Owned here
+    /// rather than made per screen so that both go through one `URLSession` — which is
+    /// `.shared`, and therefore one `URLCache`. See `ImageFetcher`.
+    let images: ImageFetcher
     let sites: SiteStore
     let bookService: BookService
     let search: SearchService
@@ -115,6 +119,7 @@ final class AppEnvironment {
         self.downloads = DownloadStore(database: database, files: files)
         let fetcher = WebFetcher()
         self.fetcher = fetcher
+        self.images = ImageFetcher()
         let bookService = BookService(fetcher: fetcher, repo: repo)
         self.bookService = bookService
         self.search = SearchService(fetcher: fetcher)
