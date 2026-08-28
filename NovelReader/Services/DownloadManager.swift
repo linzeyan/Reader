@@ -44,9 +44,14 @@ final class DownloadManager {
     private(set) var progress: Progress?
     /// Last failure, kept for display; cleared when a new run starts.
     private(set) var lastError: String?
-    /// Set when a host escalated to an interactive challenge. The root view
-    /// presents the fetcher's web view so the user can complete it.
-    var pendingChallenge: URL?
+    /// Set when a host escalated to an interactive challenge, or turned a
+    /// signed-out reader away. The root view presents the fetcher's web view so
+    /// the user can deal with it.
+    ///
+    /// The whole request rather than its URL, because the two cases need different
+    /// words on the sheet and only the moment they are caught knows which one this
+    /// is — by the time the root view sees it, an address is just an address.
+    var pendingChallenge: ChallengeRequest?
 
     private let service: BookService
     private let downloads: DownloadStore
@@ -219,6 +224,18 @@ final class DownloadManager {
         persistQueue()
     }
 
+    /// Parks the queue on something only the user can clear.
+    ///
+    /// The chapter is deliberately left at the head of `remaining`: whatever the
+    /// user does in the sheet, the retry after it has to be the chapter that hit
+    /// the wall, not the one after it.
+    private func hold(_ request: ChallengeRequest, because error: WebFetcher.FetchError) {
+        pendingChallenge = request
+        lastError = error.localizedDescription
+        status = .paused
+        persistQueue()
+    }
+
     // MARK: - Queue
 
     private func run() {
@@ -259,10 +276,20 @@ final class DownloadManager {
                 } catch WebFetcher.FetchError.challengePresented(let url) {
                     // Stop dead. The chapter stays at the head of the queue, so
                     // resuming after the user clears the challenge retries it.
-                    self.pendingChallenge = url
-                    self.lastError = WebFetcher.FetchError.challengePresented(url).localizedDescription
-                    self.status = .paused
-                    self.persistQueue()
+                    self.hold(
+                        ChallengeRequest(url: url),
+                        because: WebFetcher.FetchError.challengePresented(url)
+                    )
+                    return
+                } catch WebFetcher.FetchError.signInRequired(let url) {
+                    // The same stop for the same reason: nothing the queue can do
+                    // by itself will get the next chapter, and grinding through the
+                    // rest of the book collecting identical failures would only
+                    // bury the one message that matters.
+                    self.hold(
+                        ChallengeRequest(url: url, reason: .signIn),
+                        because: WebFetcher.FetchError.signInRequired(url)
+                    )
                     return
                 } catch {
                     // A single unreadable chapter must not strand the rest of the

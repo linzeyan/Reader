@@ -805,6 +805,54 @@
         }
       }
     },
+    "challenge.signIn.explain" : {
+      "comment" : "Explains that the user signs in on the site itself, not in the app.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This site only shows this book to signed-in readers. Sign in below, then tap Done to continue. The app never sees what you type — it goes straight to the site."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该站点只向已登入的读者显示这本书。请在下方登入后按“完成”，App 会继续。你输入的内容 App 看不到，会直接送到该站点。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個網站只給登入的讀者看這本書。請在下方登入後按「完成」，App 會接著繼續。你打的東西 App 看不到，會直接送到那個網站。"
+          }
+        }
+      }
+    },
+    "challenge.signIn.title" : {
+      "comment" : "Title of the sheet that hands the browser over for signing in.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign In at the Site"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在站点登入"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在網站登入"
+          }
+        }
+      }
+    },
     "challenge.title" : {
       "comment" : "Title of the interactive verification sheet.",
       "extractionState" : "manual",
@@ -2004,6 +2052,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法安全開啟這個檔案，未匯入任何內容。"
+          }
+        }
+      }
+    },
+    "fetch.error.signIn" : {
+      "comment" : "Shown when a site serves this page only to signed-in readers.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This site only shows this to signed-in readers. Tap to sign in."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此站点仅向已登入的读者显示此内容，请点击登入。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個網站只給登入的讀者看，請點一下登入。"
           }
         }
       }

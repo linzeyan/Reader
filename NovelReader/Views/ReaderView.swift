@@ -1093,9 +1093,10 @@ final class ReaderModel {
             startReadingAhead()
         } catch {
             guard mine == generation else { return }
-            // A challenge has to reach the shell so the sheet can be presented;
-            // everything else stays inline so the user keeps their scroll position.
-            if case WebFetcher.FetchError.challengePresented = error {
+            // A challenge or a sign-in gate has to reach the shell so the sheet can
+            // be presented; everything else stays inline so the user keeps their
+            // scroll position.
+            if WebFetcher.needsTheUser(error) {
                 env.report(error)
             }
             self.error = error.localizedDescription

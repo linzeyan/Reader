@@ -51,7 +51,9 @@ struct RootView: View {
                 .allowsHitTesting(false)
         }
         .sheet(item: $env.challenge) { challenge in
-            ChallengeSheet(webView: env.fetcher.webView, url: challenge.url) {
+            ChallengeSheet(
+                webView: env.fetcher.webView, url: challenge.url, reason: challenge.reason
+            ) {
                 // Read before it is cleared: it is what says this challenge was the
                 // one that stopped the download queue, rather than one a page load
                 // in the reader tripped over.
@@ -70,7 +72,7 @@ struct RootView: View {
             }
         }
         .onChange(of: env.downloader.pendingChallenge) { _, new in
-            if let new { env.challenge = ChallengeRequest(url: new) }
+            if let new { env.challenge = new }
         }
         // The history's half of opening a book: it posts the target, this switches
         // tabs, and the library — the tab that owns books — builds the route. The
@@ -216,6 +218,16 @@ struct RootView: View {
 /// `sheet(item:)` needs an `Identifiable`; a bare URL is not one, and keying the
 /// sheet on the URL string would re-present it for the same host twice in a row.
 struct ChallengeRequest: Identifiable, Equatable {
+    /// What the app got stuck on. Both kinds hand the same web view to the user
+    /// and both are cleared by them doing something in it, so only the words
+    /// differ — but they differ in the one way that matters, since "prove you are
+    /// human" and "type your password" must not be confused for each other.
+    enum Reason {
+        case verification
+        case signIn
+    }
+
     let id = UUID()
     let url: URL
+    var reason: Reason = .verification
 }

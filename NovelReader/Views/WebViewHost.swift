@@ -53,14 +53,16 @@ struct WebViewHost: UIViewRepresentable {
     }
 }
 
-/// Surfaces the web view so the user can complete a verification themselves.
+/// Surfaces the web view so the user can get past something the app cannot:
+/// a human check, or a site that only serves signed-in readers.
 ///
-/// Nothing here solves or evades the challenge — the app simply stops batching
-/// and gets out of the way. The cleared cookie then lives in the shared data
+/// Nothing here solves or evades either one — the app simply stops batching and
+/// gets out of the way. Whatever cookie results then lives in the shared data
 /// store, so the queue can be resumed.
 struct ChallengeSheet: View {
     let webView: WKWebView
     let url: URL
+    var reason: ChallengeRequest.Reason = .verification
     let onDone: () -> Void
 
     /// Followed live rather than read once from `url`. This sheet is the one place
@@ -82,7 +84,7 @@ struct ChallengeSheet: View {
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal)
-                Text("challenge.explain")
+                Text(explanation)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -91,7 +93,7 @@ struct ChallengeSheet: View {
                     .padding(.bottom, 8)
                 WebViewHost(webView: webView, interactive: true, token: 0)
             }
-            .navigationTitle("challenge.title")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -104,6 +106,14 @@ struct ChallengeSheet: View {
         }
         .interactiveDismissDisabled()
         .onReceive(webView.publisher(for: \.url)) { current = $0 }
+    }
+
+    private var title: LocalizedStringKey {
+        reason == .signIn ? "challenge.signIn.title" : "challenge.title"
+    }
+
+    private var explanation: LocalizedStringKey {
+        reason == .signIn ? "challenge.signIn.explain" : "challenge.explain"
     }
 
     /// A bare host for ordinary https, where the scheme is noise. Anything else —

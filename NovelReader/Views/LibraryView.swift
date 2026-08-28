@@ -496,7 +496,7 @@ struct AddBookSheet: View {
             try await env.addBook(rule: rule, siteBookId: siteBookId, info: info)
             dismiss()
         } catch {
-            if case WebFetcher.FetchError.challengePresented = error {
+            if WebFetcher.needsTheUser(error) {
                 env.report(error)
                 dismiss()
             } else {

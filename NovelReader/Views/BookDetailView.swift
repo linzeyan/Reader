@@ -459,11 +459,7 @@ struct BookDetailView: View {
             // keeps showing yesterday's count until something else reloads it.
             env.reloadLibrary()
         } catch {
-            if case WebFetcher.FetchError.challengePresented = error {
-                env.report(error)
-            } else if !silently {
-                env.report(error)
-            }
+            if WebFetcher.needsTheUser(error) || !silently { env.report(error) }
         }
     }
 }

@@ -22,6 +22,10 @@ final class WebFetcher: NSObject {
         /// The host demanded an interactive challenge. The caller must stop
         /// batching and present `webView` so a human can complete it.
         case challengePresented(URL)
+        /// The site turned a signed-out reader away. The associated URL is the
+        /// site's own sign-in page, which the web view has already been taken to —
+        /// the caller presents it the same way it presents a challenge.
+        case signInRequired(URL)
         case navigationFailed(String)
         case timedOut
         case extractionFailed(String)
@@ -37,11 +41,29 @@ final class WebFetcher: NSObject {
         var errorDescription: String? {
             switch self {
             case .challengePresented: return String(localized: "fetch.error.challenge")
+            case .signInRequired: return String(localized: "fetch.error.signIn")
             case .navigationFailed(let m): return m
             case .timedOut: return String(localized: "fetch.error.timeout")
             case .extractionFailed(let m): return m
             case .documentIsolationUnavailable: return String(localized: "fetch.error.isolation")
             }
+        }
+    }
+
+    /// Whether an error is one only the user can clear, by doing something in the
+    /// browser themselves — a human check, or signing in.
+    ///
+    /// Screens ask this to decide whether to keep a failure inline or hand it up
+    /// to the shell, which owns the one web view a sheet can show. Written once
+    /// because the answer has to be the same everywhere: a screen that knows about
+    /// challenges but not sign-ins swallows the sign-in silently, and the reader
+    /// gets an error message about a missing title instead of a password field.
+    /// `nonisolated` because it reads nothing but the error it is handed, and the
+    /// screens that ask are not all on the main actor when they ask.
+    nonisolated static func needsTheUser(_ error: any Error) -> Bool {
+        switch error {
+        case FetchError.challengePresented, FetchError.signInRequired: return true
+        default: return false
         }
     }
 
@@ -98,6 +120,7 @@ final class WebFetcher: NSObject {
         _ url: URL,
         extracting script: String,
         as type: T.Type,
+        signIn: SiteRule.SignIn? = nil,
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
@@ -105,6 +128,7 @@ final class WebFetcher: NSObject {
                 self.webView.load(URLRequest(url: url))
             }
             try await self.failIfChallenged()
+            try await self.failIfTurnedAway(by: signIn, timeout: timeout)
             let value = try await self.evaluate(script, as: type, in: self.webView)
             await self.parkAfterExtraction()
             return value
@@ -123,6 +147,7 @@ final class WebFetcher: NSObject {
         submitting submitScript: String,
         extracting script: String,
         as type: T.Type,
+        signIn: SiteRule.SignIn? = nil,
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
@@ -130,10 +155,12 @@ final class WebFetcher: NSObject {
                 self.webView.load(URLRequest(url: url))
             }
             try await self.failIfChallenged()
+            try await self.failIfTurnedAway(by: signIn, timeout: timeout)
             try await self.navigate(timeout: timeout, in: self.webView) {
                 self.webView.evaluateJavaScript(submitScript, completionHandler: nil)
             }
             try await self.failIfChallenged()
+            try await self.failIfTurnedAway(by: signIn, timeout: timeout)
             let value = try await self.evaluate(script, as: type, in: self.webView)
             await self.parkAfterExtraction()
             return value
@@ -280,6 +307,76 @@ final class WebFetcher: NSObject {
         if let challengeURL = try await detectChallenge() {
             throw FetchError.challengePresented(challengeURL)
         }
+    }
+
+    /// Stops the fetch when the site bounced us to its "members only" page, and
+    /// leaves the web view showing the sign-in form instead.
+    ///
+    /// Detected from the landed address rather than from the page's contents: the
+    /// gate is a redirect out of a `<head>` script, so once the load settles the
+    /// document we are holding is the site's own error page and carries no trace
+    /// of what was asked for. `webView.url` is what is left.
+    ///
+    /// The address alone is not enough, though, because the redirect is often
+    /// still in flight when the load reports finished. Measured on 8comic: of five
+    /// gated books, one had already landed on the members page while four sat at
+    /// their own address with the title blanked, the body empty, and the gate's
+    /// script still in the markup — the parser had stopped, the navigation had not
+    /// yet committed, and `webView.url` had nothing to say about it. Extracting
+    /// from that husk yields "could not read a title", which sends the reader off
+    /// to look for a fault in a rule that is working perfectly.
+    ///
+    /// So an emptied document is taken as "a navigation is on its way" and waited
+    /// out. Bounded, and paid only by sites that declare a gate *and* handed back
+    /// nothing — a page with any text in it never reaches the wait, which is every
+    /// page anyone actually wanted. When nothing arrives the fetch simply carries
+    /// on: a page that is empty because it is broken is not a page to ask anyone
+    /// for a password over, and 8comic has those too.
+    ///
+    /// Navigating to the sign-in form rather than leaving it to the sheet is what
+    /// makes this one interruption instead of two. The sheet shows *this* web view
+    /// — the one with the site's cookies, which is the whole point, since a
+    /// sign-in performed anywhere else would not be the one the next fetch rides
+    /// on. The page it would otherwise be showing is a dead end with no form on it.
+    ///
+    /// A failed navigation to the form is swallowed: the fetch is over either way,
+    /// and reporting "the sign-in page would not load" instead of "please sign in"
+    /// tells the reader less about what to do next.
+    private func failIfTurnedAway(by signIn: SiteRule.SignIn?, timeout: Duration) async throws {
+        guard let signIn, let signInURL = signIn.signInURL else { return }
+        if !signIn.turnsAway(webView.url) {
+            guard try await documentWasEmptied() else { return }
+            // An empty trigger: what is being waited for is the navigation the
+            // page started for itself, which `didFinish` resumes.
+            try? await navigate(timeout: Self.gateSettleTimeout, in: webView) {}
+            guard signIn.turnsAway(webView.url) else { return }
+        }
+        try? await navigate(timeout: timeout, in: webView) {
+            self.webView.load(URLRequest(url: signInURL))
+        }
+        throw FetchError.signInRequired(signInURL)
+    }
+
+    /// Long enough for a redirect already under way, short enough that a genuinely
+    /// broken page does not hold the fetch queue up.
+    private static let gateSettleTimeout: Duration = .seconds(3)
+
+    /// Whether the loaded document has no text in it at all.
+    ///
+    /// The fingerprint of a gate caught mid-redirect: its script blanks the title
+    /// and assigns `location.href` from `<head>`, so the parser never reaches the
+    /// body. Deliberately not a test for the gate's own markup — that would be a
+    /// rule reaching into the page as code rather than as data, and this says all
+    /// that is needed to know it is worth waiting a moment longer.
+    private func documentWasEmptied() async throws -> Bool {
+        struct Probe: Decodable { let empty: Bool }
+        let script = """
+        (function () {
+          var body = document.body;
+          return { empty: !body || (body.textContent || '').trim().length === 0 };
+        })()
+        """
+        return try await evaluate(script, as: Probe.self, in: webView).empty
     }
 
     /// Runs `body` after every previously queued fetch has settled.

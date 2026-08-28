@@ -74,7 +74,8 @@ final class SearchService {
                 throw ExtractorScript.BuildError.encodingFailed
             }
             payload = try await fetcher.fetch(
-                url, extracting: extractor, as: ExtractorScript.SearchPayload.self
+                url, extracting: extractor, as: ExtractorScript.SearchPayload.self,
+                signIn: rule.signIn
             )
         case .post:
             // Land on the site first so the submitted form inherits the site's
@@ -88,7 +89,7 @@ final class SearchService {
             let submit = try ExtractorScript.submitSearch(rule, query: query)
             payload = try await fetcher.fetch(
                 origin, submitting: submit, extracting: extractor,
-                as: ExtractorScript.SearchPayload.self
+                as: ExtractorScript.SearchPayload.self, signIn: rule.signIn
             )
         }
 

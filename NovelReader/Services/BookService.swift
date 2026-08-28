@@ -46,7 +46,9 @@ final class BookService {
     func info(rule: SiteRule, siteBookId: String) async throws -> Info {
         guard let url = rule.bookURL(bookId: siteBookId) else { throw ServiceError.badURL }
         let script = try ExtractorScript.book(rule)
-        let payload = try await fetcher.fetch(url, extracting: script, as: ExtractorScript.BookPayload.self)
+        let payload = try await fetcher.fetch(
+            url, extracting: script, as: ExtractorScript.BookPayload.self, signIn: rule.signIn
+        )
         guard let title = payload.title, !title.isEmpty else { throw ServiceError.noTitle }
         return Info(
             title: title, author: payload.author, cover: payload.cover,
@@ -65,7 +67,9 @@ final class BookService {
     func refreshCatalog(rule: SiteRule, book: Book) async throws -> [Chapter] {
         guard let url = rule.catalogURL(bookId: book.siteBookId) else { throw ServiceError.badURL }
         let script = try ExtractorScript.catalog(rule)
-        let payload = try await fetcher.fetch(url, extracting: script, as: ExtractorScript.CatalogPayload.self)
+        let payload = try await fetcher.fetch(
+            url, extracting: script, as: ExtractorScript.CatalogPayload.self, signIn: rule.signIn
+        )
 
         let entries = Self.entries(from: payload, rule: rule, siteBookId: book.siteBookId)
         guard !entries.isEmpty else { throw ServiceError.emptyCatalog }
@@ -140,7 +144,9 @@ final class BookService {
     private func fetchParagraphs(rule: SiteRule, chapter: Chapter) async throws -> [String] {
         guard let url = URL(string: chapter.url) else { throw ServiceError.badURL }
         let script = try ExtractorScript.chapter(rule)
-        let payload = try await fetcher.fetch(url, extracting: script, as: ExtractorScript.ChapterPayload.self)
+        let payload = try await fetcher.fetch(
+            url, extracting: script, as: ExtractorScript.ChapterPayload.self, signIn: rule.signIn
+        )
         let paragraphs = Self.dropping(rule.chapter?.dropParagraphPatterns, from: payload.paragraphs)
         guard !paragraphs.isEmpty else { throw ServiceError.emptyChapter }
         // The page names the chapter too, and names it in full where the catalog
@@ -170,7 +176,8 @@ final class BookService {
         guard let url = URL(string: chapter.url) else { throw ServiceError.badURL }
         let script = try ExtractorScript.comicImages(rule)
         let payload = try await fetcher.fetch(
-            url, extracting: script, as: ExtractorScript.ComicImagesPayload.self
+            url, extracting: script, as: ExtractorScript.ComicImagesPayload.self,
+            signIn: rule.signIn
         )
         let urls = payload.imageURLs.compactMap { URL(string: $0) }
         guard !urls.isEmpty else { throw ServiceError.emptyChapter }

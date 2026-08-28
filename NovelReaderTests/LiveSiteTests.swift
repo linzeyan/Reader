@@ -27,9 +27,10 @@ final class LiveSiteTests: XCTestCase {
         var paragraphCount: Int?
         var searchHits: Int?
         var failures: [String] = []
-        /// Stages that stopped at an interactive challenge. Reported loudly but
-        /// kept out of `failures`: handing the challenge to the user *is* the
-        /// designed behaviour, so failing the run for it would leave the suite
+        /// Stages that stopped at a wall only a person can get past — an
+        /// interactive challenge, or a site wanting the reader signed in. Reported
+        /// loudly but kept out of `failures`: handing those to the user *is* the
+        /// designed behaviour, so failing the run for one would leave the suite
         /// permanently red for something that works.
         var challenges: [String] = []
 
@@ -42,15 +43,16 @@ final class LiveSiteTests: XCTestCase {
                 "search=\(searchHits.map(String.init) ?? "n/a")",
             ]
             let verdict = !failures.isEmpty ? "FAIL" : (challenges.isEmpty ? "OK  " : "WARN")
-            let notes = failures + challenges.map { "\($0) (needs the user to verify — expected)" }
+            let notes = failures + challenges.map { "\($0) (only a person can clear this — expected)" }
             let detail = notes.isEmpty ? "" : "\n        " + notes.joined(separator: "\n        ")
             return "  \(verdict) \(site.padded(to: 10)) \(stages.joined(separator: "  "))\(detail)"
         }
 
-        /// A challenge is a warning; anything else is a real failure.
+        /// A wall only a person can get past is a warning; anything else is a real
+        /// failure.
         mutating func record(_ stage: String, _ error: any Error) {
-            if case WebFetcher.FetchError.challengePresented = error {
-                challenges.append("\(stage): interactive challenge")
+            if WebFetcher.needsTheUser(error) {
+                challenges.append("\(stage): \(error.localizedDescription)")
             } else {
                 failures.append("\(stage): \(error.localizedDescription)")
             }
@@ -401,17 +403,26 @@ extension String {
 /// the comic live checks: both suites read the same seeded folder and each takes
 /// the kinds it can drive.
 enum LiveSiteRules {
-    /// Reads every link on a site's front page and returns the first the rule can
+    /// Reads every link on a site's front page and returns the ones the rule can
     /// read a book id from — while rejecting chapter links, which on several of
     /// these sites also match the book pattern.
     ///
     /// Discovering the book rather than hardcoding one is what makes these suites
     /// also a test of `idPatterns`: the ids come out of links the site published
     /// today, not out of a fixture written when the rule was.
+    ///
+    /// Several rather than one, because "any book on this site" and "every book on
+    /// this site" are not the same claim. 8comic gates roughly one book in ten
+    /// behind a member login and lists anime-only titles that have no chapters at
+    /// all; both are the site working as designed, and both are the *first* link on
+    /// its front page often enough that a one-shot pick reports a healthy rule as
+    /// broken. The caller decides how many to try.
     @MainActor
-    static func discoverBookId(rule: SiteRule, fetcher: WebFetcher) async throws -> String? {
+    static func discoverBookIds(
+        rule: SiteRule, fetcher: WebFetcher, limit: Int = 1
+    ) async throws -> [String] {
         struct Links: Decodable { let hrefs: [String] }
-        guard let home = URL(string: "https://\(rule.host)/") else { return nil }
+        guard limit > 0, let home = URL(string: "https://\(rule.host)/") else { return [] }
         let script = """
         (function () {
           return {
@@ -421,12 +432,20 @@ enum LiveSiteRules {
         })()
         """
         let links = try await fetcher.fetch(home, extracting: script, as: Links.self)
+        var ids: [String] = []
         for href in links.hrefs {
             guard let url = URL(string: href), rule.matches(url) else { continue }
             guard rule.chapterId(from: url) == nil, let id = rule.bookId(from: url) else { continue }
-            return id
+            guard !ids.contains(id) else { continue }
+            ids.append(id)
+            if ids.count == limit { break }
         }
-        return nil
+        return ids
+    }
+
+    @MainActor
+    static func discoverBookId(rule: SiteRule, fetcher: WebFetcher) async throws -> String? {
+        try await discoverBookIds(rule: rule, fetcher: fetcher).first
     }
 
     static func seeded() throws -> [SiteRule] {

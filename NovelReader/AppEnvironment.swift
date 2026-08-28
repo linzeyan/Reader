@@ -276,15 +276,15 @@ final class AppEnvironment {
     /// one moment a new source has to feel like it worked.
     ///
     /// A failed catalog does not undo the bookmark. The book is legitimately
-    /// saved; the detail screen will try again. Challenges are surfaced, because
-    /// those need the user and nothing else will ask them.
+    /// saved; the detail screen will try again. Challenges and sign-in gates are
+    /// surfaced, because those need the user and nothing else will ask them.
     @discardableResult
     func addBook(rule: SiteRule, siteBookId: String, info: BookService.Info) async throws -> Book {
         let book = try bookmark(rule: rule, siteBookId: siteBookId, info: info)
         do {
             _ = try await bookService.refreshCatalog(rule: rule, book: book)
         } catch {
-            if case WebFetcher.FetchError.challengePresented = error { report(error) }
+            if WebFetcher.needsTheUser(error) { report(error) }
         }
         reloadLibrary()
         return book
@@ -535,9 +535,14 @@ final class AppEnvironment {
     /// Routes a fetch failure: a challenge becomes the interactive sheet,
     /// everything else becomes a banner.
     func report(_ error: any Error) {
-        if case WebFetcher.FetchError.challengePresented(let url) = error {
+        switch error {
+        case WebFetcher.FetchError.challengePresented(let url):
             challenge = ChallengeRequest(url: url)
-        } else {
+        case WebFetcher.FetchError.signInRequired(let url):
+            // Same sheet, same web view: a sign-in only helps if it happens in the
+            // browser whose cookies the next fetch will carry.
+            challenge = ChallengeRequest(url: url, reason: .signIn)
+        default:
             banner = error.localizedDescription
         }
     }

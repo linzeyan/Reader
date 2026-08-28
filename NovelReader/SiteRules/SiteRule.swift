@@ -30,6 +30,9 @@ struct SiteRule: Codable, Identifiable, Hashable {
     /// Required for `.comic`, absent for `.novel`. See `chapter`.
     let images: Images?
     let catalog: Catalog
+    /// How this site turns a signed-out reader away, for the sites that do.
+    /// Absent means the site never asks anyone to sign in.
+    let signIn: SignIn?
     /// Free-form provenance notes. Ignored at runtime, kept so a rule file
     /// stays self-documenting when it travels between devices.
     let notes: [String]?
@@ -50,6 +53,7 @@ struct SiteRule: Codable, Identifiable, Hashable {
         catalog: Catalog,
         chapter: Chapter? = nil,
         images: Images? = nil,
+        signIn: SignIn? = nil,
         notes: [String]?
     ) {
         self.id = id
@@ -63,6 +67,7 @@ struct SiteRule: Codable, Identifiable, Hashable {
         self.catalog = catalog
         self.chapter = chapter
         self.images = images
+        self.signIn = signIn
         self.notes = notes
     }
 
@@ -232,6 +237,42 @@ struct SiteRule: Codable, Identifiable, Hashable {
         }
     }
 
+    /// A site that turns signed-out readers away, and where they can sign in.
+    ///
+    /// Modelled on the Cloudflare path and handled by the same sheet, because to
+    /// the reader it is the same interruption: the app cannot get past this by
+    /// itself, so it stops and hands over the browser. The difference is where it
+    /// hands them — a challenge page *is* the thing to complete, while the page a
+    /// signed-out reader is bounced to is a dead end, so the sheet has to be taken
+    /// to the site's own sign-in form instead.
+    ///
+    /// Data only, like everything else in a rule file. `landsOn` is compared as
+    /// text in Swift and `url` is loaded as a page; neither is executed, and
+    /// neither can name a host other than the one it points at.
+    struct SignIn: Codable, Hashable {
+        /// Part of the address the site bounces a signed-out reader to. Matched as
+        /// a plain substring of the landed URL — 8comic redirects to
+        /// `/member/404.html` from a script in `<head>`, so by the time the page
+        /// settles the address is the only evidence left that a gate fired.
+        let landsOn: String
+        /// The site's own sign-in page, shown to the user in the sheet.
+        let url: String
+
+        /// Whether the page that loaded is the site's locked door.
+        ///
+        /// Nil is not a match: a fetch that landed nowhere failed for some other
+        /// reason, and reporting it as "please sign in" would send the reader to
+        /// type a password at a site that never asked for one.
+        func turnsAway(_ landed: URL?) -> Bool {
+            guard let landed, !landsOn.isEmpty else { return false }
+            return landed.absoluteString.contains(landsOn)
+        }
+
+        /// Where to send the reader. Nil for an unparseable rule, which the caller
+        /// treats as "no gate" — an unusable address is not worth interrupting for.
+        var signInURL: URL? { URL(string: url) }
+    }
+
     struct Chapter: Codable, Hashable {
         /// Tried in order; the first selector that matches a non-empty node wins.
         /// A list rather than a single value because a site's chapter markup is
@@ -255,7 +296,8 @@ struct SiteRule: Codable, Identifiable, Hashable {
     // MARK: - Decoding
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, host, kind, urls, idPatterns, search, book, catalog, chapter, images, notes
+        case id, name, host, kind, urls, idPatterns, search, book, catalog, chapter, images
+        case signIn, notes
     }
 
     /// Decoded by hand for one field: `kind` has to read as `.novel` when the key
@@ -280,6 +322,7 @@ struct SiteRule: Codable, Identifiable, Hashable {
         catalog = try c.decode(Catalog.self, forKey: .catalog)
         chapter = try c.decodeIfPresent(Chapter.self, forKey: .chapter)
         images = try c.decodeIfPresent(Images.self, forKey: .images)
+        signIn = try c.decodeIfPresent(SignIn.self, forKey: .signIn)
         notes = try c.decodeIfPresent([String].self, forKey: .notes)
     }
 }
@@ -333,7 +376,7 @@ extension SiteRule {
         SiteRule(
             id: id, name: name, host: host, kind: kind, urls: urls, idPatterns: idPatterns,
             search: search, book: book, catalog: catalog, chapter: chapter, images: images,
-            notes: notes
+            signIn: signIn, notes: notes
         )
     }
 

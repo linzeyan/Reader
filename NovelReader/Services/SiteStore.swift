@@ -128,6 +128,25 @@ final class SiteStore {
         default:
             break
         }
+        // A sign-in block names a page the app will show full screen, with a
+        // keyboard in front of it, because the rule said the reader has to sign in.
+        // Rule files travel between users, so that address has to belong to the
+        // site the rule is for — otherwise a rule for a site you trust can put a
+        // lookalike login form in front of you, and the only thing standing between
+        // you and typing a password into it is the host label on the sheet.
+        //
+        // Refused rather than dropped: a rule whose sign-in points elsewhere is not
+        // a rule with one bad field, and installing the rest of it as if the author
+        // simply made a typo is a guess this has no business making.
+        if let signIn = rule.signIn {
+            guard let url = signIn.signInURL,
+                  url.host()?.caseInsensitiveCompare(rule.host) == .orderedSame
+            else {
+                throw ImportError.malformed(
+                    "the \"signIn\" address must be on \(rule.host)"
+                )
+            }
+        }
         let target = directory.appendingPathComponent(
             ChapterFileStore.safeComponent(rule.id)
         ).appendingPathExtension("json")

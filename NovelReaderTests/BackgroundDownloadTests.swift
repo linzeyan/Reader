@@ -54,7 +54,9 @@ final class BackgroundDownloadTests: XCTestCase {
     func testAQueueWaitingOnAChallengeAsksForNoWindow() throws {
         let harness = try makeHarness(policy: .wifiOnly, connection: .wifi)
         queueTwoChapters(harness.downloader)
-        harness.downloader.pendingChallenge = URL(string: "https://demo.test/book/1")
+        harness.downloader.pendingChallenge = ChallengeRequest(
+            url: URL(string: "https://demo.test/book/1")!
+        )
 
         harness.background.scheduleIfNeeded()
 
