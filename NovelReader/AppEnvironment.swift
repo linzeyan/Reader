@@ -260,7 +260,7 @@ final class AppEnvironment {
 
     func bookmark(rule: SiteRule, siteBookId: String, info: BookService.Info) throws -> Book {
         let book = try repo.bookmark(
-            siteId: rule.id, siteBookId: siteBookId, title: info.title,
+            siteId: rule.id, siteBookId: siteBookId, kind: rule.kind, title: info.title,
             author: info.author, coverURL: info.cover
         )
         cloud.push(book)

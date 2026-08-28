@@ -10,8 +10,8 @@ import XCTest
 final class CatalogFreshnessTests: XCTestCase {
     private func makeBook(catalogUpdatedAt: Date?) -> Book {
         Book(
-            id: "demo|1", siteId: "demo", siteBookId: "1", title: "t", displayName: nil,
-            author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
+            id: "demo|1", siteId: "demo", siteBookId: "1", kind: .novel, title: "t",
+            displayName: nil, author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
             lastReadCharacterOffset: nil, lastReadFraction: nil, lastReadAt: nil, catalogUpdatedAt: catalogUpdatedAt
         )

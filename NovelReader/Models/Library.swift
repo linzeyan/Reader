@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-/// A bookmarked novel.
+/// A book on the shelf — a novel or a comic, as `kind` says.
 ///
 /// `id` is `siteId|siteBookId` rather than an autoincrement row id: the same
 /// book bookmarked on two devices must collapse to one row when iCloud merges
@@ -13,6 +13,17 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     var id: String
     var siteId: String
     var siteBookId: String
+    /// What this book is, copied from the rule it was added through.
+    ///
+    /// Copied rather than looked up, because the rule is not always there to look up: a
+    /// book restored from iCloud lands on a device that may never have installed the rule
+    /// it names, and it still has to open in the right reader. `SiteRule.Kind` rather
+    /// than a second enum saying the same two words — the rule is where this answer comes
+    /// from, and two spellings of it is how a book ends up in the wrong reader.
+    ///
+    /// A book imported from a file on the device is a novel: nothing but text can be
+    /// imported (see `LocalBookImporter`).
+    var kind: SiteRule.Kind
     /// Title as published by the site.
     var title: String
     /// User override (requirement 3.2). `nil` means "follow the site".
@@ -33,11 +44,22 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     /// position directly — `LibraryRepo.newChapterCounts` joins it back to the catalog
     /// for the whole library in one grouped query, which a blob would make impossible.
     /// `readingPosition` is the shape the rest of the app works in.
+    ///
+    /// The same three columns hold a comic's position, under a widened reading of the
+    /// middle one: `lastReadParagraph` is **which visual block** the reader stopped on —
+    /// a paragraph in a novel, a *page* in a comic — and `lastReadCharacterOffset` is 0
+    /// for a comic, which has nothing finer than a page to name. Widening the meaning
+    /// rather than adding a comic's own pair of columns is what makes a comic position
+    /// sync through iCloud and draw on the shelf without a line of new code: every query
+    /// that already reads a position reads a comic's too, and there is no second position
+    /// to keep in step with this one.
     var lastReadSiteChapterId: String?
     var lastReadParagraph: Int?
     var lastReadCharacterOffset: Int?
     /// How far into that chapter the position sits, 0…1, as `TextAnchor.fraction(in:)`
-    /// measured it when the chapter was on screen.
+    /// measured it when the chapter was on screen — or, in a comic, as the reader that had
+    /// the pages on screen measured it against their count. Either way it is the renderer
+    /// reporting what it actually laid out, never a share worked back out of the anchor.
     ///
     /// Stored rather than derived because deriving it needs the chapter's text: the shelf
     /// draws a row per book and holds none. Nil for a position recorded before this
