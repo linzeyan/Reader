@@ -107,6 +107,7 @@ final class LiveSiteTests: XCTestCase {
         let manager = DownloadManager(
             service: service,
             downloads: DownloadStore(database: database, files: files),
+            images: ImageFetcher(),
             pacer: RequestPacer(gap: 0.2...0.4),
             queueStore: DownloadQueueStore(
                 url: URL.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")

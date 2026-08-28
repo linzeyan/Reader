@@ -55,6 +55,9 @@ final class DownloadManager {
 
     private let service: BookService
     private let downloads: DownloadStore
+    /// How a comic chapter's pages come down. The addresses still come out of the web
+    /// view like everything else; only the bytes take the other road.
+    private let images: ImageFetcher
     /// Shared with the reader's read-ahead, so the two together still look like
     /// one person turning pages rather than two processes taking turns.
     private let pacer: RequestPacer
@@ -90,11 +93,13 @@ final class DownloadManager {
     init(
         service: BookService,
         downloads: DownloadStore,
+        images: ImageFetcher,
         pacer: RequestPacer,
         queueStore: DownloadQueueStore
     ) {
         self.service = service
         self.downloads = downloads
+        self.images = images
         self.pacer = pacer
         self.queueStore = queueStore
     }
@@ -261,14 +266,7 @@ final class DownloadManager {
             defer { if self.runToken == token { self.notifyStopped() } }
             while !Task.isCancelled, let chapter = self.remaining.first {
                 do {
-                    let paragraphs = try await self.service.chapterParagraphs(
-                        rule: context.rule, chapter: chapter
-                    )
-                    try self.downloads.save(
-                        paragraphs: paragraphs,
-                        book: context.book,
-                        siteChapterId: chapter.siteChapterId
-                    )
+                    try await self.download(chapter, of: context.book, from: context.rule)
                     self.noteChapterSucceeded()
                     guard self.completeIfStillQueued(chapter) else { return }
                 } catch is CancellationError {
@@ -334,6 +332,36 @@ final class DownloadManager {
             if !Task.isCancelled && self.remaining.isEmpty {
                 self.finish()
             }
+        }
+    }
+
+    /// Fetches one chapter and puts it on the device.
+    ///
+    /// The only thing about downloading that a comic changes. Everything around this —
+    /// the queue, pausing, stopping dead on a challenge, the failure streak, the rest
+    /// blocks, the background drain — is about chapters rather than about what is in
+    /// them, and none of it needed to know.
+    ///
+    /// Both paths end in a store call that writes the files first and sets
+    /// `downloadedAt` second, so the flag never claims a chapter that is not there.
+    private func download(_ chapter: Chapter, of book: Book, from rule: SiteRule) async throws {
+        switch book.kind {
+        case .novel:
+            let paragraphs = try await service.chapterParagraphs(rule: rule, chapter: chapter)
+            try downloads.save(
+                paragraphs: paragraphs, book: book, siteChapterId: chapter.siteChapterId
+            )
+        case .comic:
+            guard let page = URL(string: chapter.url) else { throw BookService.ServiceError.badURL }
+            // The addresses first, through the web view, because only a real engine
+            // runs the packed scripts these lists hide in — and that read is what a
+            // challenge or a sign-in wall interrupts, which is why it stays on the same
+            // path the novels take and reaches the same `catch` above.
+            let urls = try await service.chapterImageURLs(rule: rule, chapter: chapter)
+            let bytes = try await images.chapterImages(
+                at: urls, chapterPage: page, cookies: await ImageFetcher.siteCookies()
+            )
+            try downloads.save(pages: bytes, book: book, siteChapterId: chapter.siteChapterId)
         }
     }
 

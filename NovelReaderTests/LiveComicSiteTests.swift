@@ -87,6 +87,130 @@ final class LiveComicSiteTests: XCTestCase {
         }
     }
 
+    /// Downloading a chapter, and finding a whole one on the disk afterwards.
+    ///
+    /// The test above proves one image can be *fetched*; this proves a chapter can be
+    /// *kept*, which is not the same claim. A download writes 15–50 files through a
+    /// `.partial` directory and then sets a flag the reader trusts offline — and the one
+    /// place that promise matters is the one place it cannot be checked, so it is
+    /// checked here instead. What a broken version of this looks like is a chapter that
+    /// reads fine at home and has holes in it on a plane.
+    ///
+    /// One chapter, from the first site that offers one. The stage is a real download
+    /// against someone else's server, and doing it four times proves nothing the first
+    /// does not.
+    func testAChapterDownloadsCompleteAndReadsBackFromDisk() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["NOVELREADER_LIVE"] == "1",
+            "Live site tests are opt-in: run `make test-live`."
+        )
+        let rules = try LiveSiteRules.seeded().filter { $0.kind == .comic }
+        XCTAssertFalse(rules.isEmpty, "No comic rules in the app bundle — is this a Debug build?")
+
+        let fetcher = WebFetcher()
+        let host = HeadlessHost(webView: fetcher.webView)
+        defer { host.tearDown() }
+        let database = try AppDatabase.makeInMemory()
+        let repo = LibraryRepo(database: database)
+        let files = ChapterFileStore(
+            root: URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        )
+        defer { try? FileManager.default.removeItem(at: files.root) }
+        let service = BookService(fetcher: fetcher, repo: repo)
+        let manager = DownloadManager(
+            service: service,
+            downloads: DownloadStore(database: database, files: files),
+            images: ImageFetcher(),
+            pacer: RequestPacer(gap: 0.2...0.4),
+            queueStore: DownloadQueueStore(
+                url: URL.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+            )
+        )
+
+        guard let target = await firstDownloadableChapter(
+            from: rules, fetcher: fetcher, service: service, repo: repo
+        ) else {
+            throw XCTSkip("No comic site offered a chapter to download")
+        }
+        // The extractor's count is the yardstick: a download is complete when the disk
+        // holds exactly what the page listed. Comparing against itself — "some files
+        // arrived" — is what would let a short chapter pass.
+        let expected = try await service.chapterImageURLs(
+            rule: target.rule, chapter: target.chapter
+        ).count
+        XCTAssertGreaterThan(expected, 0)
+
+        manager.start(book: target.book, rule: target.rule, chapters: [target.chapter])
+        let deadline = Date().addingTimeInterval(Self.downloadDeadline)
+        while manager.status == .running || manager.status == .paused, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        XCTAssertEqual(
+            manager.status, .finished,
+            "the run did not finish: \(manager.status). Site \(target.rule.id)"
+        )
+
+        let pages = files.pageURLs(
+            siteId: target.book.siteId, siteBookId: target.book.siteBookId,
+            siteChapterId: target.chapter.siteChapterId
+        )
+        XCTAssertEqual(pages.count, expected, "\(target.rule.id): the chapter landed short")
+        for (index, page) in pages.enumerated() {
+            let bytes = try Data(contentsOf: page)
+            XCTAssertTrue(
+                ImageFormat.isImage(bytes), "\(target.rule.id) page \(index + 1) is not an image"
+            )
+            // The size a hotlink stub or a WAF page comes back as. `ImageFetcher`
+            // already refuses non-images, so this is the one that catches a 3-byte GIF
+            // that is technically a GIF.
+            XCTAssertGreaterThan(bytes.count, 1024, "\(target.rule.id) page \(index + 1) is a stub")
+        }
+        let stored = try repo.chapters(bookId: target.book.id)
+            .first { $0.siteChapterId == target.chapter.siteChapterId }
+        XCTAssertEqual(
+            stored?.isDownloaded, true,
+            "the flag the reader trusts offline has to agree with the disk"
+        )
+        print("\n=== \(target.rule.id): downloaded \(pages.count) pages of "
+              + "\(target.chapter.title) ===\n")
+    }
+
+    private struct DownloadTarget {
+        let rule: SiteRule
+        let book: Book
+        let chapter: Chapter
+    }
+
+    /// The first chapter any of these sites will actually give up.
+    ///
+    /// The *first* chapter of the book, deliberately: one of these sites sells its later
+    /// chapters, and a purchase wall returns a page with no images at all.
+    private func firstDownloadableChapter(
+        from rules: [SiteRule], fetcher: WebFetcher, service: BookService, repo: LibraryRepo
+    ) async -> DownloadTarget? {
+        for rule in rules {
+            guard let candidates = try? await LiveSiteRules.discoverBookIds(
+                rule: rule, fetcher: fetcher, limit: Self.bookCandidates
+            ) else { continue }
+            for siteBookId in candidates {
+                guard let info = try? await service.info(rule: rule, siteBookId: siteBookId),
+                      let book = try? repo.bookmark(
+                          siteId: rule.id, siteBookId: siteBookId, kind: rule.kind,
+                          title: info.title, author: info.author, coverURL: info.cover
+                      ),
+                      let chapters = try? await service.refreshCatalog(rule: rule, book: book),
+                      let first = chapters.first
+                else { continue }
+                return DownloadTarget(rule: rule, book: book, chapter: first)
+            }
+        }
+        return nil
+    }
+
+    /// How long one chapter is given. Fifty images three at a time, over a phone's
+    /// network, with a politeness gap between them.
+    private static let downloadDeadline: TimeInterval = 180
+
     // MARK: - One site
 
     private func exercise(_ rule: SiteRule) async -> Report {

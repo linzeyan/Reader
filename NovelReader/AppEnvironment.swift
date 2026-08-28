@@ -136,7 +136,8 @@ final class AppEnvironment {
         let pacer = RequestPacer()
         self.pacer = pacer
         let downloader = DownloadManager(
-            service: bookService, downloads: self.downloads, pacer: pacer, queueStore: queueStore
+            service: bookService, downloads: self.downloads, images: images, pacer: pacer,
+            queueStore: queueStore
         )
         self.downloader = downloader
         self.localImporter = LocalBookImporter(

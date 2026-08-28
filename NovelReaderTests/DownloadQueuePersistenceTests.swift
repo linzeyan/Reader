@@ -316,7 +316,8 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         )
         let downloader = DownloadManager(
             service: BookService(fetcher: WebFetcher(), repo: repo),
-            downloads: downloads, pacer: RequestPacer(), queueStore: queueStore
+            downloads: downloads, images: ImageFetcher(),
+            pacer: RequestPacer(), queueStore: queueStore
         )
         let settings = DownloadSettings(defaults: defaults)
         settings.network = policy
