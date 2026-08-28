@@ -199,6 +199,18 @@ struct SiteRule: Codable, Identifiable, Hashable {
                 case dom
                 /// Read them out of a global the page's own scripts built.
                 case global
+                /// Read them out of the page's own packed script, undone as text.
+                ///
+                /// For the site that ships its page list inside
+                /// `eval(function(p,a,c,k,e,d){…}(…))` and hands the result straight
+                /// to a function, so nothing of it is ever left on a global or in
+                /// the DOM — 194 pages in a chapter, one address findable. Undoing
+                /// that packing is base conversion and dictionary substitution: the
+                /// data was always in the first bytes of the page, only compressed.
+                ///
+                /// The paths below are read the same way as for `global`, but from
+                /// the decoded object rather than from `window`.
+                case packed
             }
 
             let type: Kind
@@ -216,10 +228,11 @@ struct SiteRule: Codable, Identifiable, Hashable {
             /// Run the attribute's value through HTML entity decoding first.
             let unescape: Bool?
 
-            // MARK: global
+            // MARK: global / packed
 
-            /// Dot path from `window` to an array of file names or URLs, e.g.
-            /// `newImgs` or `cInfo.files`.
+            /// Dot path to an array of file names or URLs, e.g. `newImgs` or
+            /// `cInfo.files`. Rooted at `window` for `global`, at the decoded
+            /// object for `packed`.
             ///
             /// Walked one property at a time by the extractor's own JavaScript.
             /// A rule file travels between users and is read inside the web view

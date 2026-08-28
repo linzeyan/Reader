@@ -397,6 +397,104 @@ final class ComicRuleTests: XCTestCase {
         )
     }
 
+    // MARK: - The packed strategy
+
+    /// A chapter packed the way the site that needs this packs it: the page list
+    /// is inside `eval(function(p,a,c,k,e,d){…}(…))` and nowhere else.
+    ///
+    /// `dictionaryCall` is the parameter because it is the thing under test — the
+    /// site obfuscates how its dictionary is decompressed, and a reader that only
+    /// understands one spelling of that is a reader for one site.
+    private static func packedPage(dictionaryCall: String, tail: String = "") -> String {
+        """
+        <html><body><div id="pics"></div>
+        <script>
+        window['eval'](function(p,a,c,k,e,d){}(\
+        '0.1({"2":["/p/3.jpg","/p/4.jpg"],"5":{"e":"exp","m":"sig"}})\(tail)',\
+        10,9,\(dictionaryCall),0,{}))
+        </script></body></html>
+        """
+    }
+
+    /// Index 0-8 in base 10, so each token is a single digit.
+    private static let packedDictionary = "SMH|reader|images|001|002|sl|window|__pwned|1"
+
+    private static let packedStrategy = """
+    { "type": "packed", "arrayPath": "images", "queryPath": "sl", "baseURL": "https://cdn.test" }
+    """
+
+    private static let expectedPackedURLs = [
+        "https://cdn.test/p/001.jpg?e=exp&m=sig",
+        "https://cdn.test/p/002.jpg?e=exp&m=sig",
+    ]
+
+    /// The plain case: an unobfuscated packer, whose dictionary is a `split`.
+    @MainActor
+    func testAPackedChapterIsReadWithoutRunningIt() async throws {
+        let payload = try await extractImages(
+            from: Self.comicJSON(strategies: Self.packedStrategy),
+            html: Self.packedPage(dictionaryCall: "'\(Self.packedDictionary)'.split('|')")
+        )
+        XCTAssertEqual(payload.imageURLs, Self.expectedPackedURLs)
+        XCTAssertEqual(payload.matchedStrategy, "packed:images")
+    }
+
+    /// The real case. The site hides its decompressor behind an escaped property
+    /// name and an escaped separator, so both are read out of the packed call
+    /// rather than written into the app — otherwise this is a rule engine with one
+    /// site's name compiled into it.
+    @MainActor
+    func testTheDictionaryDecoderIsReadFromThePageNotAssumed() async throws {
+        let hidden = """
+        <script>
+        String.prototype['\\x73\\x70\\x6c\\x69\\x63'] = function (s) { return this.split(s); };
+        </script>
+        """
+        let page = Self.packedPage(
+            dictionaryCall: "'\(Self.packedDictionary)'['\\x73\\x70\\x6c\\x69\\x63']('\\x7c')"
+        )
+        let payload = try await extractImages(
+            from: Self.comicJSON(strategies: Self.packedStrategy),
+            html: page.replacingOccurrences(of: "<script>\nwindow['eval']", with: "\(hidden)<script>\nwindow['eval']")
+        )
+        XCTAssertEqual(
+            payload.imageURLs, Self.expectedPackedURLs,
+            "the method name and separator have to come from the page — nothing else knows them"
+        )
+    }
+
+    /// The invariant the whole design rests on, stated where it is easiest to
+    /// break: what comes out of the packer is *text*, and text that happens to be
+    /// executable must still never execute.
+    ///
+    /// The fixture packs a statement with a visible side effect after the object.
+    /// Evaluate the unpacked string — which is exactly what the page itself does —
+    /// and the flag is set. Read it as data, and the object is parsed and the
+    /// statement is so many characters. A rule file travels between users and is
+    /// read inside the web view holding every cookie they own; this is the test
+    /// that says the packing is not a way around that.
+    @MainActor
+    func testUnpackingNeverExecutesWhatItUnpacked() async throws {
+        let script = try ExtractorScript.comicImages(
+            try rule(Self.comicJSON(strategies: Self.packedStrategy))
+        )
+        let page = ScriptedPage()
+        await page.load(Self.packedPage(dictionaryCall: "'\(Self.packedDictionary)'.split('|')",
+                                        tail: ");6.7=8"))
+
+        let payload = try await page.evaluate(script, as: ExtractorScript.ComicImagesPayload.self)
+        XCTAssertEqual(
+            payload.imageURLs, Self.expectedPackedURLs,
+            "the object still has to be read, or this test would pass by doing nothing"
+        )
+
+        struct Flag: Decodable { let pwned: Bool }
+        let flag = try await page.evaluate(
+            "({ pwned: typeof window.__pwned !== 'undefined' })", as: Flag.self
+        )
+        XCTAssertFalse(flag.pwned, "the unpacked text was executed — it must only ever be parsed")
+    }
+
     /// Shaped after the site with the per-book sort button.
     private static let sortableCatalogJSON = """
     {
