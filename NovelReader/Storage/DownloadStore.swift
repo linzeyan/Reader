@@ -40,6 +40,20 @@ struct DownloadStore {
         }
     }
 
+    /// The same contract for a comic chapter: the pages land first, and only a chapter
+    /// that is completely on disk gets the flag that says so.
+    func save(pages: [Data], book: Book, siteChapterId: String, now: Date = Date()) throws {
+        try files.writePages(
+            pages, siteId: book.siteId, siteBookId: book.siteBookId, siteChapterId: siteChapterId
+        )
+        try writer.write { db in
+            let id = Chapter.makeId(bookId: book.id, siteChapterId: siteChapterId)
+            guard var chapter = try Chapter.fetchOne(db, key: id) else { return }
+            chapter.downloadedAt = now
+            try chapter.update(db)
+        }
+    }
+
     func readParagraphs(book: Book, siteChapterId: String) throws -> [String] {
         try files.readParagraphs(
             siteId: book.siteId, siteBookId: book.siteBookId, siteChapterId: siteChapterId
