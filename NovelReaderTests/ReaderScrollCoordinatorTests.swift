@@ -181,6 +181,57 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         )
     }
 
+    // MARK: - Drawing
+
+    /// Renders one window the way `ReaderTextCanvas` does, and says whether anything
+    /// landed in it. The window is in content coordinates and the context's origin is
+    /// its top-left corner, which is exactly the canvas's arrangement.
+    private func hasInk(in window: CGRect) -> Bool {
+        let blank = UIGraphicsImageRenderer(size: window.size).pngData { _ in }
+        let drawn = UIGraphicsImageRenderer(size: window.size).pngData { context in
+            coordinator.draw(window, in: context.cgContext)
+        }
+        return drawn != blank
+    }
+
+    /// Text has to reach the foot of the window however far into a chapter the reader is.
+    ///
+    /// The report this exists for, from a device: correct at the top of a chapter,
+    /// emptier the further in, wholly blank once a window in, and the next chapter's
+    /// opening correct again. It was the reader's distance into the chapter being
+    /// subtracted twice — once here and once inside the column — so the text was pushed
+    /// up by exactly that distance. Nothing in `ChapterColumnTests` could see it: those
+    /// call the column directly, which applies the offset once and looks perfect.
+    ///
+    /// The simulator hid it too, because a demo chapter is barely taller than one window
+    /// and the error only shows past that. So the fixture here is deliberately long.
+    func testTextReachesTheFootOfTheWindowHoweverFarIntoAChapterTheReaderIs() async throws {
+        try await show([chapter(1, paragraphs: 60)])
+
+        for paragraph in [0, 10, 25, 40] {
+            coordinator.scroll(
+                to: TextAnchor(paragraph: paragraph, characterOffset: 0),
+                inChapter: 1, animated: false
+            )
+            let top = view.readingOffset
+            XCTAssertTrue(
+                hasInk(in: CGRect(
+                    x: 0, y: top, width: view.textWidth, height: view.visibleHeight
+                )),
+                "the window opened at paragraph \(paragraph) must have text in it"
+            )
+            // The foot first, because that is the end a doubled offset empties.
+            XCTAssertTrue(
+                hasInk(in: CGRect(
+                    x: 0, y: top + view.visibleHeight - 60,
+                    width: view.textWidth, height: 60
+                )),
+                "and text at its foot — a window opened at paragraph \(paragraph) that is "
+                    + "full at the top and empty at the bottom is the reported blank screen"
+            )
+        }
+    }
+
     // MARK: - Turning pages
 
     /// A tapped turn lands on the paragraph `ReaderTapZone` names, at the exact height

@@ -306,8 +306,15 @@ final class ChapterColumn {
 
     // MARK: - Drawing
 
-    /// Draws the part of the column inside `columnRect` into a context whose origin is
-    /// that rect's top-left corner.
+    /// Draws the part of the column inside `columnRect`, **in column coordinates**.
+    ///
+    /// The caller places the column: the context has to already be positioned so that
+    /// this column's y zero is where the caller wants it. `columnRect` says which part
+    /// to draw and nothing about where to put it. Translating here as well as there is
+    /// what made the reader on a device correct at the top of a chapter and emptier the
+    /// further in they got — the same offset applied twice pushes the text a whole
+    /// window off the screen once the reader is one window into the chapter, and the
+    /// simulator never showed it because a demo chapter is barely taller than one.
     ///
     /// A paragraph straddling the top edge is drawn whole and cut by the caller's clip:
     /// TextKit lays a paragraph out as one fragment, and asking for half of one would
@@ -328,8 +335,6 @@ final class ChapterColumn {
             firstY: list.first?.origin.y, lastY: list.last?.maxY, height: height
         )
         #endif
-        context.saveGState()
-        context.translateBy(x: 0, y: -columnRect.minY)
         for placed in list {
             for line in placed.lineFragments {
                 let bounds = line.typographicBounds
@@ -341,7 +346,6 @@ final class ChapterColumn {
                 )
             }
         }
-        context.restoreGState()
     }
 
     /// The fragments with any part inside a vertical range, in reading order.

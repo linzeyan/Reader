@@ -212,8 +212,12 @@ final class ChapterColumnTests: XCTestCase {
 
     // MARK: - Drawing
 
+    /// Renders one window the way the reader does: the caller places the column, and
+    /// `draw` only says which part of it to put there. See `ChapterColumn.draw` — doing
+    /// this at both ends is the bug these tests could not see.
     private func render(_ column: ChapterColumn, window: CGRect) -> Data? {
         UIGraphicsImageRenderer(size: window.size).pngData { context in
+            context.cgContext.translateBy(x: 0, y: -window.minY)
             column.draw(window, in: context.cgContext)
         }
     }
