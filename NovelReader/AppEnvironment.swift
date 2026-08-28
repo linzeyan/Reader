@@ -19,6 +19,10 @@ final class AppEnvironment {
     /// rather than made per screen so that both go through one `URLSession` — which is
     /// `.shared`, and therefore one `URLCache`. See `ImageFetcher`.
     let images: ImageFetcher
+    /// Where book covers are kept. Exposed alongside `files` because the exporter puts
+    /// one in an EPUB and reads it straight off the disk.
+    let coverFiles: CoverStore
+    let covers: CoverService
     let sites: SiteStore
     let bookService: BookService
     let search: SearchService
@@ -108,18 +112,24 @@ final class AppEnvironment {
     init(
         database: AppDatabase,
         files: ChapterFileStore,
+        coverFiles: CoverStore,
         sites: SiteStore,
         queueStore: DownloadQueueStore
     ) {
         self.database = database
         self.files = files
+        self.coverFiles = coverFiles
         self.sites = sites
         let repo = LibraryRepo(database: database)
         self.repo = repo
         self.downloads = DownloadStore(database: database, files: files)
         let fetcher = WebFetcher()
         self.fetcher = fetcher
-        self.images = ImageFetcher()
+        let images = ImageFetcher()
+        self.images = images
+        self.covers = CoverService(
+            store: coverFiles, images: images, rule: { sites.rule(id: $0) }
+        )
         let bookService = BookService(fetcher: fetcher, repo: repo)
         self.bookService = bookService
         self.search = SearchService(fetcher: fetcher)
@@ -185,6 +195,7 @@ final class AppEnvironment {
             return AppEnvironment(
                 database: try AppDatabase.makeShared(),
                 files: try ChapterFileStore.makeShared(),
+                coverFiles: try CoverStore.makeShared(),
                 sites: try SiteStore.makeShared(),
                 queueStore: try DownloadQueueStore.makeShared()
             )
@@ -196,6 +207,7 @@ final class AppEnvironment {
             let fallback = AppEnvironment(
                 database: try! AppDatabase.makeInMemory(),
                 files: ChapterFileStore(root: URL.temporaryDirectory.appendingPathComponent("Chapters")),
+                coverFiles: CoverStore(root: URL.temporaryDirectory.appendingPathComponent("Covers")),
                 sites: SiteStore(directory: URL.temporaryDirectory.appendingPathComponent("Rules")),
                 queueStore: DownloadQueueStore(
                     url: URL.temporaryDirectory.appendingPathComponent("DownloadQueue.json")
@@ -375,6 +387,7 @@ final class AppEnvironment {
         cloud.removed(bookId: book.id)
         // The one place a book stops existing, and the only chance to drop what is
         // kept about it outside the database.
+        covers.remove(book)
         librarySettings.forgetCatalogOrder(bookId: book.id)
         if downloader.progress?.bookId == book.id { downloader.cancel() }
         reloadLibrary()

@@ -23,6 +23,7 @@ final class BookExportTests: XCTestCase {
     private var tempRoot: URL!
     private var repo: LibraryRepo!
     private var downloads: DownloadStore!
+    private var coverStore: CoverStore!
     private var exporter: BookExporter!
 
     override func setUpWithError() throws {
@@ -31,17 +32,13 @@ final class BookExportTests: XCTestCase {
         let database = try AppDatabase.makeInMemory()
         repo = LibraryRepo(database: database)
         downloads = DownloadStore(database: database, files: ChapterFileStore(root: tempRoot))
-        exporter = BookExporter(downloads: downloads)
-        // Cleared at the *start*: the cover tests seed this cache, it is shared by
-        // the whole process, and a leftover response would decide whether a later
-        // test's export carries a cover.
-        URLCache.shared.removeAllCachedResponses()
+        coverStore = CoverStore(root: tempRoot.appendingPathComponent("Covers"))
+        exporter = BookExporter(downloads: downloads, covers: coverStore)
     }
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: tempRoot)
         try? FileManager.default.removeItem(at: BookExporter.directory)
-        URLCache.shared.removeAllCachedResponses()
     }
 
     // MARK: - EPUB
@@ -192,10 +189,10 @@ final class BookExportTests: XCTestCase {
     /// The cover is written only when its bytes are already on the device, because
     /// an export must not make a network request — a file the user is waiting for
     /// cannot be waiting on someone else's server.
-    func testTheCoverIsWrittenWhenItsBytesAreAlreadyCached() async throws {
+    func testTheCoverIsWrittenWhenItsBytesAreOnTheDevice() async throws {
         let cover = try XCTUnwrap(Data(base64Encoded: Self.pngBase64))
-        cacheCover(cover, mediaType: "image/png")
         let (book, catalog) = try makeBook(cover: Self.coverURL)
+        try coverStore.save(cover, for: book)
 
         let export = try await exporter.export(
             book: book, chapters: catalog, format: .epub
@@ -212,9 +209,10 @@ final class BookExportTests: XCTestCase {
         XCTAssertTrue(page.contains(#"src="cover.png""#))
     }
 
-    /// The usual case: the user never looked at this book's cover, so nothing on
-    /// the device has it. The title page is still there, in text.
-    func testNoCoverIsWrittenWhenNothingIsCached() async throws {
+    /// The usual case: the cover never arrived — the site has not got one, or
+    /// refused it — so nothing on the device has it. The title page is still there,
+    /// in text.
+    func testNoCoverIsWrittenWhenTheDeviceHasNotGotOne() async throws {
         let (book, catalog) = try makeBook(cover: Self.coverURL)
 
         let export = try await exporter.export(
@@ -234,8 +232,8 @@ final class BookExportTests: XCTestCase {
     /// rather than declared: an unfallback-able media type makes the whole file
     /// invalid, which is a high price for a picture.
     func testACoverInAnUnsupportedFormatIsLeftOut() async throws {
-        cacheCover(Data("RIFF....WEBP".utf8), mediaType: "image/webp")
         let (book, catalog) = try makeBook(cover: Self.coverURL)
+        try coverStore.save(Data("RIFF....WEBP".utf8), for: book)
 
         let export = try await exporter.export(
             book: book, chapters: catalog, format: .epub
@@ -445,25 +443,13 @@ final class BookExportTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// A 1×1 PNG. Real bytes with a real media type, because what the exporter
-    /// decides about a cover is decided from the cached response's type.
+    /// A 1×1 PNG. Real bytes, because what the exporter decides about a cover is
+    /// decided by reading them — see `ImageFormat`.
     private static let pngBase64 = """
     iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC
     """
 
     private static let coverURL = "https://example.com/covers/1.png"
-
-    /// Puts a cover where `AsyncImage` would have left one.
-    private func cacheCover(_ data: Data, mediaType: String) {
-        let url = URL(string: Self.coverURL)!
-        let response = HTTPURLResponse(
-            url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": mediaType, "Content-Length": "\(data.count)"]
-        )!
-        URLCache.shared.storeCachedResponse(
-            CachedURLResponse(response: response, data: data), for: URLRequest(url: url)
-        )
-    }
 
     /// The export is a file now, so every assertion about its contents reads it.
     private func bytes(of export: BookExporter.Export) throws -> Data {

@@ -74,6 +74,8 @@ struct BookExporter {
     typealias ProgressHandler = @MainActor (Double) -> Void
 
     let downloads: DownloadStore
+    /// Where the cover on the title page comes from. See `cover(of:)`.
+    let covers: CoverStore
 
     /// Where a finished export waits for the save sheet.
     ///
@@ -241,7 +243,7 @@ struct BookExporter {
         // be offering the user a book with nothing in it.
         guard !titles.isEmpty else { return 0 }
 
-        let cover = Self.cover(of: book)
+        let cover = cover(of: book)
         let author = Self.author(of: book)
         if let cover {
             try zip.append(ZipBuilder.Entry(name: "OEBPS/\(cover.href)", data: cover.data))
@@ -357,42 +359,42 @@ struct BookExporter {
         return trimmed?.isEmpty == true ? nil : trimmed
     }
 
-    /// The cover's bytes, if this device already has them.
+    /// The cover's bytes, if this device has them.
     ///
-    /// `URLCache` is where `AsyncImage` left the cover it drew on the library
-    /// shelf, so a book the user has actually looked at usually has one. A book
-    /// whose cover was never loaded gets a text-only title page instead: an
-    /// export must not make a network request, because a picture is not worth
-    /// making the user wait on a site that may not answer.
+    /// From `CoverStore`, which is where the cover on the shelf comes from, so a book
+    /// whose cover has ever been drawn has one here. A book that has not gets a
+    /// text-only title page instead: an export must not make a network request,
+    /// because a picture is not worth making the user wait on a site that may not
+    /// answer.
     ///
-    /// The one cost is stated here so it is not a surprise: an export made before
-    /// the cover was ever shown differs from one made after, so re-importing the
-    /// two would produce two books. Every other input to the file is fixed.
+    /// The one cost is stated here so it is not a surprise: an export made before the
+    /// cover was ever fetched differs from one made after, so re-importing the two
+    /// would produce two books. Every other input to the file is fixed.
     private struct Cover {
         let href: String
         let mediaType: String
         let data: Data
     }
 
-    /// The image types EPUB 3 lists as core, minus SVG, which a cached cover
-    /// never is. WebP is left out on purpose: it only became a core type in EPUB
-    /// 3.3 and the package below declares 3.0, so a WebP cover would trade
-    /// validity for a picture — and would need a fallback image we do not have.
-    private static let coverTypes = [
-        "image/jpeg": "jpg",
-        "image/png": "png",
-        "image/gif": "gif",
-    ]
+    /// The image types EPUB 3 lists as core, minus SVG, which a fetched cover never
+    /// is. WebP is left out on purpose: it only became a core type in EPUB 3.3 and the
+    /// package below declares 3.0, so a WebP cover would trade validity for a picture
+    /// — and would need a fallback image this does not have. That is a live case
+    /// rather than a hypothetical one: WebP is what manhuagui serves.
+    private static let epubCoverFormats: Set<ImageFormat> = [.jpeg, .png, .gif]
 
-    private static func cover(of book: Book) -> Cover? {
-        guard let string = book.coverURL,
-              let url = URL(string: string),
-              let cached = URLCache.shared.cachedResponse(for: URLRequest(url: url)),
-              !cached.data.isEmpty,
-              let mediaType = cached.response.mimeType?.lowercased(),
-              let suffix = coverTypes[mediaType]
+    /// The format is read out of the bytes rather than believed from what anything
+    /// says about them. Not pedantry: declining a WebP is the whole job here, and the
+    /// previous source of this answer — a cached response's `Content-Type` — is
+    /// exactly the field that is wrong when it matters.
+    private func cover(of book: Book) -> Cover? {
+        guard let data = covers.data(for: book), !data.isEmpty,
+              let format = ImageFormat(sniffing: data),
+              Self.epubCoverFormats.contains(format)
         else { return nil }
-        return Cover(href: "cover.\(suffix)", mediaType: mediaType, data: cached.data)
+        return Cover(
+            href: "cover.\(format.fileExtension)", mediaType: format.mediaType, data: data
+        )
     }
 
     /// One page carrying what the book is called and who wrote it.

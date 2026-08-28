@@ -138,7 +138,7 @@ struct BookDetailView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 14) {
-            CoverImage(urlString: current.coverURL)
+            BookCover(book: current)
                 .frame(width: 72, height: 100)
             VStack(alignment: .leading, spacing: 6) {
                 Text(current.shownName).font(.headline)
@@ -427,7 +427,7 @@ struct BookDetailView: View {
             exportTask = nil
         }
         do {
-            pendingExport = try await BookExporter(downloads: env.downloads)
+            pendingExport = try await BookExporter(downloads: env.downloads, covers: env.coverFiles)
                 .export(book: current, chapters: chapters, format: format) { exportProgress = $0 }
         } catch is CancellationError {
             // Stopping was the user's own decision, and the banner going away is

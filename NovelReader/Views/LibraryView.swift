@@ -400,7 +400,7 @@ struct BookRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            CoverImage(urlString: book.coverURL)
+            BookCover(book: book)
                 .frame(width: 44, height: 60)
             VStack(alignment: .leading, spacing: 3) {
                 Text(book.shownName).font(.body).lineLimit(2)
@@ -439,13 +439,42 @@ struct BookRow: View {
     }
 }
 
+/// A book's cover, drawn from the copy on this device.
+///
+/// The file rather than the site's address, because a cover is an image request and
+/// these hosts refuse an image request that does not say which page it belongs to —
+/// `AsyncImage` cannot send that header, and `CoverService` exists to. The bytes are
+/// kept, so this is also what stops the shelf's appearance depending on whether
+/// `URLCache` has evicted anything since.
+///
+/// Resolved per view rather than through one cache of decoded images: the answer is a
+/// file URL, and SwiftUI only draws the rows that are on screen, so what is held in
+/// memory is a screenful of thumbnails rather than the whole library's.
+struct BookCover: View {
+    let book: Book
+
+    @Environment(AppEnvironment.self) private var env
+    @State private var file: URL?
+    /// Which book `file` was resolved for. A row recycled onto a different book must
+    /// not draw the previous one's cover while the new one is being looked up.
+    @State private var resolvedFor: String?
+
+    var body: some View {
+        CoverImage(url: resolvedFor == book.id ? file : nil)
+            .task(id: book.id) {
+                file = await env.covers.cover(for: book)
+                resolvedFor = book.id
+            }
+    }
+}
+
 /// Covers are hotlinked from the source site and frequently 403 or simply do not
 /// exist, so the placeholder is the expected state, not the error state.
 struct CoverImage: View {
-    let urlString: String?
+    let url: URL?
 
     var body: some View {
-        AsyncImage(url: urlString.flatMap(URL.init(string:))) { phase in
+        AsyncImage(url: url) { phase in
             switch phase {
             case .success(let image):
                 image.resizable().aspectRatio(contentMode: .fill)

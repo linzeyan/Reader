@@ -26,6 +26,7 @@ final class ReadingProgressPublishTests: XCTestCase {
         env = AppEnvironment(
             database: try AppDatabase.makeInMemory(),
             files: ChapterFileStore(root: tempRoot.appendingPathComponent("files")),
+            coverFiles: CoverStore(root: tempRoot.appendingPathComponent("covers")),
             sites: SiteStore(directory: tempRoot.appendingPathComponent("sites")),
             queueStore: DownloadQueueStore(url: tempRoot.appendingPathComponent("queue.json"))
         )

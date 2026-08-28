@@ -186,7 +186,7 @@ private struct ResultRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            CoverImage(urlString: result.coverURL)
+            CoverImage(url: result.coverURL.flatMap(URL.init(string:)))
                 .frame(width: 40, height: 54)
             VStack(alignment: .leading, spacing: 3) {
                 Text(result.title).lineLimit(2)

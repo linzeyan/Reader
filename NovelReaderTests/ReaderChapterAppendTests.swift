@@ -30,6 +30,7 @@ final class ReaderChapterAppendTests: XCTestCase {
         env = AppEnvironment(
             database: try AppDatabase.makeInMemory(),
             files: files,
+            coverFiles: CoverStore(root: tempRoot.appendingPathComponent("covers")),
             sites: SiteStore(directory: tempRoot.appendingPathComponent("sites")),
             queueStore: DownloadQueueStore(url: tempRoot.appendingPathComponent("queue.json"))
         )

@@ -84,7 +84,7 @@ final class ImageFetcher {
     ///   none of them — one that came back missing pages 12–17 while claiming to
     ///   be complete is worse than one that failed out loud.
     func chapterImages(at urls: [URL], chapterPage: URL, cookies: [HTTPCookie]) async throws -> [Data] {
-        let requests = urls.map { Self.request(for: $0, chapterPage: chapterPage, cookies: cookies) }
+        let requests = urls.map { Self.request(for: $0, referer: chapterPage, cookies: cookies) }
         let session = self.session
         // One place where a page is fetched; the window below only decides when.
         let fetch: @Sendable (Int) async throws -> (index: Int, bytes: Data) = { index in
@@ -130,19 +130,39 @@ final class ImageFetcher {
     /// - Parameter page: 1-based, and only used to name the page in an error.
     func image(at url: URL, chapterPage: URL, page: Int, cookies: [HTTPCookie]) async throws -> Data {
         try await Self.load(
-            Self.request(for: url, chapterPage: chapterPage, cookies: cookies),
+            Self.request(for: url, referer: chapterPage, cookies: cookies),
             page: page, in: session
         )
     }
 
-    private static func request(for url: URL, chapterPage: URL, cookies: [HTTPCookie]) -> URLRequest {
+    /// One book cover's bytes.
+    ///
+    /// Here for the same reason the chapter pages are: an image on these sites is
+    /// refused unless the request says which page it belongs to, and `AsyncImage` —
+    /// which is what drew the covers before — cannot send a header at all.
+    ///
+    /// - Parameter bookPage: the book's own page on the site, sent as `Referer`.
+    ///   Optional because a book restored from iCloud may name a rule this device
+    ///   never installed, and there is nothing to build the address from then. A cover
+    ///   asked for without one is exactly as likely to arrive as it used to be.
+    ///
+    /// Any error this throws names page 1, which means nothing for a cover. Nothing
+    /// shows it: a cover that will not come back is not a failure the reader is asked
+    /// to do anything about, and never was — see `CoverImage`.
+    func cover(at url: URL, bookPage: URL?, cookies: [HTTPCookie]) async throws -> Data {
+        try await Self.load(
+            Self.request(for: url, referer: bookPage, cookies: cookies), page: 1, in: session
+        )
+    }
+
+    private static func request(for url: URL, referer: URL?, cookies: [HTTPCookie]) -> URLRequest {
         var request = URLRequest(url: url)
-        // The chapter page, always. Three of the four surveyed sites answer 403
-        // without it and 200 with it, and this is exactly what a browser sends:
-        // the page the <img> is on. Deliberately not a rule field — no site needs a
-        // different value, and a field nobody needs is one more way to write a rule
-        // that half works.
-        request.setValue(chapterPage.absoluteString, forHTTPHeaderField: "Referer")
+        // The page the image is on, which for a chapter's images is always known.
+        // Three of the four surveyed sites answer 403 without it and 200 with it, and
+        // this is exactly what a browser sends. Deliberately not a rule field — no
+        // site needs a different value, and a field nobody needs is one more way to
+        // write a rule that half works.
+        if let referer { request.setValue(referer.absoluteString, forHTTPHeaderField: "Referer") }
         // The identity the page itself was fetched with. A host that sees mobile
         // Safari ask for the HTML and something else ask for its images has been
         // handed the one signal we can avoid handing it.
@@ -205,38 +225,12 @@ final class ImageFetcher {
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw ImageFetchError.httpStatus(page: page, status: http.statusCode)
         }
-        guard isImage(data) else { throw ImageFetchError.notAnImage(page: page) }
+        // The case this guards is a 200 that is not the image: a WAF interstitial, a
+        // login page, a hotlink-denied stub. Sniffed rather than decoded, because the
+        // reader decodes it later anyway and paying for fifty decodes a chapter to
+        // learn what twelve bytes already say is a real cost on a phone.
+        guard ImageFormat.isImage(data) else { throw ImageFetchError.notAnImage(page: page) }
         return data
-    }
-
-    /// Whether these bytes begin the way an image file begins.
-    ///
-    /// The case this exists for is a 200 that is not the image: a WAF interstitial,
-    /// a login page, a hotlink-denied stub. The bytes are sniffed rather than the
-    /// `Content-Type` trusted because the header is the part that lies — an HTML
-    /// error page served as `image/jpeg` is precisely what a header check waves
-    /// through — and rather than the image decoded because the reader decodes it
-    /// later anyway, and paying for fifty decodes a chapter to learn what twelve
-    /// bytes already say is a real cost on a phone.
-    ///
-    /// Truncation is beyond either check: nothing short of parsing the whole file
-    /// tells a half-written JPEG from a whole one.
-    nonisolated private static func isImage(_ data: Data) -> Bool {
-        let leading: [[UInt8]] = [
-            [0xFF, 0xD8, 0xFF],        // JPEG
-            [0x89, 0x50, 0x4E, 0x47],  // PNG
-            [0x47, 0x49, 0x46, 0x38],  // GIF87a / GIF89a
-        ]
-        if leading.contains(where: { data.starts(with: $0) }) { return true }
-        // WebP and the ISO base media family (HEIC, AVIF) put a size or container
-        // magic first, so the tag that identifies them sits further in. WebP is not
-        // optional here: it is what manhuagui serves.
-        guard data.count >= 12 else { return false }
-        let head = [UInt8](data.prefix(12))
-        if Array(head[0..<4]) == Array("RIFF".utf8), Array(head[8..<12]) == Array("WEBP".utf8) {
-            return true
-        }
-        return Array(head[4..<8]) == Array("ftyp".utf8)
     }
 }
 

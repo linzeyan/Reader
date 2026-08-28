@@ -34,7 +34,7 @@ struct RecentReadingView: View {
             open(entry)
         } label: {
             HStack(spacing: 12) {
-                CoverImage(urlString: entry.book.coverURL)
+                BookCover(book: entry.book)
                     .frame(width: 44, height: 60)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.book.shownName).font(.body).lineLimit(2)

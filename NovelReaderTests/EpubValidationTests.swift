@@ -47,6 +47,7 @@ final class EpubValidationTests: XCTestCase {
     private var tempRoot: URL!
     private var repo: LibraryRepo!
     private var downloads: DownloadStore!
+    private var coverStore: CoverStore!
 
     override func setUpWithError() throws {
         tempRoot = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -54,13 +55,12 @@ final class EpubValidationTests: XCTestCase {
         let database = try AppDatabase.makeInMemory()
         repo = LibraryRepo(database: database)
         downloads = DownloadStore(database: database, files: ChapterFileStore(root: tempRoot))
-        URLCache.shared.removeAllCachedResponses()
+        coverStore = CoverStore(root: tempRoot.appendingPathComponent("Covers"))
     }
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: tempRoot)
         try? FileManager.default.removeItem(at: BookExporter.directory)
-        URLCache.shared.removeAllCachedResponses()
     }
 
     func testWritesEveryEpubShapeForEpubcheck() async throws {
@@ -72,24 +72,20 @@ final class EpubValidationTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: Self.outputDirectory, withIntermediateDirectories: true
         )
-        cacheCover(try XCTUnwrap(Data(base64Encoded: Self.pngBase64)))
-
         var written: [String] = []
         // A book the user has looked at on the shelf and downloaded in full.
-        written.append(try await write(
-            makeBook(siteBookId: "1", author: "中島敦", cover: Self.coverURL),
-            named: "山月記-full"
-        ))
-        // One bookmarked, half downloaded, whose cover was never drawn.
+        let full = try makeBook(siteBookId: "1", author: "中島敦", cover: Self.coverURL)
+        try storeCover(for: full.book)
+        written.append(try await write(full, named: "山月記-full"))
+        // One bookmarked, half downloaded, whose cover never arrived.
         written.append(try await write(
             makeBook(siteBookId: "2", author: nil, cover: nil, downloaded: 2),
             named: "山月記-plain", expectingPartial: true
         ))
         // One from a site whose author element is there and says nothing.
-        written.append(try await write(
-            makeBook(siteBookId: "3", author: "", cover: Self.coverURL),
-            named: "山月記-blank-author"
-        ))
+        let blankAuthor = try makeBook(siteBookId: "3", author: "", cover: Self.coverURL)
+        try storeCover(for: blankAuthor.book)
+        written.append(try await write(blankAuthor, named: "山月記-blank-author"))
 
         print("""
 
@@ -117,7 +113,7 @@ final class EpubValidationTests: XCTestCase {
         named name: String,
         expectingPartial: Bool = false
     ) async throws -> String {
-        let export = try await BookExporter(downloads: downloads)
+        let export = try await BookExporter(downloads: downloads, covers: coverStore)
             .export(book: made.book, chapters: made.catalog, format: .epub) { _ in }
         XCTAssertEqual(
             export.isPartial, expectingPartial,
@@ -170,15 +166,9 @@ final class EpubValidationTests: XCTestCase {
         ImportedChapter(title: "第三章 虎嘯", paragraphs: ["月光落在草上。", "草上有影。"]),
     ]
 
-    private func cacheCover(_ data: Data) {
-        let url = URL(string: Self.coverURL)!
-        let response = HTTPURLResponse(
-            url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": "image/png", "Content-Length": "\(data.count)"]
-        )!
-        URLCache.shared.storeCachedResponse(
-            CachedURLResponse(response: response, data: data), for: URLRequest(url: url)
-        )
+    /// Puts a cover on the device, where the shelf keeps the ones it has drawn.
+    private func storeCover(for book: Book) throws {
+        try coverStore.save(try XCTUnwrap(Data(base64Encoded: Self.pngBase64)), for: book)
     }
 
     /// - Parameter downloaded: how many of the fixture's chapters have text on this
