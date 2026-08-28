@@ -235,6 +235,7 @@ private struct ComicControlBar: View {
     var body: some View {
         HStack(spacing: 0) {
             control("chevron.left", label: "common.back") { onBack() }
+                .accessibilityIdentifier("comic.back")
             control("list.bullet", label: "reader.catalog") { showCatalog = true }
             control("arrow.up.to.line", label: "reader.previousChapter") {
                 Task { await model.jump(toChapterAt: model.currentChapterIndex - 1) }

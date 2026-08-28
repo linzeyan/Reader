@@ -95,6 +95,45 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempRoot.path))
     }
 
+    /// The same four levels, for a book whose chapters are directories of pages rather
+    /// than files of text.
+    ///
+    /// Nothing above `ChapterFileStore` knows the two shapes apart, which is exactly
+    /// why this is worth checking: a scope that quietly only took the `.txt` would leave
+    /// a comic's pages on the device, and the storage screen would go on reporting space
+    /// the user has already asked twice to get back.
+    func testEveryLevelTakesAComicsPagesWithItsFlag() throws {
+        let comic = try library.bookmark(
+            siteId: "alpha", siteBookId: "3", kind: .comic, title: "D"
+        )
+        try library.replaceCatalog(bookId: comic.id, entries: [
+            (siteChapterId: "v1", title: "Volume 1", url: "https://x/v1"),
+        ])
+        let pages = [Data("page 0".utf8), Data("page 1".utf8)]
+        let levels: [DownloadStore.Scope] = [
+            .chapter(book: comic, siteChapterId: "v1"),
+            .book(comic),
+            .site(siteId: "alpha"),
+            .everything,
+        ]
+
+        for level in levels {
+            try store.save(pages: pages, book: comic, siteChapterId: "v1")
+            XCTAssertEqual(try store.downloadedCount(bookId: comic.id), 1)
+            XCTAssertTrue(store.files.hasPages(siteId: "alpha", siteBookId: "3", siteChapterId: "v1"))
+
+            try store.delete(level)
+
+            XCTAssertEqual(
+                try store.downloadedCount(bookId: comic.id), 0, "\(level) left the flag set"
+            )
+            XCTAssertFalse(
+                store.files.hasPages(siteId: "alpha", siteBookId: "3", siteChapterId: "v1"),
+                "\(level) left the pages on disk"
+            )
+        }
+    }
+
     /// Deleting downloads must not delete the bookmark itself — they are
     /// separate user intentions.
     func testDeletingDownloadsKeepsBookmarks() throws {

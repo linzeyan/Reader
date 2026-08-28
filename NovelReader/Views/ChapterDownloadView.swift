@@ -46,6 +46,11 @@ struct ChapterDownloadView: View {
                     Text(sizeText)
                         .foregroundStyle(.secondary)
                 }
+                // One element, so the count and the size are read together — and so a
+                // walk can ask this row what is on the device instead of counting
+                // rows past two section headers.
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("downloads.summary")
                 if let progress = env.downloader.progress, progress.bookId == book.id,
                    env.downloader.status == .running || env.downloader.status == .paused {
                     ProgressView(value: progress.fraction) {
@@ -83,6 +88,10 @@ struct ChapterDownloadView: View {
                 ForEach(filtered) { chapter in
                     ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex)
                         .tag(chapter.id)
+                        // Here rather than inside `ChapterRow`, which the book screen
+                        // also draws: this names a row on *this* screen, for a walk
+                        // that cannot know a live site's chapter titles.
+                        .accessibilityIdentifier("downloads.chapter")
                         // Simultaneous, not `onLongPressGesture`: an exclusive
                         // recognizer on the row makes the list's own edit-mode tap
                         // wait on it, and ticking one chapter stops working — the
