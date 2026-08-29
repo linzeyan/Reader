@@ -926,7 +926,7 @@
       }
     },
     "comic.image.error.http %lld %lld" : {
-      "comment" : "A comic page's image could not be downloaded; the whole chapter fails.",
+      "comment" : "A comic page's image could not be downloaded; the page is recorded as missing.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -945,6 +945,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "第 %1$lld 頁下載失敗（HTTP %2$lld）。"
+          }
+        }
+      }
+    },
+    "comic.image.error.missing %lld" : {
+      "comment" : "Stands in for a page a download recorded as unavailable.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page %lld could not be downloaded and is missing from this chapter."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 页当初没有下载到，本话缺这一页。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 頁當初沒有下載到，本話缺這一頁。"
           }
         }
       }
@@ -1017,6 +1041,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "第 %lld 頁載入失敗"
+          }
+        }
+      }
+    },
+    "comic.page.retry" : {
+      "comment" : "Button drawn in place of a comic page whose image could not be fetched.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try this page again"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重试这一页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重試這一頁"
+          }
+        }
+      }
+    },
+    "comic.pageOf %@ %@" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "comic.pageOf %1$@ %2$@"
           }
         }
       }
@@ -1689,6 +1747,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用行動網路下載？"
+          }
+        }
+      }
+    },
+    "downloads.chapter.missingPages %@ %lld" : {
+      "comment" : "A chapter downloaded with some of its pages missing.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: saved without %2$lld page(s) the site would not return."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：有 %2$lld 页取不到，其余已保存。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：有 %2$lld 頁取不到，其餘已儲存。"
           }
         }
       }
@@ -2368,6 +2450,9 @@
         }
       }
     },
+    "library.add.failed %@" : {
+
+    },
     "library.add.failed %lld" : {
       "comment" : "Says how many pasted addresses were not added, after a batch ends.",
       "extractionState" : "manual",
@@ -2412,6 +2497,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "一行一個網址，小說與漫畫可以混貼；App 會逐一比對已安裝的來源。"
+          }
+        }
+      }
+    },
+    "library.add.progress %@ %@" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "library.add.progress %1$@ %2$@"
           }
         }
       }

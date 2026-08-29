@@ -5,10 +5,13 @@ import XCTest
 /// files in the same tree.
 ///
 /// The promise being defended is the one the whole download feature rests on —
-/// `downloadedAt` is set if and only if there is a complete, readable chapter on the
-/// device. A chapter of text is one file, so it was free. A chapter of fifty images is
-/// fifty chances to end up with half of one, and half a chapter is worse than none: it
-/// is only discovered offline, which is the one place it cannot be fixed.
+/// `downloadedAt` is set if and only if there is a readable chapter on the device. A
+/// chapter of text is one file, so it was free. A chapter of fifty images is fifty
+/// chances to end up with half of one, and half a chapter *that says it is whole* is
+/// worse than none: it is only discovered offline, which is the one place it cannot be
+/// fixed. Hence the `.partial` directory for an interrupted write, and hence the marker
+/// files for the pages a site would not give up — the difference between the two is
+/// that the second kind is finished, and knows what it is short.
 final class ComicChapterFilesTests: XCTestCase {
     private var root: URL!
     private var files: ChapterFileStore!
@@ -58,6 +61,28 @@ final class ComicChapterFilesTests: XCTestCase {
             files.pageURLs(siteId: site, siteBookId: book, siteChapterId: chapter).first
         )
         XCTAssertEqual(url.pathExtension, "webp")
+    }
+
+    /// A page the site would not give up keeps its number, because the alternative is
+    /// every page after it moving up one: a fifty-page chapter that lost page 12 would
+    /// read as forty-nine pages, and the reader would have no way to tell that from a
+    /// chapter that is forty-nine pages long. The marker is empty and named so that it
+    /// is obvious to whoever opens the folder.
+    func testAPageThatCouldNotBeFetchedKeepsItsPlaceAsAMarker() throws {
+        try files.writePages(
+            [Data("page 0".utf8), nil, Data("page 2".utf8)],
+            siteId: site, siteBookId: book, siteChapterId: chapter
+        )
+
+        let urls = files.pageURLs(siteId: site, siteBookId: book, siteChapterId: chapter)
+        XCTAssertEqual(urls.count, 3)
+        XCTAssertEqual(urls[1].lastPathComponent, "001.missing")
+        XCTAssertEqual(try Data(contentsOf: urls[1]), Data())
+        XCTAssertEqual(try Data(contentsOf: urls[2]), Data("page 2".utf8))
+        XCTAssertTrue(
+            files.hasPages(siteId: site, siteBookId: book, siteChapterId: chapter),
+            "A chapter short one page is still a chapter to read"
+        )
     }
 
     /// The whole point of writing through `.partial`: until the last page has landed

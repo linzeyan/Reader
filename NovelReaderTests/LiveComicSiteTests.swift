@@ -322,15 +322,17 @@ final class LiveComicSiteTests: XCTestCase {
                     at: [firstImage], chapterPage: chapterPage,
                     cookies: await ImageFetcher.siteCookies()
                 )
-                report.firstImageBytes = bytes.first?.count
+                // Doubly optional: one entry per address, each `nil` where that page
+                // would not come back. A one-page chapter of nothing throws instead
+                // of arriving here, so this is the page or it is the failure above.
+                let size = bytes.first??.count
+                report.firstImageBytes = size
                 // `ImageFetcher` already refuses anything that does not begin like
                 // an image, so arriving here with bytes is the assertion. Size is
                 // checked separately because a 200 of a few bytes is what a hotlink
                 // stub looks like, and one site's is literally three dots.
-                if (bytes.first?.count ?? 0) < 1024 {
-                    report.failures.append(
-                        "image: \(bytes.first?.count ?? 0) bytes — too small to be a page"
-                    )
+                if (size ?? 0) < 1024 {
+                    report.failures.append("image: \(size ?? 0) bytes — too small to be a page")
                 }
             } catch {
                 report.record("image", error)

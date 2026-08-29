@@ -41,8 +41,9 @@ struct DownloadStore {
     }
 
     /// The same contract for a comic chapter: the pages land first, and only a chapter
-    /// that is completely on disk gets the flag that says so.
-    func save(pages: [Data], book: Book, siteChapterId: String, now: Date = Date()) throws {
+    /// that is on disk gets the flag that says so. A `nil` page is one the site would
+    /// not give up; `ChapterFileStore.writePages` keeps its place in the numbering.
+    func save(pages: [Data?], book: Book, siteChapterId: String, now: Date = Date()) throws {
         try files.writePages(
             pages, siteId: book.siteId, siteBookId: book.siteBookId, siteChapterId: siteChapterId
         )

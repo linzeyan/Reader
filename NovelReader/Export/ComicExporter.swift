@@ -142,10 +142,14 @@ struct ComicExporter {
         let width = max(3, String(chapters.count).count)
         return chapters.enumerated().compactMap { index, chapter in
             guard chapter.isDownloaded else { return nil }
+            // Without the markers a download left where a page would not come back
+            // (`ChapterFileStore.writePages`): an archive is for reading elsewhere, and
+            // an empty `.missing` file is a note to this app, not a page. The numbering
+            // inside the folder keeps the gap, which is the honest shape.
             let pages = files.pageURLs(
                 siteId: book.siteId, siteBookId: book.siteBookId,
                 siteChapterId: chapter.siteChapterId
-            )
+            ).filter { $0.pathExtension != "missing" }
             guard !pages.isEmpty else { return nil }
             let number = String(format: "%0\(width)d", index + 1)
             let folder = "\(root)/\(number) \(BookExporter.filename(from: chapter.title))"

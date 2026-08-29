@@ -80,21 +80,41 @@ final class ImageFetcher {
     ///   - chapterPage: the page the images were listed on. Sent as `Referer`.
     ///   - cookies: read once with `siteCookies()`. Each request is given the
     ///     subset that belongs to its own host, not the whole jar.
-    /// - Throws: on the first page that fails. A chapter is all of its pages or
-    ///   none of them — one that came back missing pages 12–17 while claiming to
-    ///   be complete is worse than one that failed out loud.
-    func chapterImages(at urls: [URL], chapterPage: URL, cookies: [HTTPCookie]) async throws -> [Data] {
+    /// - Returns: one entry per address, in reading order, holding `nil` where that
+    ///   page could not be fetched.
+    ///
+    ///   This used to fail the whole chapter on the first bad page, on the argument
+    ///   that a chapter quietly missing pages 12–17 is worse than one that failed out
+    ///   loud. The argument was right about *quietly* and wrong about the rest: on a
+    ///   real site one dead image is an ordinary thing, and throwing the other forty
+    ///   nine pages away over it left the reader with nothing and a chapter they could
+    ///   not download by trying again. So the gap is kept and recorded instead — as a
+    ///   marker file on disk (`ChapterFileStore.writePages`), as a page the reader is
+    ///   told is absent, and as a line under the download progress.
+    /// - Throws: when nothing at all came back, which is not a chapter with a hole in
+    ///   it but a chapter that is not there — the queue must keep it and say so. Also
+    ///   on cancellation, which is the reader leaving rather than anything being wrong.
+    func chapterImages(at urls: [URL], chapterPage: URL, cookies: [HTTPCookie]) async throws -> [Data?] {
         let requests = urls.map { Self.request(for: $0, referer: chapterPage, cookies: cookies) }
         let session = self.session
         // One place where a page is fetched; the window below only decides when.
-        let fetch: @Sendable (Int) async throws -> (index: Int, bytes: Data) = { index in
-            let bytes = try await Self.load(requests[index], page: index + 1, in: session)
-            return (index, bytes)
+        let fetch: @Sendable (Int) async throws -> Page = { index in
+            do {
+                let bytes = try await Self.load(requests[index], page: index + 1, in: session)
+                return Page(index: index, bytes: bytes, failure: nil)
+            } catch is CancellationError {
+                // Out, not down: the whole chapter is being abandoned, and recording
+                // forty pages as missing because the user closed the app would write
+                // that abandonment to disk.
+                throw CancellationError()
+            } catch {
+                return Page(index: index, bytes: nil, failure: error)
+            }
         }
 
-        var collected: [(index: Int, bytes: Data)] = []
+        var collected: [Page] = []
         collected.reserveCapacity(requests.count)
-        try await withThrowingTaskGroup(of: (index: Int, bytes: Data).self) { group in
+        try await withThrowingTaskGroup(of: Page.self) { group in
             // A sliding window rather than "add them all and let the runtime sort
             // it out": a group runs every task it is given, so adding fifty would
             // put fifty requests on the wire at once.
@@ -113,9 +133,21 @@ final class ImageFetcher {
                 next += 1
             }
         }
-        // Reached only when the group filled every slot, since any throw leaves
-        // through the line above.
-        return collected.sorted { $0.index < $1.index }.map(\.bytes)
+        collected.sort { $0.index < $1.index }
+        // Nothing landed. Reported with the first page's reason rather than a count,
+        // because "page 1: 403" is what tells whoever reads it that the referer or the
+        // clearance is what broke, and every page failed the same way.
+        if collected.allSatisfy({ $0.bytes == nil }), let failure = collected.first?.failure {
+            throw failure
+        }
+        return collected.map(\.bytes)
+    }
+
+    /// One page's outcome, carried back out of the group in whatever order it lands.
+    private struct Page {
+        let index: Int
+        let bytes: Data?
+        let failure: (any Error)?
     }
 
     /// One page's bytes.
@@ -234,18 +266,21 @@ final class ImageFetcher {
     }
 }
 
-/// Why a chapter of images could not be downloaded.
+/// Why one page of a comic could not be shown.
 ///
-/// Both cases fail the whole chapter. Skipping the page and carrying on would
-/// produce a download that looks complete and reads with holes in it, and the
-/// holes would only be discovered offline, which is the one place they cannot be
-/// fixed.
+/// A page, not a chapter: the first two are what a fetch came back with, and a
+/// download records them against that page and keeps the rest of the chapter. They
+/// only fail a whole chapter when every page failed.
 enum ImageFetchError: LocalizedError {
     /// `page` is 1-based here and nowhere else in the type: this text is read by
     /// someone looking at a chapter that would not download, and "page 0" is not a
     /// page they can find.
     case httpStatus(page: Int, status: Int)
     case notAnImage(page: Int)
+    /// A page the download already knew it could not get. Raised when the reader
+    /// opens the marker file left in its place, so a gap in a downloaded chapter
+    /// reads as a gap rather than as a page still loading.
+    case missing(page: Int)
 
     var errorDescription: String? {
         switch self {
@@ -253,6 +288,8 @@ enum ImageFetchError: LocalizedError {
             return String(localized: "comic.image.error.http \(page) \(status)")
         case .notAnImage(let page):
             return String(localized: "comic.image.error.notImage \(page)")
+        case .missing(let page):
+            return String(localized: "comic.image.error.missing \(page)")
         }
     }
 }

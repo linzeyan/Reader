@@ -266,8 +266,20 @@ final class DownloadManager {
             defer { if self.runToken == token { self.notifyStopped() } }
             while !Task.isCancelled, let chapter = self.remaining.first {
                 do {
-                    try await self.download(chapter, of: context.book, from: context.rule)
+                    let missing = try await self.download(
+                        chapter, of: context.book, from: context.rule
+                    )
                     self.noteChapterSucceeded()
+                    // Said out loud, because this is the one thing a chapter on the
+                    // device can now be that it could not be before: there, readable,
+                    // and short a page. Silence would make the gap a surprise found
+                    // offline, which is the whole reason the all-or-nothing rule was
+                    // there in the first place.
+                    if missing > 0 {
+                        self.lastError = String(
+                            localized: "downloads.chapter.missingPages \(chapter.title) \(missing)"
+                        )
+                    }
                     guard self.completeIfStillQueued(chapter) else { return }
                 } catch is CancellationError {
                     return
@@ -344,13 +356,17 @@ final class DownloadManager {
     ///
     /// Both paths end in a store call that writes the files first and sets
     /// `downloadedAt` second, so the flag never claims a chapter that is not there.
-    private func download(_ chapter: Chapter, of book: Book, from rule: SiteRule) async throws {
+    ///
+    /// - Returns: how many of the chapter's pages the site would not give up. Always
+    ///   zero for a novel, which has no unit smaller than the chapter to lose.
+    private func download(_ chapter: Chapter, of book: Book, from rule: SiteRule) async throws -> Int {
         switch book.kind {
         case .novel:
             let paragraphs = try await service.chapterParagraphs(rule: rule, chapter: chapter)
             try downloads.save(
                 paragraphs: paragraphs, book: book, siteChapterId: chapter.siteChapterId
             )
+            return 0
         case .comic:
             guard let page = URL(string: chapter.url) else { throw BookService.ServiceError.badURL }
             // The addresses first, through the web view, because only a real engine
@@ -362,6 +378,7 @@ final class DownloadManager {
                 at: urls, chapterPage: page, cookies: await ImageFetcher.siteCookies()
             )
             try downloads.save(pages: bytes, book: book, siteChapterId: chapter.siteChapterId)
+            return bytes.lazy.filter { $0 == nil }.count
         }
     }
 

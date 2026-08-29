@@ -111,21 +111,28 @@ struct ChapterFileStore {
 
     // MARK: - Pages
 
-    /// Writes a comic chapter's pages, all of them or none of them.
+    /// Writes a comic chapter's pages, the whole chapter or none of it.
     ///
     /// Through a `.partial` directory that is renamed into place once every page has
     /// landed, because the promise the rest of the app is built on — `downloadedAt` is
-    /// not null *if and only if* there is a complete, readable chapter on the device —
-    /// must not get weaker because a chapter became fifty files instead of one. A
-    /// process killed mid-write leaves a `.partial` nobody looks in, and the next
-    /// attempt at the same chapter clears it.
+    /// not null *if and only if* there is a readable chapter on the device — must not
+    /// get weaker because a chapter became fifty files instead of one. A process killed
+    /// mid-write leaves a `.partial` nobody looks in, and the next attempt at the same
+    /// chapter clears it.
+    ///
+    /// A `nil` page is one the site would not give up (see `ImageFetcher.chapterImages`)
+    /// and is written as an empty `.missing` file rather than left out. Left out, every
+    /// page after it would shift up a number and the chapter would read as complete
+    /// while being short; written, the numbering is the site's own, the gap is visible
+    /// to anyone who opens the folder, and the reader can say which page is absent
+    /// instead of showing one that never fills in.
     ///
     /// The one window left is the same one novels have always had: between removing an
     /// older copy and renaming the new one in, a crash leaves the flag set and the
     /// files gone. Everything that reads a chapter already treats missing text as
     /// missing rather than trusting the flag — see `BookExporter.paragraphs(of:in:)`.
     func writePages(
-        _ pages: [Data], siteId: String, siteBookId: String, siteChapterId: String
+        _ pages: [Data?], siteId: String, siteBookId: String, siteChapterId: String
     ) throws {
         let final = pageDirectory(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId)
         let partial = final.appendingPathExtension("partial")
@@ -133,13 +140,20 @@ struct ChapterFileStore {
             try fileManager.removeItem(at: partial)
         }
         try fileManager.createDirectory(at: partial, withIntermediateDirectories: true)
-        for (index, bytes) in pages.enumerated() {
+        for (index, page) in pages.enumerated() {
+            let name = String(format: "%03d", index)
+            guard let bytes = page else {
+                try Data().write(
+                    to: partial.appendingPathComponent(name).appendingPathExtension("missing"),
+                    options: .atomic
+                )
+                continue
+            }
             // The extension comes from the bytes rather than from the address it was
             // fetched from: these CDNs serve `.jpg` URLs holding WebP often enough that
             // the address is not evidence. Nothing reads it back — pages are found by
             // number and decoded by sniffing — so it is there for whoever opens the
             // folder, and being honest costs nothing.
-            let name = String(format: "%03d", index)
             let file = ImageFormat(sniffing: bytes)
                 .map { partial.appendingPathComponent(name).appendingPathExtension($0.fileExtension) }
                 ?? partial.appendingPathComponent(name)

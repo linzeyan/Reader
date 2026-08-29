@@ -5,8 +5,9 @@ import XCTest
 /// WebKit was doing for free — the `Referer` the hosts demand, the browser
 /// identity, the site's cookies — is now something this app has to get right by
 /// hand, and gets wrong silently. Silently is the problem: a chapter that comes
-/// back missing pages 12–17 and calls itself complete is only discovered offline,
-/// which is the one place it cannot be fixed.
+/// back missing pages 12–17 and says nothing is only discovered offline, which is
+/// the one place it cannot be fixed. Which page is absent is therefore part of what
+/// a fetch returns, rather than something the caller has to notice.
 ///
 /// The whole suite runs without a network: the fetcher's `URLSession` is injected,
 /// and `StubOrigin` below answers for the origin server.
@@ -95,39 +96,37 @@ final class ImageFetcherTests: XCTestCase {
         let pages = try await ImageFetcher(session: session, maxConcurrent: 4)
             .chapterImages(at: urls, chapterPage: chapterPage, cookies: [])
 
-        XCTAssertEqual(pages.map { $0.last }, [1, 2, 3, 4])
+        XCTAssertEqual(pages.map { $0?.last }, [1, 2, 3, 4])
     }
 
-    // MARK: - Failure is the whole chapter
+    // MARK: - A bad page, and a chapter that is not there
 
-    /// A missing page must not be quietly dropped: the caller writes what it is
-    /// given and marks the chapter downloaded, so a short list becomes a chapter
-    /// with holes that reads as complete. The page number is in the error because
-    /// "chapter 340 failed" is not something anyone can act on.
-    func testAMissingPageFailsTheWholeChapterAndNamesIt() async throws {
+    /// One dead image is an ordinary thing on these sites, and it used to cost the
+    /// reader the other forty-nine pages *and* leave them a chapter that failed the
+    /// same way every time they tried again. So the gap comes back as a gap, in the
+    /// place it belongs: page 3 is `nil`, pages 1, 2, 4 and 5 are the pages.
+    func testAPageThatWillNotComeBackIsAGapAndTheRestOfTheChapterStillLands() async throws {
         let urls = (1...5).map { URL(string: "https://img.example.com/\($0).png")! }
         for (index, url) in urls.enumerated() { StubOrigin.script.serve(url, body: png(page: UInt8(index))) }
         StubOrigin.script.serve(urls[2], status: 404, body: Data())
 
-        do {
-            _ = try await ImageFetcher(session: session, maxConcurrent: 1)
-                .chapterImages(at: urls, chapterPage: chapterPage, cookies: [])
-            XCTFail("a chapter missing a page must not be returned as a chapter")
-        } catch let error as ImageFetchError {
-            guard case .httpStatus(let page, let status) = error else {
-                return XCTFail("expected an HTTP failure, got \(error)")
-            }
-            XCTAssertEqual(page, 3, "Page numbers in errors are the ones printed on the reader")
-            XCTAssertEqual(status, 404)
-        }
+        let pages = try await ImageFetcher(session: session, maxConcurrent: 1)
+            .chapterImages(at: urls, chapterPage: chapterPage, cookies: [])
+
+        XCTAssertEqual(pages.count, 5, "A gap keeps its place, or every page after it moves")
+        XCTAssertNil(pages[2])
+        XCTAssertEqual(
+            pages.map { $0?.last }, [0, 1, nil, 3, 4],
+            "The pages that came back are the pages that came back"
+        )
     }
 
     /// The failure these hosts actually produce is a 200 that is not the image: a
     /// WAF interstitial, a login page, a hotlink-denied stub — served, often
-    /// enough, under an `image/*` content type. Trusting the header would let a
-    /// chapter of HTML error pages land on disk and be reported as downloaded, and
-    /// the reader would show 30 blank pages with nothing to explain them.
-    func testABodyThatIsNotAnImageFailsTheChapterEvenWhenItClaimsToBeOne() async throws {
+    /// enough, under an `image/*` content type. Trusting the header would put HTML
+    /// error pages on disk and call them a chapter, and the reader would show 30
+    /// blank pages with nothing to explain them.
+    func testABodyThatIsNotAnImageIsAGapEvenWhenItClaimsToBeAnImage() async throws {
         let urls = (1...3).map { URL(string: "https://img.example.com/\($0).png")! }
         for (index, url) in urls.enumerated() { StubOrigin.script.serve(url, body: png(page: UInt8(index))) }
         StubOrigin.script.serve(
@@ -135,15 +134,34 @@ final class ImageFetcherTests: XCTestCase {
             body: Data("<html><body>Access denied</body></html>".utf8)
         )
 
+        let pages = try await ImageFetcher(session: session, maxConcurrent: 1)
+            .chapterImages(at: urls, chapterPage: chapterPage, cookies: [])
+
+        XCTAssertNil(pages[1], "HTML under an image content type is not a page")
+        XCTAssertNotNil(pages[0])
+        XCTAssertNotNil(pages[2])
+    }
+
+    /// A chapter where nothing at all came back is not a chapter with holes in it —
+    /// it is a chapter that is not there, and the difference decides what the
+    /// download queue does with it. Kept, retried and reported when every page
+    /// failed; written to disk when even one page landed. The reason travels with
+    /// it because "page 1: 403" is what says the referer or the clearance is what
+    /// broke, and forty identical failures say it once.
+    func testAChapterWhereNoPageCameBackFailsWithTheFirstPagesReason() async throws {
+        let urls = (1...4).map { URL(string: "https://img.example.com/\($0).png")! }
+        for url in urls { StubOrigin.script.serve(url, status: 403, body: Data()) }
+
         do {
             _ = try await ImageFetcher(session: session, maxConcurrent: 1)
                 .chapterImages(at: urls, chapterPage: chapterPage, cookies: [])
-            XCTFail("HTML under an image content type is not an image")
+            XCTFail("a chapter of nothing must not be returned as a chapter")
         } catch let error as ImageFetchError {
-            guard case .notAnImage(let page) = error else {
-                return XCTFail("expected a not-an-image failure, got \(error)")
+            guard case .httpStatus(let page, let status) = error else {
+                return XCTFail("expected an HTTP failure, got \(error)")
             }
-            XCTAssertEqual(page, 2)
+            XCTAssertEqual(page, 1, "Page numbers in errors are the ones printed on the reader")
+            XCTAssertEqual(status, 403)
         }
     }
 
