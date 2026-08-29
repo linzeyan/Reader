@@ -251,19 +251,27 @@ final class ComicScrollCoordinator {
         let chapter = placed[index]
         let isAbove = chapter.top + chapter.column.top(ofPage: page)
             + chapter.column.height(ofPage: page) <= view.readingOffset
-        // A magnification is held back for the same reason a drag is, and harder: the
-        // offset is mid-animation while `zoomScale` is already at its destination, so
-        // the shift this would compute is measured against a position that exists on
-        // neither side of the zoom. That was the double tap's "jump" — not the pages
-        // re-drawing, but the content being moved under an animation.
+        // A drag holds back only the corrections that would move the reader, because
+        // adjusting the offset mid-drag fights the pan gesture — a page growing at or
+        // below them moves nothing they can see.
+        //
+        // A magnification holds back *everything*, which is not the same rule and was the
+        // double tap's jump. Measured on device: coming out of 2x, a page at the reader's
+        // own position corrected 621→594, the content shrank by 27 points, and the offset
+        // went from 222 to 0 — the top of the chapter. A scroll view mid-zoom is animating
+        // its offset against a content size it was given when the animation started, and
+        // changing that size under it does not adjust the animation, it abandons it.
+        // Which page was corrected makes no difference to that: what disturbs the zoom is
+        // the resize, and every correction is a resize.
+        let holding = view.isMagnifying || (isAbove && isTouching)
         #if DEBUG
         ComicProbe.correction(
             page: page, from: chapter.column.height(ofPage: page),
             to: size.height / size.width * chapter.column.width, above: isAbove,
-            held: isAbove && (isTouching || view.isMagnifying), reading: view.readingOffset
+            held: holding, reading: view.readingOffset
         )
         #endif
-        if isAbove, isTouching || view.isMagnifying {
+        if holding {
             heldCorrections.append((chapterId, page, size))
             return
         }

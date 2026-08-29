@@ -55,6 +55,21 @@ final class ComicScrollView: UIScrollView {
     /// that computes a position from the two together computes it from halfway.
     private(set) var isMagnifying = false
 
+    /// Where the reader was before a double tap magnified them, so the double tap back
+    /// out puts them there again.
+    ///
+    /// Without it the pair does not undo itself. Zooming in is around the *finger*, which
+    /// is what makes it useful — the panel they pointed at is the panel they get — but
+    /// that moves the top of the window down by up to half a screen. Measured on device:
+    /// in at 29868, out at 30092. Zooming out then preserved that 30092 faithfully, which
+    /// is the wrong number to be faithful to: the reader tapped twice and expected to be
+    /// back where they started, and instead the page had slid a quarter screen.
+    ///
+    /// Dropped the moment they move themselves — a drag or a pinch makes where they are
+    /// their own decision, and restoring a position from before that would take the book
+    /// off them.
+    private var offsetBeforeZoom: CGFloat?
+
     /// Where the top of the window sits in the content — the reading position exactly.
     ///
     /// In *unzoomed* content points, which is the space the columns are laid out in and
@@ -288,10 +303,10 @@ final class ComicScrollView: UIScrollView {
             #if DEBUG
             probe("tap.out")
             #endif
+            let y = offsetBeforeZoom ?? readingOffset
+            offsetBeforeZoom = nil
             zoom(
-                to: CGRect(
-                    x: 0, y: readingOffset, width: bounds.width, height: bounds.height
-                ),
+                to: CGRect(x: 0, y: y, width: bounds.width, height: bounds.height),
                 animated: true
             )
             return
@@ -299,6 +314,7 @@ final class ComicScrollView: UIScrollView {
         #if DEBUG
         probe("tap.in")
         #endif
+        offsetBeforeZoom = readingOffset
         let point = gesture.location(in: content)
         let size = CGSize(
             width: bounds.width / Self.doubleTapZoom, height: bounds.height / Self.doubleTapZoom
@@ -344,6 +360,9 @@ extension ComicScrollView: UIScrollViewDelegate {
 
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
         isMagnifying = true
+        // A pinch is not half of a toggle: whatever the reader does with their fingers
+        // from here is where they meant to be.
+        offsetBeforeZoom = nil
     }
 
     /// The end of the pinch *and* the end of a programmatic zoom's animation, which is
@@ -386,6 +405,7 @@ extension ComicScrollView: UIScrollViewDelegate {
         // a finger dragging the page is a magnification that is over whatever WebKit
         // said about it.
         endMagnifying()
+        offsetBeforeZoom = nil
         coordinator?.handleTouch(down: true)
     }
 
