@@ -34,6 +34,7 @@ final class AppEnvironment {
     let downloadSettings: DownloadSettings
     let librarySettings: LibrarySettings
     let localImporter: LocalBookImporter
+    let comicImporter: ComicArchiveImporter
     let backgroundDownloads: BackgroundDownloads
     /// Owned but not exposed: nothing on screen asks about a queue read back from
     /// disk, it simply appears as the paused download it was when the app died.
@@ -142,6 +143,9 @@ final class AppEnvironment {
         self.downloader = downloader
         self.localImporter = LocalBookImporter(
             repo: repo, downloads: self.downloads, fetcher: fetcher
+        )
+        self.comicImporter = ComicArchiveImporter(
+            repo: repo, downloads: self.downloads, covers: coverFiles
         )
         self.cloud = CloudSync(repo: repo)
         let monitor = NetworkMonitor()
@@ -345,7 +349,23 @@ final class AppEnvironment {
     func importLocalBook(
         from url: URL, progress: @escaping LocalBookImporter.ProgressHandler
     ) async throws -> Book {
-        let task = Task { try await localImporter.importBook(from: url, progress: progress) }
+        try await runImport { try await self.localImporter.importBook(from: url, progress: progress) }
+    }
+
+    /// Imports a comic archive the user picked as a book.
+    ///
+    /// Everything that made `importLocalBook` what it is holds here too — the same
+    /// cancel handle, the same reload however it ends — because from the shelf's
+    /// point of view these are the same gesture with a different file in it.
+    @discardableResult
+    func importComicArchive(
+        from url: URL, progress: @escaping LocalBookImporter.ProgressHandler
+    ) async throws -> Book {
+        try await runImport { try await self.comicImporter.importComic(from: url, progress: progress) }
+    }
+
+    private func runImport(_ work: @escaping () async throws -> Book) async throws -> Book {
+        let task = Task { try await work() }
         importTask = task
         defer {
             importTask = nil

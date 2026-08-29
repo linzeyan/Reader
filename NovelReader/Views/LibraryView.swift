@@ -96,29 +96,33 @@ struct LibraryView: View {
                     .accessibilityIdentifier("library.add")
                     .disabled(env.sites.rules.isEmpty || importProgress != nil)
                 }
-                // Only on the novel shelf. A `.txt` or an `.epub` is text, so an
-                // import always produces a novel — offered here it would take a file,
-                // succeed, and put the result on the shelf the reader is not looking
-                // at, which is indistinguishable from having failed.
-                if env.mediaMode == .novel {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            picking = true
-                        } label: {
-                            Label("library.import", systemImage: "square.and.arrow.down")
-                        }
-                        .accessibilityIdentifier("library.import")
-                        .disabled(importProgress != nil)
+                // On both shelves, taking a different kind of file on each. What a
+                // file can be imported *as* is decided by its type — text is a
+                // novel, an archive of pictures is a comic — so the shelf the
+                // reader is looking at is what says which one to offer. Offering
+                // the wrong one would take a file, succeed, and put the result on
+                // the shelf they are not looking at, which is indistinguishable
+                // from having failed.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        picking = true
+                    } label: {
+                        Label("library.import", systemImage: "square.and.arrow.down")
                     }
+                    .accessibilityIdentifier("library.import")
+                    .disabled(importProgress != nil)
                 }
             }
             .overlay(alignment: .top) { importBanner }
             .animation(.snappy, value: importProgress == nil)
             .sheet(isPresented: $adding) { AddBookSheet() }
-            // Only the two types this app can actually read. Opening a book from
+            // Only the types this app can actually read, and only the ones that
+            // belong to the shelf in front of the reader. Opening a book from
             // another app is a separate feature: it needs document types declared
-            // in Info.plist, which is a shipping-configuration change.
-            .fileImporter(isPresented: $picking, allowedContentTypes: [.plainText, .epub]) { result in
+            // in Info.plist, which is a shipping-configuration change — and for
+            // `.zip` in particular it would put this app in the "open with" menu of
+            // every archive on the device, comic or not.
+            .fileImporter(isPresented: $picking, allowedContentTypes: importableTypes) { result in
                 switch result {
                 case .success(let url): Task { await runImport(url) }
                 case .failure(let failure): env.report(failure)
@@ -216,11 +220,21 @@ struct LibraryView: View {
     /// the state this sets around it would otherwise be written from wherever the
     /// task happened to land.
     @MainActor
+    private var importableTypes: [UTType] {
+        switch env.mediaMode {
+        case .novel: return [.plainText, .epub]
+        case .comic: return [.zip]
+        }
+    }
+
     private func runImport(_ url: URL) async {
         importProgress = 0
         defer { importProgress = nil }
         do {
-            try await env.importLocalBook(from: url) { importProgress = $0 }
+            switch env.mediaMode {
+            case .novel: try await env.importLocalBook(from: url) { importProgress = $0 }
+            case .comic: try await env.importComicArchive(from: url) { importProgress = $0 }
+            }
         } catch is CancellationError {
             // Not reported. The user asked for this and the banner going away is
             // the answer; a red error banner would read as "the import broke".

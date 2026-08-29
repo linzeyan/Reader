@@ -483,6 +483,30 @@
         }
       }
     },
+    "book.export.part %lld %lld" : {
+      "comment" : "Suffix on the filename of one part of a comic export that was too big for a single archive.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(%1$lld of %2$lld)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(第%1$lld包共%2$lld包)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(第%1$lld包共%2$lld包)"
+          }
+        }
+      }
+    },
     "book.export.partial %@ %@" : {
       "localizations" : {
         "zh-Hant" : {
@@ -2868,6 +2892,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯入檔案"
+          }
+        }
+      }
+    },
+    "library.import.error.archive" : {
+      "comment" : "The comic archive is not a ZIP the importer can read; a technical detail follows on the next line.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This ZIP file could not be read."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 ZIP 文件无法解析。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個 ZIP 檔無法解析。"
           }
         }
       }

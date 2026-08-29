@@ -17,11 +17,30 @@ struct BookDetailView: View {
     /// pull. At most one: the menu that starts an export is replaced by its own
     /// progress indicator while one is running.
     @State private var exportTask: Task<Void, Never>?
-    /// The format waiting for the user to accept that the file will be
+    /// The export waiting for the user to accept that the file will be
     /// incomplete. Non-nil only while that question is on screen.
-    @State private var partialFormat: BookExporter.Format?
+    @State private var partialChoice: ExportChoice?
     /// A finished export, waiting for the user to choose where it goes.
     @State private var pendingExport: BookExporter.Export?
+    /// The same, for a comic — a different type because it can be several files.
+    @State private var pendingComicExport: ComicExporter.Export?
+
+    /// What was asked for. The two novel formats and the comic archive share one
+    /// path because everything around them is the same — the partial warning, the
+    /// banner, the cancel button — and only the writer at the far end differs.
+    private enum ExportChoice: Equatable {
+        case text
+        case epub
+        case comic
+
+        var novelFormat: BookExporter.Format? {
+            switch self {
+            case .text: return .text
+            case .epub: return .epub
+            case .comic: return nil
+            }
+        }
+    }
 
     private var rule: SiteRule? { env.sites.rule(id: book.siteId) }
 
@@ -93,11 +112,15 @@ struct BookDetailView: View {
                     .disabled(isRefreshing || rule == nil)
                 }
             }
-            // Novels only. Both formats this writes are text — a `.txt` of a comic
-            // would be a file of nothing, and an `.epub` of one is a different feature
-            // (see docs/COMICS.md, which does not have it).
-            if current.kind == .novel {
-                ToolbarItem(placement: .topBarTrailing) { exportMenu }
+            ToolbarItem(placement: .topBarTrailing) {
+                // A menu for a novel because there are two text formats to choose
+                // between; a button for a comic because there is one archive and a
+                // menu of one item is a tap nobody needs.
+                if current.kind == .novel {
+                    exportMenu
+                } else {
+                    comicExportButton
+                }
             }
         }
         // Asked *before* the file is written, not reported after: someone
@@ -111,14 +134,14 @@ struct BookDetailView: View {
             // `presenting:` rather than reading the state inside the action:
             // dismissing the dialog clears it, and which format was tapped must
             // not depend on whether that happens first.
-            presenting: partialFormat
-        ) { format in
-            Button("book.export.partial.confirm") { startExport(format) }
+            presenting: partialChoice
+        ) { choice in
+            Button("book.export.partial.confirm") { startExport(choice) }
             Button("common.cancel", role: .cancel) {}
         }
         .fileExporter(
             isPresented: exportBinding,
-            document: pendingExport.map(BookExportDocument.init),
+            document: pendingExport.map { BookExportDocument($0.url) },
             contentType: pendingExport?.format.contentType ?? .plainText,
             defaultFilename: pendingExport?.filename
         ) { result in
@@ -128,6 +151,21 @@ struct BookDetailView: View {
             // temporary one is only wasted space from here on.
             if let url = pendingExport?.url { try? FileManager.default.removeItem(at: url) }
             pendingExport = nil
+        }
+        // Its own sheet because a comic can come out as several files, and the
+        // multi-document exporter asks for a folder to put them in rather than a
+        // filename. Each document carries its own name (see `ExportedFileWrapper`),
+        // which is what keeps the parts from landing on top of one another.
+        .fileExporter(
+            isPresented: comicExportBinding,
+            documents: (pendingComicExport?.urls ?? []).map(BookExportDocument.init),
+            contentType: .zip
+        ) { result in
+            if case .failure(let error) = result { env.report(error) }
+            for url in pendingComicExport?.urls ?? [] {
+                try? FileManager.default.removeItem(at: url)
+            }
+            pendingComicExport = nil
         }
         .overlay(alignment: .top) { exportBanner }
         .animation(.snappy, value: exportProgress == nil)
@@ -335,12 +373,34 @@ struct BookDetailView: View {
         }
     }
 
+    /// A comic's export: one button, because there is one thing it can produce.
+    /// Disabled for the same reason the menu is — see `exportMenu`.
+    private var comicExportButton: some View {
+        Group {
+            if exportProgress != nil {
+                ProgressView()
+            } else {
+                Button {
+                    beginExport(.comic)
+                } label: {
+                    Label("book.export", systemImage: "square.and.arrow.up")
+                }
+                .accessibilityIdentifier("book.export")
+                .disabled(downloadedCount == 0)
+            }
+        }
+    }
+
     private var partialBinding: Binding<Bool> {
-        Binding(get: { partialFormat != nil }, set: { if !$0 { partialFormat = nil } })
+        Binding(get: { partialChoice != nil }, set: { if !$0 { partialChoice = nil } })
     }
 
     private var exportBinding: Binding<Bool> {
         Binding(get: { pendingExport != nil }, set: { if !$0 { pendingExport = nil } })
+    }
+
+    private var comicExportBinding: Binding<Bool> {
+        Binding(get: { pendingComicExport != nil }, set: { if !$0 { pendingComicExport = nil } })
     }
 
     /// The same banner an import gets, for the same reason: writing out a
@@ -399,19 +459,19 @@ struct BookDetailView: View {
     // MARK: - Exporting
 
     /// A whole book goes straight to work; a partial one asks first.
-    private func beginExport(_ format: BookExporter.Format) {
+    private func beginExport(_ choice: ExportChoice) {
         if downloadedCount < chapters.count {
-            partialFormat = format
+            partialChoice = choice
         } else {
-            startExport(format)
+            startExport(choice)
         }
     }
 
     /// Wrapped in a task rather than awaited straight from the button so the
     /// banner's cancel button has a handle to pull — the same shape
     /// `AppEnvironment.importLocalBook` uses for the import.
-    private func startExport(_ format: BookExporter.Format) {
-        exportTask = Task { await runExport(format) }
+    private func startExport(_ choice: ExportChoice) {
+        exportTask = Task { await runExport(choice) }
     }
 
     /// `BookExporter` is not main-actor bound, so the reads and the deflate pass
@@ -419,16 +479,25 @@ struct BookDetailView: View {
     /// explicitly, because the progress callback comes back to this actor from
     /// wherever the export happens to be running.
     @MainActor
-    private func runExport(_ format: BookExporter.Format) async {
-        partialFormat = nil
+    private func runExport(_ choice: ExportChoice) async {
+        partialChoice = nil
         exportProgress = 0
         defer {
             exportProgress = nil
             exportTask = nil
         }
         do {
-            pendingExport = try await BookExporter(downloads: env.downloads, covers: env.coverFiles)
+            if let format = choice.novelFormat {
+                pendingExport = try await BookExporter(
+                    downloads: env.downloads, covers: env.coverFiles
+                )
                 .export(book: current, chapters: chapters, format: format) { exportProgress = $0 }
+            } else {
+                pendingComicExport = try await ComicExporter(
+                    files: env.files, covers: env.coverFiles
+                )
+                .export(book: current, chapters: chapters) { exportProgress = $0 }
+            }
         } catch is CancellationError {
             // Stopping was the user's own decision, and the banner going away is
             // the answer. An error banner would read as the export having broken.
@@ -489,11 +558,11 @@ struct BookDetailView: View {
 /// Write-only. The app already reads these files, through `LocalBookImporter`, and
 /// a second way in would be a second thing to keep correct.
 struct BookExportDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.plainText, .epub] }
+    static var readableContentTypes: [UTType] { [.plainText, .epub, .zip] }
 
     private let url: URL
 
-    init(_ export: BookExporter.Export) { url = export.url }
+    init(_ url: URL) { self.url = url }
 
     init(configuration: ReadConfiguration) throws {
         throw CocoaError(.fileReadUnsupportedScheme)

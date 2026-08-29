@@ -85,10 +85,10 @@ struct ZipArchive {
         guard start >= 0, start + entry.compressedSize <= bytes.count else {
             throw ZipError.truncated
         }
-        let payload = bytes[start ..< start + entry.compressedSize]
+        let payload = Data(bytes[start ..< start + entry.compressedSize])
         let content: Data
         switch entry.method {
-        case 0: content = Data(payload)
+        case 0: content = payload
         case 8: content = try Self.inflate(payload, expecting: entry.uncompressedSize, name: name)
         default: throw ZipError.unsupportedCompression(entry.method, name)
         }
@@ -184,16 +184,18 @@ struct ZipArchive {
     /// The output buffer is sized from the directory's uncompressed length, so
     /// a short result means the stream and the directory disagree. That is a
     /// corrupt archive, not a chapter with a few bytes missing, so it throws.
-    private static func inflate(
-        _ payload: ArraySlice<UInt8>, expecting size: Int, name: String
-    ) throws -> Data {
+    ///
+    /// Shared with `ZipFileReader`, which reads the same streams out of a file
+    /// rather than out of memory: where the payload came from changes nothing
+    /// about how it is inflated, and one of these is enough to get wrong.
+    static func inflate(_ payload: Data, expecting size: Int, name: String) throws -> Data {
         guard size > 0 else { return Data() }
         guard !payload.isEmpty else { throw ZipError.truncated }
         var output = Data(count: size)
         let written = output.withUnsafeMutableBytes { destination -> Int in
             guard let target = destination.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-            return payload.withUnsafeBufferPointer { source -> Int in
-                guard let origin = source.baseAddress else { return 0 }
+            return payload.withUnsafeBytes { source -> Int in
+                guard let origin = source.bindMemory(to: UInt8.self).baseAddress else { return 0 }
                 return compression_decode_buffer(
                     target, size, origin, source.count, nil, COMPRESSION_ZLIB
                 )

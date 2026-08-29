@@ -16,6 +16,8 @@ struct ImportedChapter {
 enum LocalBookError: LocalizedError {
     case unreadable
     case malformed(String)
+    /// A comic archive that is not a ZIP, or is one this app cannot read.
+    case badArchive(String)
     case unknownEncoding
     case empty
     /// The book was imported, but its text is no longer on disk.
@@ -27,6 +29,8 @@ enum LocalBookError: LocalizedError {
             return String(localized: "library.import.error.unreadable")
         case .malformed(let detail):
             return String(localized: "library.import.error.malformed") + "\n" + detail
+        case .badArchive(let detail):
+            return String(localized: "library.import.error.archive") + "\n" + detail
         case .unknownEncoding:
             return String(localized: "library.import.error.encoding")
         case .empty:
