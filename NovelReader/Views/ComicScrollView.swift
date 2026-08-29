@@ -70,6 +70,17 @@ final class ComicScrollView: UIScrollView {
     /// off them.
     private var offsetBeforeZoom: CGFloat?
 
+    /// Whether the magnification now starting is the double tap's own animation rather
+    /// than the reader's fingers.
+    ///
+    /// `scrollViewWillBeginZooming` reports both, and they mean opposite things for
+    /// `offsetBeforeZoom`. Without the distinction the first attempt at this undid itself:
+    /// the double tap wrote the position down and then started a zoom whose own beginning
+    /// wiped it, so the tap back out had nothing to return to. Measured on device — in at
+    /// 2394.5, out at 2634.0, the same quarter-screen slide the position was written to
+    /// prevent.
+    private var isDoubleTapZooming = false
+
     /// Where the top of the window sits in the content — the reading position exactly.
     ///
     /// In *unzoomed* content points, which is the space the columns are laid out in and
@@ -299,6 +310,8 @@ final class ComicScrollView: UIScrollView {
         // Set here rather than left to `scrollViewWillBeginZooming`, which is about the
         // gesture: the whole cost of a double tap is paid by the animation after it.
         isMagnifying = true
+        isDoubleTapZooming = true
+        coordinator?.magnificationBegan()
         guard zoomScale == minimumZoomScale else {
             #if DEBUG
             probe("tap.out")
@@ -360,8 +373,11 @@ extension ComicScrollView: UIScrollViewDelegate {
 
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
         isMagnifying = true
+        coordinator?.magnificationBegan()
         // A pinch is not half of a toggle: whatever the reader does with their fingers
-        // from here is where they meant to be.
+        // from here is where they meant to be. A double tap's own animation reports its
+        // beginning here too, and that one *is* half of a toggle — see `isDoubleTapZooming`.
+        guard !isDoubleTapZooming else { return }
         offsetBeforeZoom = nil
     }
 
@@ -412,6 +428,7 @@ extension ComicScrollView: UIScrollViewDelegate {
     private func endMagnifying() {
         guard isMagnifying else { return }
         isMagnifying = false
+        isDoubleTapZooming = false
         coordinator?.magnificationEnded()
     }
 

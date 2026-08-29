@@ -170,16 +170,20 @@ final class ImageFetcher {
     /// How long one page waits, while somebody is looking at it, before it is called a
     /// failure.
     ///
-    /// Twenty seconds, against `URLSession`'s default sixty. These CDNs stall rather than
+    /// Ten seconds, against `URLSession`'s default sixty. These CDNs stall rather than
     /// refuse — a page that is never going to answer holds the connection open instead of
     /// closing it — and until the request gives up the reader has a black rectangle with
     /// no retry button on it, because nothing yet knows the page failed. Sixty seconds of
     /// that is the retry button being absent for the whole time it is wanted.
     ///
+    /// Ten is defensible because this is an *idle* deadline and not a total one: it is
+    /// reset by every byte that arrives, so a page crawling in over a bad connection is
+    /// never cut off, and what it actually measures is ten seconds of complete silence.
+    ///
     /// The reading path only. A download runs with nobody watching, and a shorter deadline
     /// there would write gaps into a chapter somebody is keeping for a flight — the one
     /// place waiting is cheaper than failing.
-    private static let readTimeout: TimeInterval = 20
+    private static let readTimeout: TimeInterval = 10
 
     /// One book cover's bytes.
     ///

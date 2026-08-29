@@ -347,6 +347,21 @@ final class ComicScrollCoordinator {
         config.onPlaceChange(place)
     }
 
+    /// The reader has started magnifying, so a restored position is no longer the answer
+    /// to where they are.
+    ///
+    /// The same rule as `turnPage` and `handleTouch(down:)` — anything they did with their
+    /// own hands makes the position theirs — and it has to be said separately because a
+    /// double tap never drags, so the scroll view never reports a touch for it. That gap
+    /// was the double tap's jump, and it was much larger than the arithmetic ever was.
+    /// Measured on device: a chapter opened at page 4 and then double-tapped, never
+    /// scrolled, had `pendingLanding` still set — so every image that arrived corrected a
+    /// height, every correction re-asserted the landing, and the reader was dragged from
+    /// 2634 back to 2394.5 in the middle of coming out of the zoom, over and over.
+    func magnificationBegan() {
+        pendingLanding = nil
+    }
+
     /// Everything a magnification held back, once it is over.
     func magnificationEnded() {
         #if DEBUG
