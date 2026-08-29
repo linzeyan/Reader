@@ -430,7 +430,7 @@ struct StorageView: View {
                 Text("storage.downloads.footer")
             }
 
-            ForEach(env.booksBySite, id: \.siteId) { group in
+            ForEach(downloadedGroups, id: \.siteId) { group in
                 Section {
                     ForEach(group.books) { book in
                         LabeledContent(book.shownName, value: Self.format(bookSizes[book.id] ?? 0))
@@ -451,7 +451,6 @@ struct StorageView: View {
                             reversible: group.siteId != Book.localSiteId
                         )
                     }
-                    .disabled((siteSizes[group.siteId] ?? 0) == 0)
                 } header: {
                     HStack {
                         Text(group.name)
@@ -489,6 +488,20 @@ struct StorageView: View {
             Button("common.cancel", role: .cancel) { confirmingLocalScope = nil }
         }
         .task { measure() }
+    }
+
+    /// Only the books that have something downloaded, the same rule `CacheView` reads by.
+    ///
+    /// A shelf is mostly books nobody has taken offline, and listing them all put the one
+    /// number this screen exists for — where the space went — in a column of zeroes. The
+    /// site's own delete button needs no `disabled` state once this filter runs: a group is
+    /// here because one of its books has bytes, so the site has bytes.
+    private var downloadedGroups: [LibrarySource] {
+        env.booksBySite.compactMap { group in
+            let books = group.books.filter { (bookSizes[$0.id] ?? 0) > 0 }
+            guard !books.isEmpty else { return nil }
+            return LibrarySource(siteId: group.siteId, name: group.name, books: books)
+        }
     }
 
     /// Deletes at once when the bytes can be fetched again, and asks first when
