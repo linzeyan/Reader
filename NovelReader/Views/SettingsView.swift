@@ -1,13 +1,24 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// The settings tab: five topics, each a heading a reader would recognise, and the
+/// detail of each one tap away.
+///
+/// It used to be nine unlabelled sections in the order they were built, with the storage
+/// screen sitting between the background-download report and the launch pickers. Nothing
+/// there was wrong on its own; together they were a wall to be read top to bottom every
+/// time, because there was no heading to skip by.
+///
+/// So the rule here is one question per section — where books come from, what reading
+/// looks like, how chapters arrive, what they take up, whether it syncs — and anything
+/// that is more than a line or two of controls lives on its own screen behind a link.
+/// Everything below is still exactly the same controls; only where they sit has changed.
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
 
     var body: some View {
         @Bindable var cloud = env.cloud
         @Bindable var downloadSettings = env.downloadSettings
-        @Bindable var librarySettings = env.librarySettings
 
         NavigationStack {
             Form {
@@ -24,10 +35,14 @@ struct SettingsView: View {
                     Text("settings.sources.footer")
                 }
 
-                Section {
-                    Toggle("settings.icloud", isOn: $cloud.isEnabled)
-                } footer: {
-                    Text("settings.icloud.footer")
+                Section("settings.section.reading") {
+                    NavigationLink("settings.appearance") { AppearanceSettingsView() }
+                        .accessibilityIdentifier("settings.appearance")
+                    // The two launch pickers and the reading-history controls, together
+                    // on one screen: they are four answers to "what do I see when I open
+                    // this app", and they were three sections apart.
+                    NavigationLink("settings.start") { StartSettingsView() }
+                        .accessibilityIdentifier("settings.start")
                 }
 
                 Section {
@@ -38,47 +53,32 @@ struct SettingsView: View {
                             .tag(DownloadSettings.NetworkPolicy.wifiAndCellular)
                     }
                     .accessibilityIdentifier("settings.downloadNetwork")
+                    // A report rather than a setting, and four rows of one: on the main
+                    // screen it read as something to configure.
+                    NavigationLink("settings.background") { BackgroundDownloadsView() }
+                        .accessibilityIdentifier("settings.background")
+                } header: {
+                    Text("settings.section.downloads")
                 } footer: {
                     Text("settings.downloadNetwork.footer")
                 }
 
-                BackgroundDownloadsSection()
-
-                Section {
-                    NavigationLink("settings.storage") { StorageView() }
+                // Two links, not one inside the other: what the reader asked to keep and
+                // what reading left behind are different promises, and burying the second
+                // inside the first says it is a detail of the first.
+                Section("settings.section.storage") {
+                    NavigationLink("storage.downloads") { StorageView() }
                         .accessibilityIdentifier("settings.storage")
+                    NavigationLink("settings.cache") { CacheView() }
+                        .accessibilityIdentifier("settings.cache")
                 }
 
-                // Both answers to "what do I see when I open this app", so one
-                // section: which screen, and — because the shelf is two shelves now —
-                // which of them.
                 Section {
-                    Picker("settings.home", selection: $librarySettings.home) {
-                        ForEach(HomeScreen.allCases) { screen in
-                            Text(screen.nameKey).tag(screen)
-                        }
-                    }
-                    .accessibilityIdentifier("settings.home")
-                    Picker("settings.defaultMode", selection: $librarySettings.defaultMediaMode) {
-                        ForEach(MediaMode.allCases) { mode in
-                            Label(mode.nameKey, systemImage: mode.icon).tag(mode)
-                        }
-                    }
-                    .accessibilityIdentifier("settings.defaultMode")
+                    Toggle("settings.icloud", isOn: $cloud.isEnabled)
                 } header: {
-                    Text("settings.start")
+                    Text("settings.section.sync")
                 } footer: {
-                    Text("settings.start.footer")
-                }
-
-                // Next to the appearance controls rather than up with the sources and
-                // the sync toggle: those decide what the app can reach, this decides
-                // what reading looks like — which is what a list of half-read books is.
-                RecentReadingSection()
-
-                Section("reader.settings") {
-                    NavigationLink("settings.appearance") { AppearanceSettingsView() }
-                        .accessibilityIdentifier("settings.appearance")
+                    Text("settings.icloud.footer")
                 }
 
                 Section {
@@ -94,6 +94,45 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "—"
         let build = info?["CFBundleVersion"] as? String ?? "—"
         return "\(short) (\(build))"
+    }
+}
+
+// MARK: - Launch
+
+/// Everything about what the app opens on: which screen, which shelf, and how long the
+/// list on that screen is.
+///
+/// One screen because they are one question. They were three sections on the main
+/// settings list with a storage link between two of them, so answering "why does it open
+/// here?" meant reading the whole page.
+private struct StartSettingsView: View {
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        @Bindable var settings = env.librarySettings
+
+        List {
+            Section {
+                Picker("settings.home", selection: $settings.home) {
+                    ForEach(HomeScreen.allCases) { screen in
+                        Text(screen.nameKey).tag(screen)
+                    }
+                }
+                .accessibilityIdentifier("settings.home")
+                Picker("settings.defaultMode", selection: $settings.defaultMediaMode) {
+                    ForEach(MediaMode.allCases) { mode in
+                        Label(mode.nameKey, systemImage: mode.icon).tag(mode)
+                    }
+                }
+                .accessibilityIdentifier("settings.defaultMode")
+            } footer: {
+                Text("settings.start.footer")
+            }
+
+            RecentReadingSection()
+        }
+        .navigationTitle("settings.start")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -148,6 +187,18 @@ private struct RecentReadingSection: View {
 }
 
 // MARK: - Background downloads
+
+/// The report on its own screen, because it is a report: four rows of what happened last
+/// night, which on the main settings list read as four things to set.
+private struct BackgroundDownloadsView: View {
+    var body: some View {
+        List {
+            BackgroundDownloadsSection()
+        }
+        .navigationTitle("settings.background")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
 
 /// The only window onto a feature that by definition runs where nobody can see
 /// it. Without this the honest answer to "did it download anything overnight?" is
@@ -364,7 +415,6 @@ struct StorageView: View {
     @State private var siteSizes: [String: Int64] = [:]
     @State private var bookSizes: [String: Int64] = [:]
     @State private var total: Int64 = 0
-    @State private var cacheBytes: Int64 = 0
     @State private var confirmingEverything = false
     /// Set when the delete about to happen cannot be undone by downloading again —
     /// an imported book, or the whole imported shelf.
@@ -376,21 +426,8 @@ struct StorageView: View {
                 LabeledContent("storage.total", value: Self.format(total))
                 Button("storage.deleteAll", role: .destructive) { confirmingEverything = true }
                     .disabled(total == 0)
-            } header: {
-                Text("storage.downloads")
             } footer: {
                 Text("storage.downloads.footer")
-            }
-
-            Section {
-                NavigationLink {
-                    CacheView()
-                } label: {
-                    LabeledContent("storage.cache", value: Self.format(cacheBytes))
-                }
-                .accessibilityIdentifier("storage.cache")
-            } footer: {
-                Text("storage.cache.footer")
             }
 
             ForEach(env.booksBySite, id: \.siteId) { group in
@@ -424,7 +461,7 @@ struct StorageView: View {
                 }
             }
         }
-        .navigationTitle("settings.storage")
+        .navigationTitle("storage.downloads")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             "storage.deleteAll.confirm",
@@ -473,16 +510,8 @@ struct StorageView: View {
     /// Sizes come from walking the files rather than from a stored total: the
     /// number has to stay honest after a crash mid-delete, and a few hundred
     /// stat() calls on a screen the user visits occasionally is nothing.
-    ///
-    /// The cache is asked to recount itself for the same reason, and shown as one number
-    /// with the web caches — the row is a way in, not an accounting. `CacheView` is where
-    /// they are told apart.
     private func measure() {
         total = env.downloads.size(of: .everything)
-        Task {
-            await env.cache.measure()
-            cacheBytes = (env.cache.used ?? 0) + WebCache.imageCacheBytes
-        }
         var sites: [String: Int64] = [:]
         var books: [String: Int64] = [:]
         for group in env.booksBySite {
@@ -522,11 +551,24 @@ struct CacheView: View {
         List {
             Section {
                 LabeledContent("cache.used", value: Self.format(env.cache.used ?? 0))
-                Picker("cache.limit", selection: $cache.limit) {
-                    ForEach(limits, id: \.self) { limit in
-                        Text(Self.format(limit)).tag(limit)
-                    }
+                // A slider rather than a list of sizes. The list had to stop somewhere,
+                // and where it stopped — "2.15 GB", because a gibibyte drawn in decimal
+                // is not a number anyone chose — read as the app being broken. A slider
+                // has an end without pretending the end is a menu item, and the row above
+                // it says what the end is.
+                VStack(alignment: .leading, spacing: 4) {
+                    LabeledContent("cache.limit", value: Self.format(cache.limit))
+                    Slider(
+                        value: Binding(
+                            get: { Double(cache.limit) },
+                            set: { cache.limit = ChapterCache.rounded($0) }
+                        ),
+                        in: Double(ChapterCache.minimumLimit)...Double(ceiling),
+                        step: Double(ChapterCache.limitStep)
+                    )
+                    .accessibilityIdentifier("cache.limit")
                 }
+                LabeledContent("cache.free", value: Self.format(free))
                 Button("cache.clear", role: .destructive) {
                     env.cache.clearEverything()
                     measure()
@@ -593,10 +635,14 @@ struct CacheView: View {
         }
     }
 
-    /// Read once when the screen appears rather than per redraw: how much room the disk
-    /// has is a syscall, and `body` runs on every one of these numbers landing.
-    private var limits: [Int64] {
-        ChapterCache.limits(free: free, current: env.cache.limit)
+    /// The top of the slider. `free` is read once when the screen appears rather than per
+    /// redraw: how much room the disk has is a syscall, and `body` runs on every one of
+    /// these numbers landing.
+    ///
+    /// Never below what is already set, or dragging the slider would be the act of
+    /// lowering a limit the reader chose on a fuller day.
+    private var ceiling: Double {
+        Double(max(ChapterCache.ceiling(free: free), env.cache.limit))
     }
 
     private func measure() {

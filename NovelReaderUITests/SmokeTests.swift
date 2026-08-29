@@ -103,21 +103,30 @@ final class SmokeTests: XCTestCase {
     func testStorageScreenOpens() {
         settingsTab.tap()
         let storage = app.buttons["settings.storage"]
+        app.reveal(storage)
         XCTAssertTrue(storage.waitForExistence(timeout: 5))
         storage.tap()
         // With nothing downloaded the screen is just the totals row; its presence
         // is what proves the four delete scopes have a home.
         XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5))
+    }
 
-        // The cache is a screen of its own, reachable only from here. Downloads and
-        // what reading left behind are different promises with different buttons, and
-        // a link that stopped leading anywhere would be invisible from the outside.
-        let cache = app.descendants(matching: .any).matching(identifier: "storage.cache").firstMatch
+    /// The cache is its own screen beside the downloads, not a detail inside them: the
+    /// two are different promises about the same disk. This also covers the settings
+    /// list's shape — the link is in a section that has to exist for it to be reachable.
+    func testCacheScreenOpens() {
+        settingsTab.tap()
+        let cache = app.buttons["settings.cache"]
+        app.reveal(cache)
         XCTAssertTrue(cache.waitForExistence(timeout: 5))
         cache.tap()
         XCTAssertTrue(
             app.buttons["storage.clearCache"].waitForExistence(timeout: 5),
             "The cache screen should say which caches its button clears"
+        )
+        XCTAssertTrue(
+            app.sliders["cache.limit"].exists,
+            "The ceiling is set with a slider, not a list of sizes"
         )
     }
 

@@ -25,17 +25,41 @@ import Foundation
 @MainActor
 @Observable
 final class ChapterCache {
-    /// The default ceiling: a gibibyte, which is a few dozen chapters of comic and more
+    /// The default ceiling: a gigabyte, which is a few dozen chapters of comic and more
     /// novel than anyone reads. Small enough to go unnoticed on a phone that is mostly
     /// photos, large enough that an evening's reading fits inside it.
-    static let defaultLimit: Int64 = 1 << 30
+    ///
+    /// Round decimal numbers rather than powers of two, all the way down this block,
+    /// because these are shown to a person: `ByteCountFormatter` counts in decimal, so a
+    /// gibibyte is drawn as "2.15 GB" and a reader setting a limit reads that as a bug in
+    /// the app rather than as a unit they never agreed to use.
+    static let defaultLimit: Int64 = 1_000_000_000
 
-    /// What the ceiling may be set to. No "unlimited", at the reader's own call: a cache
-    /// with no ceiling is a download nobody agreed to, and this one fills at fifteen
-    /// megabytes a chapter. Trimmed to what the device can spare — see `limits(free:)`.
-    static let limitChoices: [Int64] = [
-        256 << 20, 512 << 20, 1 << 30, 2 << 30, 5 << 30, 10 << 30, 20 << 30,
-    ]
+    /// The smallest ceiling worth having: below this a comic chapter and its neighbour do
+    /// not both fit, and the cache spends its life evicting what it just wrote.
+    static let minimumLimit: Int64 = 250_000_000
+    /// The largest, whatever the disk says. Past twenty gigabytes this has stopped being
+    /// a cache and become a download the reader did not ask for.
+    static let maximumLimit: Int64 = 20_000_000_000
+    /// What the slider moves by. Small enough to feel continuous, large enough that every
+    /// stop is a number a person would say out loud.
+    static let limitStep: Int64 = 250_000_000
+
+    /// The top of the range this device offers.
+    ///
+    /// Bounded by what the disk can actually spare, because a ceiling it cannot reach is
+    /// not a choice — but never so low that there is nothing to drag: a phone with a few
+    /// hundred megabytes free still gets a slider, and iOS reclaiming this directory under
+    /// pressure is the backstop that makes that safe.
+    static func ceiling(free: Int64) -> Int64 {
+        min(maximumLimit, max(minimumLimit * 2, free))
+    }
+
+    /// A slider's position as a limit: on a step, and never below the smallest.
+    static func rounded(_ bytes: Double) -> Int64 {
+        let steps = (bytes / Double(limitStep)).rounded()
+        return max(minimumLimit, Int64(steps) * limitStep)
+    }
 
     /// How much the cache may hold. Lowering it takes effect at once, because a setting
     /// that only applies to future reading is a setting that did not do what it said.
@@ -249,19 +273,12 @@ final class ChapterCache {
         }
     }
 
-    /// The ceilings worth offering on this device.
+    /// How much the device could spare, which is both the top of the slider and a number
+    /// the screen shows outright.
     ///
-    /// Nothing larger than the space there is, because a ceiling the disk cannot reach is
-    /// not a choice — but always at least the smallest, so a nearly full phone still has
-    /// something to pick, and always whatever is currently set, so a picker cannot open
-    /// with no row selected.
-    static func limits(free: Int64, current: Int64) -> [Int64] {
-        let offered = limitChoices.filter { $0 <= free }
-        let list = offered.isEmpty ? [limitChoices[0]] : offered
-        return list.contains(current) ? list : (list + [current]).sorted()
-    }
-
-    /// How much the device could spare, for building that list.
+    /// Shown, because otherwise the slider stopping at 2.4 GB on a 64 GB phone reads as
+    /// the app being broken rather than as the phone being full — which is exactly how it
+    /// read the first time.
     ///
     /// `volumeAvailableCapacityForImportantUsage` rather than plain free space: it is what
     /// the system says it would let this app have, with the reserve iOS keeps for itself

@@ -853,6 +853,30 @@
         }
       }
     },
+    "cache.free" : {
+      "comment" : "How much room the device says this app can have. Shown so that where the slider stops is not a mystery.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Space available"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此设备可用空间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此裝置可用空間"
+          }
+        }
+      }
+    },
     "cache.limit" : {
       "comment" : "Picker for how large the chapter cache may grow.",
       "extractionState" : "manual",
@@ -6075,6 +6099,102 @@
         }
       }
     },
+    "settings.section.downloads" : {
+      "comment" : "Groups how chapters arrive.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloads"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載"
+          }
+        }
+      }
+    },
+    "settings.section.reading" : {
+      "comment" : "Groups everything about what reading looks like.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阅读"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "閱讀"
+          }
+        }
+      }
+    },
+    "settings.section.storage" : {
+      "comment" : "Groups what is taking up space: the downloads, and the cache.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Storage"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存储空间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存空間"
+          }
+        }
+      }
+    },
+    "settings.section.sync" : {
+      "comment" : "Groups iCloud.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步"
+          }
+        }
+      }
+    },
     "settings.sources" : {
       "comment" : "Source (site rule) management.",
       "extractionState" : "manual",
@@ -6603,54 +6723,6 @@
         }
       }
     },
-    "storage.cache" : {
-      "comment" : "Row on the storage screen leading to the cache screen; shows both caches together.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cache"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "缓存"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "快取"
-          }
-        }
-      }
-    },
-    "storage.cache.footer" : {
-      "comment" : "Says what the cache is, in one line, for a reader who has never thought about one.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "What reading leaves behind, so a page you go back to loads at once. It clears itself, and never touches your downloads."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "阅读时顺手留下的东西，回头再看就不用重新抓。它会自己清掉，也不会动到你的下载。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "閱讀時順手留下的東西，回頭再看就不用重新抓。它會自己清掉，也不會動到你的下載。"
-          }
-        }
-      }
-    },
     "storage.clearCache" : {
       "comment" : "Button that empties WebKit's and URLCache's caches. Names them, because there is a second cache on the same screen.",
       "extractionState" : "manual",
@@ -6748,7 +6820,7 @@
       }
     },
     "storage.downloads" : {
-      "comment" : "Section header over the downloads total.",
+      "comment" : "Both a section title and the name of the downloads screen.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {

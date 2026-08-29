@@ -154,20 +154,35 @@ final class ChapterCacheTests: XCTestCase {
         XCTAssertLessThanOrEqual(cache.used ?? .max, 1_500)
     }
 
-    /// Never larger than the disk, because a ceiling that cannot be reached is not a
-    /// choice; never empty, because a nearly full phone still has to be able to pick
-    /// something; and always containing what is already set, or the picker opens with no
-    /// row selected and the reader's own setting is not on the list.
-    func testTheCeilingsOfferedFitTheDeviceAndIncludeWhateverIsSet() {
-        let roomy = ChapterCache.limits(free: 100 << 30, current: 1 << 30)
-        XCTAssertEqual(roomy, ChapterCache.limitChoices)
+    /// Where the slider ends: at the space there is, because a ceiling the disk cannot
+    /// reach is not a choice — but never at a point, or a full phone gets a control with
+    /// nothing to drag.
+    func testTheSliderEndsAtWhatTheDiskCanSpareButNeverAtNothing() {
+        XCTAssertEqual(
+            ChapterCache.ceiling(free: 4_000_000_000), 4_000_000_000,
+            "An ordinary phone gets its own free space as the end"
+        )
+        XCTAssertEqual(
+            ChapterCache.ceiling(free: 900_000_000_000), ChapterCache.maximumLimit,
+            "Past twenty gigabytes this has stopped being a cache"
+        )
+        XCTAssertEqual(
+            ChapterCache.ceiling(free: 0), ChapterCache.minimumLimit * 2,
+            "A full phone still gets a range to drag through"
+        )
+    }
 
-        let tight = ChapterCache.limits(free: 700 << 20, current: 512 << 20)
-        XCTAssertEqual(tight, [256 << 20, 512 << 20])
-
-        let full = ChapterCache.limits(free: 0, current: 5 << 30)
-        XCTAssertEqual(full, [256 << 20, 5 << 30])
-        XCTAssertTrue(full.contains(5 << 30), "The picker must be able to show what is set")
+    /// Every stop is a round number, because the reader reads them. A limit rounded off a
+    /// slider must also never land under the smallest one — a cache too small to hold two
+    /// chapters spends its life evicting what it just wrote.
+    func testASliderPositionRoundsToARoundNumberOfBytes() {
+        XCTAssertEqual(ChapterCache.rounded(1_010_000_000), 1_000_000_000)
+        XCTAssertEqual(ChapterCache.rounded(1_130_000_000), 1_250_000_000)
+        XCTAssertEqual(ChapterCache.rounded(0), ChapterCache.minimumLimit)
+        XCTAssertEqual(
+            ChapterCache.rounded(Double(ChapterCache.defaultLimit)), ChapterCache.defaultLimit,
+            "The default has to be a position the slider can actually sit on"
+        )
     }
 
     // MARK: - Taking it back
