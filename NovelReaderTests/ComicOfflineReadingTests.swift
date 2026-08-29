@@ -27,6 +27,9 @@ final class ComicOfflineReadingTests: XCTestCase {
         env = AppEnvironment(
             database: try AppDatabase.makeInMemory(),
             files: files,
+            cache: ChapterCache(
+                files: ChapterFileStore(root: tempRoot.appendingPathComponent("cache"))
+            ),
             coverFiles: CoverStore(root: tempRoot.appendingPathComponent("covers")),
             sites: SiteStore(directory: tempRoot.appendingPathComponent("sites")),
             queueStore: DownloadQueueStore(url: tempRoot.appendingPathComponent("queue.json"))
@@ -149,6 +152,38 @@ final class ComicOfflineReadingTests: XCTestCase {
         store.retry(page: 1)
         await fulfillment(of: [again], timeout: 5)
         XCTAssertTrue(store.hasFailed(page: 1))
+    }
+
+    /// The same promise for a chapter nobody downloaded.
+    ///
+    /// A page read online is kept, and the next look finds it — which is what lets the
+    /// store hold only six pages' bytes in memory without the reader paying twice for the
+    /// seventh. Proven the only way it can be: the address is an ordinary web one, the
+    /// session refuses every request, and the page draws anyway.
+    func testAPageAlreadyCachedIsReadFromDiskRatherThanAskedForAgain() async throws {
+        let cache = env.cache
+        cache.store(Self.png(width: 80, height: 120), page: 0, of: book, siteChapterId: siteChapterId)
+        await cache.work?.value
+
+        let store = ComicPageStore(
+            urls: [URL(string: "https://comic.test/1/000.jpg")!],
+            chapterPage: URL(string: "https://comic.test/1")!,
+            fetcher: ImageFetcher(session: Self.refusingSession())
+        )
+        store.cached = { page in
+            cache.page(page, of: self.book, siteChapterId: self.siteChapterId)
+        }
+        let drawn = expectation(description: "image")
+        store.onImage = { _ in drawn.fulfill() }
+        store.onFetched = { page, _ in XCTFail("page \(page) was kept a second time") }
+        store.onFailure = { page, error in
+            XCTFail("page \(page) went to the network: \(error)")
+        }
+
+        store.setWindow(0..<1, width: 80)
+
+        await fulfillment(of: [drawn], timeout: 5)
+        XCTAssertEqual(store.size(page: 0), CGSize(width: 80, height: 120))
     }
 
     // MARK: - Helpers

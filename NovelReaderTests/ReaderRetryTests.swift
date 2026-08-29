@@ -26,6 +26,9 @@ final class ReaderRetryTests: XCTestCase {
         env = AppEnvironment(
             database: try AppDatabase.makeInMemory(),
             files: files,
+            cache: ChapterCache(
+                files: ChapterFileStore(root: tempRoot.appendingPathComponent("cache"))
+            ),
             coverFiles: CoverStore(root: tempRoot.appendingPathComponent("covers")),
             sites: SiteStore(directory: tempRoot.appendingPathComponent("sites")),
             queueStore: DownloadQueueStore(url: tempRoot.appendingPathComponent("queue.json"))

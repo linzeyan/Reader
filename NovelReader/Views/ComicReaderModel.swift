@@ -24,11 +24,16 @@ final class ComicReaderModel {
         let imageURLs: [URL]
         /// The page the images were listed on, sent as `Referer` for every one of them.
         let chapterPage: URL
-        /// Called with a page that came off the network for a chapter that is otherwise
-        /// on the device, so the gap it was fetched for can be filled in for good.
-        /// Absent for a chapter with no gaps, and for one being read online — there is
-        /// nothing on disk for either to write into.
-        let fillGap: ((Int, Data) -> Void)?
+        /// Where a page that came off the network is put so it need not be fetched twice.
+        /// Two different places, decided when the chapter opens: the cache, for a chapter
+        /// being read online, or the hole in a downloaded chapter that the page was
+        /// fetched to fill. Absent when there is nowhere — a downloaded chapter with no
+        /// gaps asks for nothing.
+        let keepPage: ((Int, Data) -> Void)?
+        /// Where a page already is, for a chapter being read online. The other half of
+        /// `keepPage`, and absent for the same reasons: nothing was kept, or what was
+        /// kept is the chapter itself.
+        let cachedPage: ((Int) -> URL?)?
         var id: String { chapter.id }
     }
 
@@ -206,8 +211,22 @@ final class ComicReaderModel {
         do {
             let urls = try await env.bookService.chapterImageURLs(rule: rule, chapter: chapter)
             guard mine == generation else { return nil }
+            // Every page read online is kept, and looked for before it is asked for
+            // again. That is what makes scrolling back through a chapter — or opening it
+            // again tomorrow — a disk read rather than fifty more requests, and what lets
+            // the store hold only six pages' bytes in memory without the reader paying
+            // for the seventh twice.
+            let cache = env.cache
+            let book = self.book
+            let siteChapterId = chapter.siteChapterId
             return LoadedChapter(
-                chapter: chapter, imageURLs: urls, chapterPage: page, fillGap: nil
+                chapter: chapter, imageURLs: urls, chapterPage: page,
+                keepPage: { index, bytes in
+                    cache.store(bytes, page: index, of: book, siteChapterId: siteChapterId)
+                },
+                cachedPage: { index in
+                    cache.page(index, of: book, siteChapterId: siteChapterId)
+                }
             )
         } catch {
             guard mine == generation else { return nil }
@@ -225,7 +244,7 @@ final class ComicReaderModel {
     ///
     /// So the addresses are asked for again — once, only for a chapter that has a gap,
     /// and only when there is a rule to ask with. The marker's slot is given the live
-    /// address, which the store fetches like any online page, and `fillGap` writes what
+    /// address, which the store fetches like any online page, and `keepPage` writes what
     /// comes back into the hole so the next open has nothing to fetch.
     ///
     /// Everything about this fails soft. No rule, no network, a list that no longer has
@@ -241,7 +260,8 @@ final class ComicReaderModel {
               live.count == stored.count
         else {
             return LoadedChapter(
-                chapter: chapter, imageURLs: stored, chapterPage: page, fillGap: nil
+                chapter: chapter, imageURLs: stored, chapterPage: page,
+                keepPage: nil, cachedPage: nil
             )
         }
         guard mine == generation else { return nil }
@@ -253,12 +273,18 @@ final class ComicReaderModel {
         let fillable = Set(gaps)
         return LoadedChapter(
             chapter: chapter, imageURLs: urls, chapterPage: page,
-            fillGap: { index, bytes in
+            keepPage: { index, bytes in
+                // Into the download, not the cache: this chapter is one the reader asked
+                // to keep, and a page of it belongs where the rest of it is.
                 guard fillable.contains(index) else { return }
                 try? downloads.fillPage(
                     bytes, index: index, book: book, siteChapterId: siteChapterId
                 )
-            }
+            },
+            // Nothing to look up. Every page of this chapter but the gaps is already a
+            // file address, and a gap filled during this read is one page of fifty — not
+            // worth a lookup on every page of every downloaded chapter to save.
+            cachedPage: nil
         )
     }
 

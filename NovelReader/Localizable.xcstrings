@@ -781,6 +781,198 @@
         }
       }
     },
+    "cache.chapters" : {
+      "comment" : "Section header over the chapter cache.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chapters You Have Read"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看过的章节"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看過的章節"
+          }
+        }
+      }
+    },
+    "cache.chapters.footer" : {
+      "comment" : "Explains the ceiling and what gets dropped first.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text and pages of chapters read online. When the cache reaches its limit, the chapters you have not opened in the longest go first. Downloaded chapters are never touched."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在线看过的章节文字与图片。缓存到达上限时，会先丢掉最久没再打开的章节。已下载的章节不受影响。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "線上看過的章節文字與圖片。快取到達上限時，會先丟掉最久沒再打開的章節。已下載的章節不受影響。"
+          }
+        }
+      }
+    },
+    "cache.clear" : {
+      "comment" : "Button that empties the chapter cache.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Chapter Cache"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除章节缓存"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除章節快取"
+          }
+        }
+      }
+    },
+    "cache.limit" : {
+      "comment" : "Picker for how large the chapter cache may grow.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Limit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上限"
+          }
+        }
+      }
+    },
+    "cache.used" : {
+      "comment" : "Bytes the chapter cache is holding.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Used"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已使用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已使用"
+          }
+        }
+      }
+    },
+    "cache.web" : {
+      "comment" : "Bytes WebKit and URLCache are holding.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Web pages and covers"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页与封面"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網頁與封面"
+          }
+        }
+      }
+    },
+    "cache.web.footer" : {
+      "comment" : "Explains what clearing does and does not remove.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pages and covers will be fetched again; downloaded chapters and the chapter cache are untouched. Site verification cookies are kept, so you will not have to pass those checks again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除后网页与封面要重新下载，已下载的章节与章节缓存不受影响。网站的验证状态（cookie）会保留，不必重新完成人机验证。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除後網頁與封面要重新下載，已下載的章節與章節快取不受影響。網站的驗證狀態（cookie）會保留，不必重新完成人機驗證。"
+          }
+        }
+      }
+    },
+    "cache.web.section" : {
+      "comment" : "Section header over the WebKit and URLCache caches.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other Caches"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他缓存"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他快取"
+          }
+        }
+      }
+    },
     "challenge.done" : {
       "comment" : "Confirms the challenge was completed.",
       "extractionState" : "manual",
@@ -5499,6 +5691,30 @@
         }
       }
     },
+    "settings.cache" : {
+      "comment" : "Cache screen.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快取"
+          }
+        }
+      }
+    },
     "settings.defaultMode" : {
       "comment" : "Picks which shelf a launch opens on.",
       "extractionState" : "manual",
@@ -6388,73 +6604,73 @@
       }
     },
     "storage.cache" : {
-      "comment" : "Cached pages and cover images.",
+      "comment" : "Row on the storage screen leading to the cache screen; shows both caches together.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Cached pages and covers"
+            "value" : "Cache"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "网页与封面缓存"
+            "value" : "缓存"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "網頁與封面快取"
+            "value" : "快取"
           }
         }
       }
     },
     "storage.cache.footer" : {
-      "comment" : "Explains what clearing does and does not remove.",
+      "comment" : "Says what the cache is, in one line, for a reader who has never thought about one.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Pages and covers will be fetched again; downloaded chapters are untouched. Site verification cookies are kept, so you will not have to pass those checks again."
+            "value" : "What reading leaves behind, so a page you go back to loads at once. It clears itself, and never touches your downloads."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "清除后网页与封面要重新下载，已下载的章节不受影响。网站的验证状态（cookie）会保留，不必重新完成人机验证。"
+            "value" : "阅读时顺手留下的东西，回头再看就不用重新抓。它会自己清掉，也不会动到你的下载。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "清除後網頁與封面要重新下載，已下載的章節不受影響。網站的驗證狀態（cookie）會保留，不必重新完成人機驗證。"
+            "value" : "閱讀時順手留下的東西，回頭再看就不用重新抓。它會自己清掉，也不會動到你的下載。"
           }
         }
       }
     },
     "storage.clearCache" : {
-      "comment" : "Button that empties the caches.",
+      "comment" : "Button that empties WebKit's and URLCache's caches. Names them, because there is a second cache on the same screen.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Clear cache"
+            "value" : "Clear Web and Cover Caches"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "清除缓存"
+            "value" : "清除网页与封面缓存"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "清除快取"
+            "value" : "清除網頁與封面快取"
           }
         }
       }
@@ -6527,6 +6743,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刪除本站全部下載"
+          }
+        }
+      }
+    },
+    "storage.downloads" : {
+      "comment" : "Section header over the downloads total.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloads"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載"
+          }
+        }
+      }
+    },
+    "storage.downloads.footer" : {
+      "comment" : "Draws the line between downloads and the cache below them.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chapters you asked to keep. Nothing removes them but you."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你要求保留在设备上的章节。除了你自己，没有东西会删掉它们。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你要求保留在裝置上的章節。除了你自己，沒有東西會刪掉它們。"
           }
         }
       }

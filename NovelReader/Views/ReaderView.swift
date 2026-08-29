@@ -1104,12 +1104,20 @@ final class ReaderModel {
     }
 
     /// Local text wins: a downloaded chapter must be readable with no network at
-    /// all, which is the entire point of downloading it. Chapters read online are
-    /// held in memory only — writing them to disk would inflate the storage
-    /// screen with files the user never asked to keep.
+    /// all, which is the entire point of downloading it.
+    ///
+    /// Then whatever reading online left behind. That is a weaker claim than a
+    /// download — `ChapterCache` may have thrown the chapter away to stay under its
+    /// ceiling, and it is asked for the chapter rather than told about it — but when
+    /// it does have one, scrolling back up a chapter costs a disk read instead of a
+    /// trip to the site. Which is also the polite thing: the page has not changed
+    /// since the reader passed it two minutes ago.
     private func paragraphs(for chapter: Chapter) async throws -> [String] {
         if chapter.isDownloaded, let stored = await storedParagraphs(for: chapter), !stored.isEmpty {
             return stored
+        }
+        if let cached = await env.cache.paragraphs(of: book, siteChapterId: chapter.siteChapterId) {
+            return cached
         }
         switch readAheadPhase {
         case .fetching(let id) where id == chapter.id:
@@ -1139,7 +1147,9 @@ final class ReaderModel {
             if book.isLocal { throw LocalBookError.contentDeleted }
             throw BookService.ServiceError.badURL
         }
-        return try await env.bookService.chapterParagraphs(rule: rule, chapter: chapter)
+        let fetched = try await env.bookService.chapterParagraphs(rule: rule, chapter: chapter)
+        env.cache.store(paragraphs: fetched, of: book, siteChapterId: chapter.siteChapterId)
+        return fetched
     }
 
     /// Reads a downloaded chapter off the main actor.
@@ -1189,6 +1199,18 @@ final class ReaderModel {
         readAheadPhase = .pacing(chapterId: next.id)
         readAheadTask = Task { [weak self] in
             guard let self else { return }
+            // A chapter already in the cache is read back instead of asked for. Not for
+            // the speed — `paragraphs(for:)` would find it there in any case — but
+            // because the alternative is a request nobody needs for text this device
+            // already has, which is exactly the traffic the pacer exists to avoid.
+            if let cached = await self.env.cache.paragraphs(
+                of: self.book, siteChapterId: next.siteChapterId
+            ) {
+                guard !Task.isCancelled else { return }
+                self.readAheadPhase = nil
+                self.readAhead = (chapterId: next.id, paragraphs: cached)
+                return
+            }
             await self.env.pacer.pace()
             guard !Task.isCancelled else { return }
             self.readAheadPhase = .fetching(chapterId: next.id)
@@ -1196,6 +1218,9 @@ final class ReaderModel {
                 rule: rule, chapter: next
             ) else { return }
             guard !Task.isCancelled else { return }
+            self.env.cache.store(
+                paragraphs: paragraphs, of: self.book, siteChapterId: next.siteChapterId
+            )
             self.readAhead = (chapterId: next.id, paragraphs: paragraphs)
         }
     }

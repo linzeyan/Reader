@@ -280,6 +280,16 @@ struct ChapterFileStore {
         targets(for: scope).reduce(0) { $0 + Self.totalSize(at: $1, fileManager: fileManager) }
     }
 
+    /// Bytes under one path, whatever is there — a novel chapter's file, a comic
+    /// chapter's directory of pages.
+    ///
+    /// For `ChapterCache`, which weighs chapters against each other before it throws the
+    /// oldest away. A scope cannot say this: it names a chapter by its ids, and the cache
+    /// is holding the entries it found by walking, whose ids it never learns.
+    func size(at url: URL) -> Int64 {
+        Self.totalSize(at: url, fileManager: fileManager)
+    }
+
     private static func totalSize(at url: URL, fileManager: FileManager) -> Int64 {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return 0 }

@@ -354,6 +354,11 @@ struct SiteListView: View {
 // MARK: - Storage
 
 /// Requirement 4.3: the four delete scopes, with the numbers that justify them.
+///
+/// Downloads only. What reading online leaves behind is a different kind of thing —
+/// nobody asked for it, it has a ceiling, and it goes away by itself — and mixing the two
+/// totals would make the one number a reader checks mean nothing. `CacheView` is the
+/// other half, one tap away.
 struct StorageView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var siteSizes: [String: Int64] = [:]
@@ -371,17 +376,19 @@ struct StorageView: View {
                 LabeledContent("storage.total", value: Self.format(total))
                 Button("storage.deleteAll", role: .destructive) { confirmingEverything = true }
                     .disabled(total == 0)
+            } header: {
+                Text("storage.downloads")
+            } footer: {
+                Text("storage.downloads.footer")
             }
 
             Section {
-                LabeledContent("storage.cache", value: Self.format(cacheBytes))
-                Button("storage.clearCache") {
-                    Task {
-                        await WebCache.clear()
-                        cacheBytes = WebCache.imageCacheBytes
-                    }
+                NavigationLink {
+                    CacheView()
+                } label: {
+                    LabeledContent("storage.cache", value: Self.format(cacheBytes))
                 }
-                .accessibilityIdentifier("storage.clearCache")
+                .accessibilityIdentifier("storage.cache")
             } footer: {
                 Text("storage.cache.footer")
             }
@@ -466,9 +473,16 @@ struct StorageView: View {
     /// Sizes come from walking the files rather than from a stored total: the
     /// number has to stay honest after a crash mid-delete, and a few hundred
     /// stat() calls on a screen the user visits occasionally is nothing.
+    ///
+    /// The cache is asked to recount itself for the same reason, and shown as one number
+    /// with the web caches — the row is a way in, not an accounting. `CacheView` is where
+    /// they are told apart.
     private func measure() {
         total = env.downloads.size(of: .everything)
-        cacheBytes = WebCache.imageCacheBytes
+        Task {
+            await env.cache.measure()
+            cacheBytes = (env.cache.used ?? 0) + WebCache.imageCacheBytes
+        }
         var sites: [String: Int64] = [:]
         var books: [String: Int64] = [:]
         for group in env.booksBySite {
@@ -479,6 +493,121 @@ struct StorageView: View {
         }
         siteSizes = sites
         bookSizes = books
+    }
+
+    private static func format(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+}
+
+// MARK: - Cache
+
+/// What the app kept without being asked, and the two ways to take it back.
+///
+/// Two caches, listed apart because they are not the same promise. The chapter cache is
+/// the text and pages of things the reader has actually read, it is measured per book,
+/// and it holds a ceiling they set. The web caches are WebKit's and `URLCache`'s, they
+/// cannot be measured properly (see `WebCache.imageCacheBytes`), and there is nothing to
+/// aim at inside them — the only honest control is one button that empties the lot, and
+/// it has to say what the lot is.
+struct CacheView: View {
+    @Environment(AppEnvironment.self) private var env
+    @State private var bookSizes: [String: Int64] = [:]
+    @State private var webBytes: Int64 = 0
+    @State private var free: Int64 = 0
+    @State private var clearing = false
+
+    var body: some View {
+        @Bindable var cache = env.cache
+        List {
+            Section {
+                LabeledContent("cache.used", value: Self.format(env.cache.used ?? 0))
+                Picker("cache.limit", selection: $cache.limit) {
+                    ForEach(limits, id: \.self) { limit in
+                        Text(Self.format(limit)).tag(limit)
+                    }
+                }
+                Button("cache.clear", role: .destructive) {
+                    env.cache.clearEverything()
+                    measure()
+                }
+                .disabled((env.cache.used ?? 0) == 0)
+                .accessibilityIdentifier("cache.clear")
+            } header: {
+                Text("cache.chapters")
+            } footer: {
+                Text("cache.chapters.footer")
+            }
+
+            ForEach(cachedGroups, id: \.siteId) { group in
+                Section(group.name) {
+                    ForEach(group.books) { book in
+                        LabeledContent(
+                            book.shownName, value: Self.format(bookSizes[book.id] ?? 0)
+                        )
+                        .swipeActions {
+                            // No confirmation, unlike a download: everything here can be
+                            // read again, and most of it will be thrown away by the
+                            // ceiling anyway.
+                            Button(role: .destructive) {
+                                env.cache.clear(book)
+                                measure()
+                            } label: {
+                                Label("common.delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section {
+                LabeledContent("cache.web", value: Self.format(webBytes))
+                Button("storage.clearCache") {
+                    clearing = true
+                    Task {
+                        await WebCache.clear()
+                        clearing = false
+                        measure()
+                    }
+                }
+                .disabled(clearing)
+                .accessibilityIdentifier("storage.clearCache")
+            } header: {
+                Text("cache.web.section")
+            } footer: {
+                Text("cache.web.footer")
+            }
+        }
+        .navigationTitle("settings.cache")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { measure() }
+    }
+
+    /// Only the books that have something cached. The whole library would be a list of
+    /// zeroes with the answer buried in it.
+    private var cachedGroups: [LibrarySource] {
+        env.booksBySite.compactMap { group in
+            let books = group.books.filter { (bookSizes[$0.id] ?? 0) > 0 }
+            guard !books.isEmpty else { return nil }
+            return LibrarySource(siteId: group.siteId, name: group.name, books: books)
+        }
+    }
+
+    /// Read once when the screen appears rather than per redraw: how much room the disk
+    /// has is a syscall, and `body` runs on every one of these numbers landing.
+    private var limits: [Int64] {
+        ChapterCache.limits(free: free, current: env.cache.limit)
+    }
+
+    private func measure() {
+        webBytes = WebCache.imageCacheBytes
+        free = ChapterCache.freeBytes()
+        Task {
+            await env.cache.measure()
+            // The total first, because that is the number the screen is opened for; the
+            // per-book list fills in behind it a moment later.
+            bookSizes = await env.cache.sizes(of: env.books)
+        }
     }
 
     private static func format(_ bytes: Int64) -> String {

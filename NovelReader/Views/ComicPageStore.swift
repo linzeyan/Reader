@@ -34,11 +34,16 @@ final class ComicPageStore {
     var onSize: ((Int, CGSize) -> Void)?
     /// A page's image became available, so whatever is on screen should be redrawn.
     var onImage: ((Int) -> Void)?
-    /// A page arrived from the network. Set only for a chapter that is on the device and
-    /// short a page or two, and only the gaps are acted on — see `ComicReaderModel`.
-    /// Here rather than in the fetch itself because a store has no idea what a chapter
-    /// is or where one is kept; it has addresses and bytes.
+    /// A page arrived from the network, so it can be kept and not asked for twice —
+    /// in the chapter cache, or in the hole of a downloaded chapter it was fetched to
+    /// fill. Which of those is `ComicReaderModel`'s business, not this one's: a store has
+    /// no idea what a chapter is or where one is kept, it has addresses and bytes.
     var onFetched: ((Int, Data) -> Void)?
+    /// Where a page already is, asked before every fetch. Answers for the pages
+    /// `onFetched` has kept, which is what makes scrolling back through a chapter cost a
+    /// disk read rather than the network — see `ChapterCache.page(_:of:siteChapterId:)`.
+    /// Absent for a chapter read off the device, which is already nothing but files.
+    var cached: ((Int) -> URL?)?
     /// A page could not be fetched, so whatever is drawing it should draw that instead.
     /// Not an error anyone is asked about: one dead image out of fifty is an ordinary
     /// thing on these sites, and a banner over the page the reader is on — with the
@@ -145,12 +150,16 @@ final class ComicPageStore {
 
     private func fetch(page: Int) {
         guard fetching[page] == nil, urls.indices.contains(page) else { return }
-        let url = urls[page]
+        // The kept copy in preference to the address it came from. Resolved here rather
+        // than once per chapter because a page kept a moment ago should answer the next
+        // look, and because a lookup that came back stale — the file evicted or deleted
+        // between the answer and the read — would be a page that never loads.
+        let url = cached?(page) ?? urls[page]
         fetching[page] = Task { [weak self] in
             guard let self else { return }
             do {
                 let data = try await self.bytes(of: url, page: page)
-                self.received(data, page: page)
+                self.received(data, page: page, from: url)
             } catch is CancellationError {
                 // The reader left. Not a failure, and nothing to report.
             } catch {
@@ -205,12 +214,12 @@ final class ComicPageStore {
         return jar
     }
 
-    private func received(_ data: Data, page: Int) {
+    private func received(_ data: Data, page: Int, from url: URL) {
         fetching[page] = nil
-        // Only what would have to come back over the network. A page from disk is
-        // already stored, in a file the reader chose to keep, and holding a second
-        // copy in memory buys a decode that was never the expensive part.
-        if !urls[page].isFileURL {
+        // Only what would have to come back over the network. A page that came off the
+        // disk is already kept — downloaded, or cached by a previous read — and a second
+        // copy of it in memory buys a decode that was never the expensive part.
+        if !url.isFileURL {
             bytes[page] = data
             trimBytes()
             onFetched?(page, data)
@@ -242,9 +251,10 @@ final class ComicPageStore {
     /// window of long chapters used to hold — which is what made a long session get
     /// slower and slower.
     ///
-    /// Scrolling further back than that re-asks, and today that costs a download,
-    /// because the only thing behind this is `URLCache` at its default ten megabytes.
-    /// The chapter cache is what makes it a disk read instead.
+    /// Scrolling further back than that asks again, and what answers is usually
+    /// `ChapterCache` — every page fetched here is written there, so the second ask for
+    /// a page is a disk read. Which is what makes six a defensible number rather than a
+    /// stingy one.
     private static let retainedPages = 6
 
     /// Drops the retained pages furthest from what the reader is looking at.

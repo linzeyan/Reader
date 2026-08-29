@@ -14,6 +14,10 @@ final class AppEnvironment {
     let files: ChapterFileStore
     let repo: LibraryRepo
     let downloads: DownloadStore
+    /// What reading online leaves behind, so going back a chapter is a disk read rather
+    /// than a second trip to the site. Separate from `downloads` in every way that
+    /// matters — a different directory, a ceiling, and nobody asked for it.
+    let cache: ChapterCache
     let fetcher: WebFetcher
     /// The comic reader's and the comic downloader's way onto the network. Owned here
     /// rather than made per screen so that both go through one `URLSession` — which is
@@ -113,12 +117,14 @@ final class AppEnvironment {
     init(
         database: AppDatabase,
         files: ChapterFileStore,
+        cache: ChapterCache,
         coverFiles: CoverStore,
         sites: SiteStore,
         queueStore: DownloadQueueStore
     ) {
         self.database = database
         self.files = files
+        self.cache = cache
         self.coverFiles = coverFiles
         self.sites = sites
         let repo = LibraryRepo(database: database)
@@ -200,6 +206,7 @@ final class AppEnvironment {
             return AppEnvironment(
                 database: try AppDatabase.makeShared(),
                 files: try ChapterFileStore.makeShared(),
+                cache: try ChapterCache.makeShared(),
                 coverFiles: try CoverStore.makeShared(),
                 sites: try SiteStore.makeShared(),
                 queueStore: try DownloadQueueStore.makeShared()
@@ -212,6 +219,11 @@ final class AppEnvironment {
             let fallback = AppEnvironment(
                 database: try! AppDatabase.makeInMemory(),
                 files: ChapterFileStore(root: URL.temporaryDirectory.appendingPathComponent("Chapters")),
+                cache: ChapterCache(
+                    files: ChapterFileStore(
+                        root: URL.temporaryDirectory.appendingPathComponent("CachedChapters")
+                    )
+                ),
                 coverFiles: CoverStore(root: URL.temporaryDirectory.appendingPathComponent("Covers")),
                 sites: SiteStore(directory: URL.temporaryDirectory.appendingPathComponent("Rules")),
                 queueStore: DownloadQueueStore(
@@ -404,6 +416,9 @@ final class AppEnvironment {
     /// files belonged to the book.
     func removeBookmark(_ book: Book) {
         try? downloads.delete(.book(book))
+        // And what reading it online left behind. Nothing else would ever come back for
+        // it: the cache is found by book, and this is the moment the book stops existing.
+        cache.clear(book)
         try? repo.removeBookmark(bookId: book.id)
         cloud.removed(bookId: book.id)
         // The one place a book stops existing, and the only chance to drop what is
