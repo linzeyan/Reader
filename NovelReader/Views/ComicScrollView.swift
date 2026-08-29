@@ -60,32 +60,6 @@ final class ComicScrollView: UIScrollView {
     /// that computes a position from the two together computes it from halfway.
     private(set) var isMagnifying = false
 
-    /// Where the reader was before a double tap magnified them, so the double tap back
-    /// out puts them there again.
-    ///
-    /// Without it the pair does not undo itself. Zooming in is around the *finger*, which
-    /// is what makes it useful — the panel they pointed at is the panel they get — but
-    /// that moves the top of the window down by up to half a screen. Measured on device:
-    /// in at 29868, out at 30092. Zooming out then preserved that 30092 faithfully, which
-    /// is the wrong number to be faithful to: the reader tapped twice and expected to be
-    /// back where they started, and instead the page had slid a quarter screen.
-    ///
-    /// Dropped the moment they move themselves — a drag or a pinch makes where they are
-    /// their own decision, and restoring a position from before that would take the book
-    /// off them.
-    private var offsetBeforeZoom: CGFloat?
-
-    /// Whether the magnification now starting is the double tap's own animation rather
-    /// than the reader's fingers.
-    ///
-    /// `scrollViewWillBeginZooming` reports both, and they mean opposite things for
-    /// `offsetBeforeZoom`. Without the distinction the first attempt at this undid itself:
-    /// the double tap wrote the position down and then started a zoom whose own beginning
-    /// wiped it, so the tap back out had nothing to return to. Measured on device — in at
-    /// 2394.5, out at 2634.0, the same quarter-screen slide the position was written to
-    /// prevent.
-    private var isDoubleTapZooming = false
-
     /// Where the top of the window sits in the content — the reading position exactly.
     ///
     /// In *unzoomed* content points, which is the space the columns are laid out in and
@@ -233,9 +207,13 @@ final class ComicScrollView: UIScrollView {
 
     func setReadingOffset(_ y: CGFloat, animated: Bool) {
         let maximum = max(0, contentSize.height - bounds.height)
-        setContentOffset(
-            CGPoint(x: contentOffset.x, y: min(max(y * zoomScale, 0), maximum)), animated: animated
+        let landed = min(max(y * zoomScale, 0), maximum)
+        #if DEBUG
+        ComicProbe.movedTo(
+            asked: y * zoomScale, landed: landed, animated: animated, zoom: zoomScale
         )
+        #endif
+        setContentOffset(CGPoint(x: contentOffset.x, y: landed), animated: animated)
     }
 
     func showFooter(_ state: ReaderTextFooter.State) {
@@ -305,26 +283,35 @@ final class ComicScrollView: UIScrollView {
     /// has no opinion about where that is.
     ///
     /// Going in, the rect is around their finger, so the panel they pointed at is the
-    /// panel they get. Coming out, it is the window as it stands — same top edge, full
-    /// width — because `setZoomScale` preserves the *centre*, and for a page taller than
-    /// the screen that is not where anyone is reading. At 2x the window holds half a
-    /// screen of content, so dropping back to 1x with the centre pinned moves the top
-    /// edge up by a quarter of a screen, every time. That is the "jump": not a redraw,
-    /// an actual scroll nobody asked for.
+    /// panel they get. Coming out, it is the window centred where the window already is —
+    /// *not* the same top edge, which is what the jump was.
+    ///
+    /// The arithmetic, from the device log: at 2x a 896pt screen holds 448 points of book,
+    /// so a reader at 2634 is looking at the middle of 2634…3082, about 2858. Coming out
+    /// with the top edge kept at 2634 makes the screen hold 896 points, and the middle
+    /// becomes 3082 — everything under their eyes slides up 224 points, every time,
+    /// unconditionally. Keeping the middle is what makes the page shrink in place instead
+    /// of shrinking and running away.
+    ///
+    /// Which is also why there is no memory of where they were before zooming in. The
+    /// reader who magnifies a panel, pans across it, and taps back out has *moved*, and a
+    /// remembered offset would haul them back somewhere they left on purpose. The middle
+    /// of the screen is the one anchor that is true whatever they did in between.
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
         // Set here rather than left to `scrollViewWillBeginZooming`, which is about the
         // gesture: the whole cost of a double tap is paid by the animation after it.
         isMagnifying = true
-        isDoubleTapZooming = true
         coordinator?.magnificationBegan()
         guard zoomScale == minimumZoomScale else {
             #if DEBUG
             probe("tap.out")
             #endif
-            let y = offsetBeforeZoom ?? readingOffset
-            offsetBeforeZoom = nil
+            let middle = readingOffset + visibleHeight / 2
             zoom(
-                to: CGRect(x: 0, y: y, width: bounds.width, height: bounds.height),
+                to: CGRect(
+                    x: 0, y: middle - bounds.height / 2,
+                    width: bounds.width, height: bounds.height
+                ),
                 animated: true
             )
             return
@@ -332,7 +319,6 @@ final class ComicScrollView: UIScrollView {
         #if DEBUG
         probe("tap.in")
         #endif
-        offsetBeforeZoom = readingOffset
         let point = gesture.location(in: content)
         let size = CGSize(
             width: bounds.width / Self.doubleTapZoom, height: bounds.height / Self.doubleTapZoom
@@ -379,11 +365,6 @@ extension ComicScrollView: UIScrollViewDelegate {
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
         isMagnifying = true
         coordinator?.magnificationBegan()
-        // A pinch is not half of a toggle: whatever the reader does with their fingers
-        // from here is where they meant to be. A double tap's own animation reports its
-        // beginning here too, and that one *is* half of a toggle — see `isDoubleTapZooming`.
-        guard !isDoubleTapZooming else { return }
-        offsetBeforeZoom = nil
     }
 
     /// The end of the pinch *and* the end of a programmatic zoom's animation, which is
@@ -426,14 +407,12 @@ extension ComicScrollView: UIScrollViewDelegate {
         // a finger dragging the page is a magnification that is over whatever WebKit
         // said about it.
         endMagnifying()
-        offsetBeforeZoom = nil
         coordinator?.handleTouch(down: true)
     }
 
     private func endMagnifying() {
         guard isMagnifying else { return }
         isMagnifying = false
-        isDoubleTapZooming = false
         coordinator?.magnificationEnded()
     }
 
@@ -466,10 +445,6 @@ final class ComicPageView: UIView {
     /// Which of the two layouts is up: the button and a line under it, or the page number
     /// filling the frame.
     private var isOfferingRetry = false
-    #if DEBUG
-    /// Only so the probe's lines can be matched to a page. See `ComicProbe`.
-    private var drawnNumber = 0
-    #endif
 
     init() {
         super.init(frame: .zero)
@@ -525,12 +500,6 @@ final class ComicPageView: UIView {
         label.frame = CGRect(
             x: 0, y: retryButton.frame.maxY + 12, width: bounds.width, height: 24
         )
-        #if DEBUG
-        ComicProbe.drew(
-            number: drawnNumber, failed: true, hasImage: imageView.image != nil,
-            page: bounds, button: retryButton.frame
-        )
-        #endif
     }
 
     @objc private func tappedRetry() {
@@ -542,15 +511,6 @@ final class ComicPageView: UIView {
         onRetry: (() -> Void)? = nil
     ) {
         imageView.image = image
-        #if DEBUG
-        drawnNumber = number
-        if offersRetry {
-            ComicProbe.drew(
-                number: number, failed: true, hasImage: image != nil,
-                page: bounds, button: retryButton.frame
-            )
-        }
-        #endif
         // Re-assigned on every pass because these views are pooled: the closure knows
         // which page it is for, and a recycled view is a different page.
         self.onRetry = onRetry

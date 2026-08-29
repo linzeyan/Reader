@@ -124,15 +124,6 @@ final class ComicPageStore {
     /// giving up on the reader's behalf.
     func offersRetry(page: Int) -> Bool { failed.contains(page) || slow.contains(page) }
 
-    #if DEBUG
-    /// Every page this store has given up on, whether or not anything is drawing it.
-    /// See `ComicProbe.window`.
-    var failedPages: [Int] { failed.sorted() }
-    /// Every page whose request is still out. A page that is neither drawn, nor failed,
-    /// nor here is a page nothing is doing anything about.
-    var pendingPages: [Int] { fetching.keys.sorted() }
-    #endif
-
     // MARK: - The window
 
     /// Says which pages are worth having in memory, and at what width.
@@ -178,9 +169,6 @@ final class ComicPageStore {
     /// request is not going to answer first, and leaving it running spends one of the few
     /// connections per host that the new one needs.
     func retry(page: Int) {
-        #if DEBUG
-        ComicProbe.pageRetried(page, hadBytes: bytes[page] != nil, width: pendingWidth)
-        #endif
         let hadFailed = failed.remove(page) != nil
         let wasSlow = slow.remove(page) != nil
         guard hadFailed || wasSlow, let width = pendingWidth else { return }
@@ -227,9 +215,6 @@ final class ComicPageStore {
                 self.stopWaiting(page: page)
                 self.slow.remove(page)
                 self.failed.insert(page)
-                #if DEBUG
-                ComicProbe.pageFailed(page, of: self.urls.count, error: error)
-                #endif
                 self.onFailure?(page, error)
             }
         }
@@ -251,9 +236,6 @@ final class ComicPageStore {
                   self.fetching[page] != nil, !self.failed.contains(page)
             else { return }
             self.slow.insert(page)
-            #if DEBUG
-            ComicProbe.pageSlow(page, after: Self.patience)
-            #endif
             self.onSlow?(page)
         }
     }

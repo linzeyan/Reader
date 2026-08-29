@@ -223,11 +223,6 @@ final class ComicReaderModel {
             let cache = env.cache
             let book = self.book
             let siteChapterId = chapter.siteChapterId
-            #if DEBUG
-            ComicProbe.opened(
-                chapter: chapter.index, pages: urls.count, source: "web", missing: []
-            )
-            #endif
             return LoadedChapter(
                 chapter: chapter, imageURLs: urls, chapterPage: page,
                 keepPage: { index, bytes in
@@ -276,11 +271,6 @@ final class ComicReaderModel {
               let live = try? await env.bookService.chapterImageURLs(rule: rule, chapter: chapter),
               live.count == stored.count
         else {
-            #if DEBUG
-            ComicProbe.opened(
-                chapter: chapter.index, pages: stored.count, source: "device", missing: gaps
-            )
-            #endif
             // No `missingPages`, and that is not an oversight: every slot here still holds
             // the marker file itself, which reads as a failure the instant it is opened.
             // Naming them would only replace one immediate button with another.
@@ -296,11 +286,6 @@ final class ComicReaderModel {
         let downloads = env.downloads
         let book = self.book
         let fillable = Set(gaps)
-        #if DEBUG
-        ComicProbe.opened(
-            chapter: chapter.index, pages: urls.count, source: "device+web", missing: gaps
-        )
-        #endif
         return LoadedChapter(
             chapter: chapter, imageURLs: urls, chapterPage: page,
             keepPage: { index, bytes in

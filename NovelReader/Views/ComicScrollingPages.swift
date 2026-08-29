@@ -417,17 +417,9 @@ final class ComicScrollCoordinator {
             )
             chapter.store.setWindow(wanted, width: view.pageWidth)
             guard chapter.bottom > top, chapter.top < bottom else { continue }
-            #if DEBUG
-            var drawn: [Int] = []
-            var marked: [Int] = []
-            #endif
             for page in chapter.column.pages(in: (top - chapter.top)..<(bottom - chapter.top)) {
                 let frame = chapter.column.frame(ofPage: page)
                 let store = chapter.store
-                #if DEBUG
-                drawn.append(page)
-                if store.offersRetry(page: page) { marked.append(page) }
-                #endif
                 pages.append(ComicScrollView.VisiblePage(
                     key: "\(chapter.chapterId)#\(page)",
                     frame: frame.offsetBy(dx: 0, dy: chapter.top),
@@ -441,12 +433,6 @@ final class ComicScrollCoordinator {
                     }
                 ))
             }
-            #if DEBUG
-            ComicProbe.window(
-                chapter: chapter.chapterIndex, visible: drawn, failed: marked,
-                known: chapter.store.failedPages, pending: chapter.store.pendingPages
-            )
-            #endif
         }
         view.show(pages)
     }

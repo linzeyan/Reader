@@ -1,35 +1,31 @@
 #if DEBUG
 import Foundation
 import QuartzCore
-import UIKit
 
-/// Two open questions in the comic reader, instrumented until they are answered.
+/// One open question in the comic reader, instrumented until it is answered.
 ///
 /// A hunt kit like `ColumnProbe`, and meant to be deleted the same way — see PITFALLS
-/// 2026-08-28. Both questions have survived a round of reading the code and a round of
-/// fixing what the reading suggested, which is the point at which the device has to say
-/// what is actually happening rather than the code saying what should be.
+/// 2026-08-28.
 ///
 /// **`[DEBUG-zoom]` — double-tapping back out moves the page.** Everything that can move
 /// a reader is logged with the same five numbers, so the step that moved them is the line
-/// where `reading` changes: the zoom itself, a content resize, a `shift`, or a correction
-/// that was held during the magnification and let go after it. `reading` is the reading
-/// offset in unzoomed content points — the only number that should be the same before and
-/// after a zoom, because zooming changes how much of a page fills the screen and nothing
-/// about where the reader is in the book.
+/// where `reading` changes: the zoom itself, a content resize, a `shift`, an offset set by
+/// hand, or a correction that was held during the magnification and let go after it.
+/// `reading` is the reading offset in unzoomed content points — the only number that
+/// should be the same before and after a zoom, because zooming changes how much of a page
+/// fills the screen and nothing about where the reader is in the book.
 ///
-/// **`[DEBUG-page]` — the retry button on a page that would not load is not there.**
-/// Three places, because the button needs all three to be true: the store has to record
-/// the failure, the coordinator has to pass `failed` into the window it draws, and the
-/// page view has to turn that into a visible button somewhere on screen. Whichever of the
-/// three is missing from the log is the one that is wrong.
+/// The `[DEBUG-page]` half is gone, and its going is part of the method: it answered its
+/// question, and while it was still here it wrote several hundred lines per second into
+/// the same console — enough that a device log pasted back for the zoom contained no zoom
+/// in it at all. A probe that drowns the one it is next to is worse than no probe.
 ///
 /// Unconditional in DEBUG rather than armed by a launch argument: whoever is reading this
 /// has the device in one hand and the console in the other. Throttled where it is called
 /// per frame.
 ///
 /// ```
-/// log stream --predicate 'eventMessage CONTAINS "[DEBUG-zoom]" OR eventMessage CONTAINS "[DEBUG-page]"'
+/// log stream --predicate 'eventMessage CONTAINS "[DEBUG-zoom]"'
 /// ```
 enum ComicProbe {
 
@@ -60,7 +56,10 @@ enum ComicProbe {
         content: CGFloat, laid: CGFloat, bounds: CGFloat
     ) {
         let now = CACurrentMediaTime()
-        guard now - lastZoomStep >= 0.1 else { return }
+        // Fine enough to see the path a zoom animation takes rather than only its ends: a
+        // third of a second of animation at 0.1s was three samples, and the question is
+        // where inside it the reader moves.
+        guard now - lastZoomStep >= 0.03 else { return }
         lastZoomStep = now
         self.zoom(
             step, reading: reading, offset: offset, zoom: zoom,
@@ -103,74 +102,15 @@ enum ComicProbe {
         NSLog("[DEBUG-zoom] mag.%@ held=%d reading=%.1f", step, held, reading)
     }
 
-    // MARK: - The retry button
-
-    /// The store recording that a page will not come. If this line is absent, nothing
-    /// below it can be right — the page is still believed to be loading.
-    static func pageFailed(_ page: Int, of pages: Int, error: any Error) {
-        NSLog("[DEBUG-page] failed page=%d/%d %@", page, pages, String(describing: error))
-    }
-
-    /// A page that has kept the reader waiting long enough to be offered a retry while its
-    /// request carries on. Not a failure — if `failed` never follows for the same page,
-    /// the request answered in the end.
-    static func pageSlow(_ page: Int, after seconds: TimeInterval) {
-        NSLog("[DEBUG-page] slow page=%d after=%.0fs", page, seconds)
-    }
-
-    static func pageRetried(_ page: Int, hadBytes: Bool, width: CGFloat?) {
+    /// Somebody setting the offset by hand, which is the one way of moving the reader that
+    /// nothing else here would show. `asked` is what was requested and `landed` is what the
+    /// scroll view took after clamping — a difference between them is the content being
+    /// shorter than the position, which is its own kind of jump.
+    static func movedTo(asked: CGFloat, landed: CGFloat, animated: Bool, zoom: CGFloat) {
         NSLog(
-            "[DEBUG-page] retry page=%d bytes=%d width=%.1f",
-            page, hadBytes ? 1 : 0, width ?? -1
+            "[DEBUG-zoom] set asked=%.1f landed=%.1f animated=%d zoom=%.3f",
+            asked, landed, animated ? 1 : 0, zoom
         )
-    }
-
-    /// How a chapter opened, which decides what every line after it means. A chapter read
-    /// off the device fails a page the instant it opens the marker; one read online waits
-    /// for the network to give up first, and a black page with no button is that wait.
-    /// `missing` is the gaps a download left behind.
-    static func opened(chapter: Int, pages: Int, source: String, missing: [Int]) {
-        NSLog(
-            "[DEBUG-page] open ch=%d pages=%d source=%@ missing=%@",
-            chapter, pages, source, list(missing)
-        )
-    }
-
-    /// What the coordinator handed the scroll view. `failed` is the pages it marked,
-    /// `known` is every page the store considers failed — a page in `known` but not in
-    /// `visible` is one whose button exists nowhere on screen — and `pending` is every
-    /// request still out. A visible page in none of the three is one nothing is doing
-    /// anything about; a visible page in `pending` alone is the black rectangle the reader
-    /// is waiting on, and how long it stays there is how long the button takes to appear.
-    static func window(
-        chapter: Int, visible: [Int], failed: [Int], known: [Int], pending: [Int]
-    ) {
-        guard !failed.isEmpty || !known.isEmpty || !pending.isEmpty else { return }
-        let now = CACurrentMediaTime()
-        guard now - lastWindow >= 0.25 else { return }
-        lastWindow = now
-        NSLog(
-            "[DEBUG-page] window ch=%d visible=%@ failed=%@ known=%@ pending=%@",
-            chapter, list(visible), list(failed), list(known), list(pending)
-        )
-    }
-
-    private static var lastWindow: Double = 0
-
-    /// The page view's own account. `button` is whether it made the button visible, and
-    /// `frame` is where it put it — in the page's coordinates, which for a page taller
-    /// than the screen may be nowhere the reader is looking.
-    static func drew(number: Int, failed: Bool, hasImage: Bool, page: CGRect, button: CGRect) {
-        guard failed else { return }
-        NSLog(
-            "[DEBUG-page] drew page=%d image=%d pageFrame=%.0fx%.0f button=(%.0f,%.0f %.0fx%.0f)",
-            number, hasImage ? 1 : 0, page.width, page.height,
-            button.minX, button.minY, button.width, button.height
-        )
-    }
-
-    private static func list(_ pages: [Int]) -> String {
-        pages.isEmpty ? "-" : pages.map(String.init).joined(separator: ",")
     }
 }
 #endif
