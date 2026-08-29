@@ -327,35 +327,58 @@ final class ComicScrollView: UIScrollView {
         isMagnifying = true
         isDoubleTapZooming = true
         coordinator?.magnificationBegan()
-        guard zoomScale == minimumZoomScale else {
+        let target: CGRect
+        if zoomScale == minimumZoomScale {
+            #if DEBUG
+            probe("tap.in")
+            #endif
+            offsetBeforeZoom = readingOffset
+            let point = gesture.location(in: content)
+            let size = CGSize(
+                width: bounds.width / Self.doubleTapZoom,
+                height: bounds.height / Self.doubleTapZoom
+            )
+            target = CGRect(
+                x: point.x - size.width / 2, y: point.y - size.height / 2,
+                width: size.width, height: size.height
+            )
+        } else {
             #if DEBUG
             probe("tap.out")
             #endif
             let middle = readingOffset + visibleHeight / 2
-            let y = offsetBeforeZoom ?? (middle - bounds.height / 2)
-            offsetBeforeZoom = nil
-            zoom(
-                to: CGRect(x: 0, y: y, width: bounds.width, height: bounds.height),
-                animated: true
+            target = CGRect(
+                x: 0, y: offsetBeforeZoom ?? (middle - bounds.height / 2),
+                width: bounds.width, height: bounds.height
             )
-            return
+            offsetBeforeZoom = nil
         }
-        #if DEBUG
-        probe("tap.in")
-        #endif
-        offsetBeforeZoom = readingOffset
-        let point = gesture.location(in: content)
-        let size = CGSize(
-            width: bounds.width / Self.doubleTapZoom, height: bounds.height / Self.doubleTapZoom
-        )
-        zoom(
-            to: CGRect(
-                x: point.x - size.width / 2, y: point.y - size.height / 2,
-                width: size.width, height: size.height
-            ),
-            animated: true
-        )
+        // Driven by hand rather than through `zoom(to:animated: true)`, for one thing that
+        // call cannot give: a completion that means the reader has stopped seeing movement.
+        //
+        // `scrollViewDidEndZooming` reports the *model* settling, and measured on device
+        // that is the whole animation early — the whole `tap.out` … `zoom.ended` sequence
+        // lands in one frame. Everything a magnification holds back was being released into
+        // a zoom the reader was still watching, and a height correction resizes the content
+        // view the zoom is animating, which abandons the animation rather than adjusting
+        // it. That is why the jump came and went: it needed an image to land inside the
+        // third of a second, and most double taps had none.
+        UIView.animate(
+            withDuration: Self.doubleTapDuration, delay: 0, options: .curveEaseInOut
+        ) {
+            self.zoom(to: target, animated: false)
+        } completion: { [weak self] _ in
+            guard let self else { return }
+            self.endMagnifying()
+            #if DEBUG
+            self.probe("zoom.released")
+            #endif
+        }
     }
+
+    /// How long a double tap's zoom runs. `UIScrollView`'s own is about this, and matching
+    /// it matters less than owning it — what the corrections wait for is this number.
+    private static let doubleTapDuration: TimeInterval = 0.3
 
     #if DEBUG
     /// Every number the reader's position is computed from, in one place, so the step
@@ -404,6 +427,9 @@ extension ComicScrollView: UIScrollViewDelegate {
         #if DEBUG
         probe("zoom.ended")
         #endif
+        // A double tap says when it is over from its own completion. This fires as the
+        // model settles, which for that one is before the reader has seen anything move.
+        guard !isDoubleTapZooming else { return }
         endMagnifying()
         #if DEBUG
         probe("zoom.released")
