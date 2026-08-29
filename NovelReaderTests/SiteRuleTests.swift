@@ -86,6 +86,25 @@ final class SiteRuleTests: XCTestCase {
         XCTAssertFalse(rule.matches(URL(string: "https://example.com/book/1.htm")!))
     }
 
+    /// A rule names one host, and the sites this app reads answer to two or three:
+    /// manhuagui serves the same book at `www.` and `m.`, and its rule can only be
+    /// written against the one whose page shape the selectors match. Someone who
+    /// copies an address out of a desktop browser was told "add a source first" for
+    /// a source they already had — for a book the app can read.
+    ///
+    /// The label has to be a whole first label and one of the device ones, though:
+    /// `tw.` is a different edition of the site with a different page shape, and
+    /// matching it would answer the paste with the wrong selectors rather than with
+    /// nothing.
+    func testMatchesTheSameSiteReachedThroughItsMobileOrDesktopHost() throws {
+        let rule = try makeRule()
+        XCTAssertTrue(rule.matches(URL(string: "https://m.69shuba.com/book/1.htm")!))
+        XCTAssertTrue(rule.matches(URL(string: "https://69shuba.com/book/1.htm")!))
+        XCTAssertTrue(rule.matches(URL(string: "https://WWW.69Shuba.com/book/1.htm")!))
+        XCTAssertFalse(rule.matches(URL(string: "https://tw.69shuba.com/book/1.htm")!))
+        XCTAssertFalse(rule.matches(URL(string: "https://m.69shuba.com.evil.example/book/1.htm")!))
+    }
+
     /// The shelf offers "copy link" so a reader can open the book where it lives
     /// or send it to someone. What it copies has to be the same page the app
     /// itself fetches, and it has to be absent — not wrong — where no page exists.

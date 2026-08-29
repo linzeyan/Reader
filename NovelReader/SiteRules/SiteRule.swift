@@ -382,8 +382,31 @@ extension SiteRule {
         Self.firstCapture(of: idPatterns.chapterId, in: text)
     }
 
+    /// Whether this rule reads the site `url` is on.
+    ///
+    /// The device label is dropped from both hosts before they are compared, because
+    /// `www.manhuagui.com` and `m.manhuagui.com` are one site serving one book, and a
+    /// rule can only name the one its selectors were written against. Someone who
+    /// copies an address out of a desktop browser is asking for the book, not for a
+    /// subdomain — and nothing downstream ever sees what they pasted, because every
+    /// address the app then fetches is rebuilt from `urls`, which carries this rule's
+    /// own host.
     func matches(_ url: URL) -> Bool {
-        url.host()?.caseInsensitiveCompare(host) == .orderedSame
+        guard let pasted = url.host() else { return false }
+        return Self.site(of: pasted).caseInsensitiveCompare(Self.site(of: host)) == .orderedSame
+    }
+
+    /// A host with its device label removed, and only these three, and only as a whole
+    /// first label. Dropping *any* first label would make a rule for one subdomain
+    /// match every other subdomain of the same domain — which for the sites that put
+    /// unrelated properties on their subdomains would read the wrong pages.
+    private static func site(of host: String) -> String {
+        let lowered = host.lowercased()
+        for label in ["www.", "m.", "mobile."] where lowered.count > label.count
+            && lowered.hasPrefix(label) {
+            return String(lowered.dropFirst(label.count))
+        }
+        return lowered
     }
 
     /// A copy carrying a different search block. Search is the one part of a rule
