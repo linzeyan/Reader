@@ -105,6 +105,16 @@ final class WebFetcher: NSObject {
         // evaluated outside the actor, and `.default()` is main-actor isolated.
         config.websiteDataStore = .default()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        // Nothing this web view loads is ever *watched*. Both flags are about the one
+        // way a page it is only reading can take the screen: with inline playback off
+        // — the iPhone default — a `<video>` that starts playing is put up full screen
+        // over whatever the reader was doing, and these sites carry video ads. That is
+        // the black player with an X in the corner that appeared in the middle of a
+        // comic. Inline keeps any such video inside a view nobody can see, and the
+        // user-action requirement means it should not have started at all.
+        // `blockMediaIfNeeded` is the belt to this pair of braces.
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = .all
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: config)
         super.init()
         webView.navigationDelegate = self
@@ -311,6 +321,41 @@ final class WebFetcher: NSObject {
         }
     }
 
+    /// Stops the fetcher's web view ever loading audio or video, once per session.
+    ///
+    /// The two configuration flags in `init` keep a playing video off the screen; this
+    /// keeps there from being one. A page the app reads for a title, a catalog or a
+    /// list of image addresses has no use for a media file, and the ad networks these
+    /// sites carry serve plenty — each one a download the reader pays for out of their
+    /// data plan to feed a player nobody is watching. Images are deliberately left
+    /// alone: rules read `src` attributes off them, and a blocked image is a page the
+    /// extractor sees differently from the one the site meant to serve.
+    ///
+    /// A failure to compile is swallowed, unlike `compileBlockAllRules`: there the
+    /// rules *are* the isolation an import depends on, while here they are politeness.
+    /// Refusing to fetch anything because an ad could not be blocked would trade a
+    /// working app for a tidy one.
+    private func blockMediaIfNeeded() async {
+        guard !hasBlockedMedia, let store = WKContentRuleListStore.default() else { return }
+        hasBlockedMedia = true
+        let rules = #"""
+        [{"trigger":{"url-filter":".*","resource-type":["media"]},"action":{"type":"block"}}]
+        """#
+        let list: WKContentRuleList? = await withCheckedContinuation { continuation in
+            store.compileContentRuleList(
+                forIdentifier: "fetch-block-media", encodedContentRuleList: rules
+            ) { list, _ in
+                continuation.resume(returning: list)
+            }
+        }
+        guard let list else { return }
+        webView.configuration.userContentController.add(list)
+    }
+
+    /// Tried once. A second attempt after a failure would recompile the same rules
+    /// against the same store on every fetch for the rest of the session.
+    private var hasBlockedMedia = false
+
     private func failIfChallenged() async throws {
         if let challengeURL = try await detectChallenge() {
             throw FetchError.challengePresented(challengeURL)
@@ -392,6 +437,7 @@ final class WebFetcher: NSObject {
         let previous = queueTail
         let task = Task { @MainActor in
             await previous.value
+            await self.blockMediaIfNeeded()
             return try await body()
         }
         // Tail tracks completion only, so a failed fetch never blocks the queue.
