@@ -187,6 +187,25 @@ final class URLPatternInferenceTests: XCTestCase {
         ))
     }
 
+    /// The same rejection, reached the way a real site reaches it.
+    ///
+    /// mycomic identifies a book only in its own URL — chapters live at a flat
+    /// `/chapters/9771` that says nothing about which book they belong to — so
+    /// there is no anchor and the honest answer is nil. What made this worth its
+    /// own case is how nearly it went the other way: a book page's related-comics
+    /// strip is all `/comics/…` links, so the word `comics` appears in every one
+    /// of them, and it is long enough that ranking it down did not keep it out.
+    /// The rule that came back named the book "comics" and offered the strip as
+    /// its chapter list — worse than no rule, because it looks like one.
+    func testAStructuralWordIsNeverTheBookId() {
+        XCTAssertNil(URLPatternInference.infer(
+            bookURL: URL(string: "https://mycomic.com/comics/19799")!,
+            chapterURLs: [URL(string: "https://mycomic.com/comics/45991")!,
+                          URL(string: "https://mycomic.com/comics/8566")!,
+                          URL(string: "https://mycomic.com/comics/8871")!]
+        ))
+    }
+
     // MARK: - Helper
 
     private func makeRule(host: String, inferred: URLPatternInference.Inferred) -> SiteRule {

@@ -32,7 +32,7 @@ enum URLPatternInference {
     private static let structuralWords: Set<String> = [
         "book", "books", "novel", "novels", "n", "txt", "read", "chapter",
         "chapters", "list", "info", "index", "html", "htm", "php", "shtml",
-        "xiaoshuo", "content", "view", "page",
+        "xiaoshuo", "content", "view", "page", "comic", "comics", "manga",
     ]
 
     // MARK: - Entry point
@@ -72,9 +72,17 @@ enum URLPatternInference {
     /// Path tokens from `url` that look like identifiers rather than structure,
     /// best first. Used to find other pages about the same book before anything
     /// is known about the site.
+    ///
+    /// A structural word is excluded outright rather than ranked last, and by
+    /// name rather than by score. Scoring it down cannot express "never": the
+    /// penalty competes with token length, so a long enough structural word
+    /// survives it — `mycomic.com/comics/19799` offers `comics`, which outlived
+    /// the penalty and, because every link in the page's related-comics strip
+    /// contains it, was accepted as the book id. The rule that came out said the
+    /// book was called "comics" and its chapters were other people's books.
     static func identifierTokens(in url: URL) -> [String] {
         tokens(in: url.path)
-            .filter { $0.count >= 2 && score($0) > 0 }
+            .filter { $0.count >= 2 && !structuralWords.contains($0.lowercased()) }
             .sorted { score($0) > score($1) }
     }
 
@@ -91,11 +99,11 @@ enum URLPatternInference {
     /// (almost) every chapter link. "Almost" rather than "every" because
     /// catalogs habitually mix in a stray link to a related book.
     private static func inferBookId(bookURL: URL, chapterURLs: [String]) -> String? {
-        // A structural word scores negative and is dropped outright rather than
-        // merely ranked last. Accepting one as a fallback is worse than failing:
-        // "/book/90442.htm" against a list of *other* books' pages would settle on
-        // "book", producing a rule that treats every page on the site as the same
-        // book. Failing instead lets the caller go and find the real catalog.
+        // `identifierTokens` has already dropped the structural words. Accepting
+        // one as a fallback is worse than failing: "/book/90442.htm" against a
+        // list of *other* books' pages would settle on "book", producing a rule
+        // that treats every page on the site as the same book. Failing instead
+        // lets the caller go and find the real catalog.
         let candidates = identifierTokens(in: bookURL)
         // Well under a majority: a catalog container often holds the book's own
         // chapters *and* a site-wide recent-updates list, so the real book id can
@@ -110,8 +118,8 @@ enum URLPatternInference {
     }
 
     /// Prefers tokens that look like identifiers: digits are a strong signal,
-    /// length is a weak one, and a structural path word is disqualifying. This is
-    /// what stops `/Book/1889` from being read as book id "Book".
+    /// length is a weak one, and a structural path word is pushed down. Ranking
+    /// only — `identifierTokens` is where a structural word is refused outright.
     private static func score(_ token: String) -> Int {
         var value = token.count
         if token.contains(where: \.isNumber) { value += 2 }
