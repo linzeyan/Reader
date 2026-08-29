@@ -102,6 +102,16 @@ enum ComicProbe {
         NSLog("[DEBUG-zoom] mag.%@ held=%d reading=%.1f", step, held, reading)
     }
 
+    /// Page views taken from the pool while an animation was in flight around the caller.
+    ///
+    /// `inherited` is `UIView.inheritedAnimationDuration` as it stood *before* the frames
+    /// were assigned: anything but zero means those assignments would have been animated,
+    /// and a pooled view still carries the frame of the page it last was. That is a page
+    /// travelling across the screen from somewhere it is not.
+    static func pooled(_ count: Int, inherited: Double) {
+        NSLog("[DEBUG-zoom] pooled n=%d inherited=%.3f", count, inherited)
+    }
+
     /// Somebody setting the offset by hand, which is the one way of moving the reader that
     /// nothing else here would show. `asked` is what was requested and `landed` is what the
     /// scroll view took after clamping — a difference between them is the content being

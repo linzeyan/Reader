@@ -253,20 +253,44 @@ final class ComicScrollView: UIScrollView {
     /// Diffed by key rather than rebuilt: a scrolled frame usually changes one page at
     /// either end, and tearing every view down would drop the decoded bitmaps of pages
     /// that never left the screen.
+    ///
+    /// Never animated, whoever is asking, and that is the point of the wrapper rather than
+    /// a detail of it. Which pages have views is a windowing decision — a page is at its
+    /// place in the book, and arriving there is not something that happens over time.
+    /// Ordinarily nothing would animate it anyway, but the double tap calls `zoom(to:)`
+    /// from inside its own `UIView.animate`, and that call reports back through
+    /// `scrollViewDidZoom` synchronously, so this runs with that animation inherited. A
+    /// view out of the pool still holds the frame of the page it last was — usually the far
+    /// edge of the window, since that is where pages get recycled — and assigning the new
+    /// frame under an inherited animation sends it across the screen over a third of a
+    /// second, showing a page where no page is.
     func show(_ pages: [VisiblePage]) {
-        var kept: [String: ComicPageView] = [:]
-        kept.reserveCapacity(pages.count)
-        for page in pages {
-            let view = live.removeValue(forKey: page.key) ?? dequeue()
-            view.frame = page.frame
-            view.show(
-                image: page.image, number: page.number, failed: page.failed,
-                offersRetry: page.offersRetry, onRetry: page.onRetry
-            )
-            kept[page.key] = view
+        #if DEBUG
+        let inherited = UIView.inheritedAnimationDuration
+        var pooled = 0
+        #endif
+        UIView.performWithoutAnimation {
+            var kept: [String: ComicPageView] = [:]
+            kept.reserveCapacity(pages.count)
+            for page in pages {
+                let reused = live.removeValue(forKey: page.key)
+                #if DEBUG
+                if reused == nil { pooled += 1 }
+                #endif
+                let view = reused ?? dequeue()
+                view.frame = page.frame
+                view.show(
+                    image: page.image, number: page.number, failed: page.failed,
+                    offersRetry: page.offersRetry, onRetry: page.onRetry
+                )
+                kept[page.key] = view
+            }
+            for (_, view) in live { recycle(view) }
+            live = kept
         }
-        for (_, view) in live { recycle(view) }
-        live = kept
+        #if DEBUG
+        if inherited > 0, pooled > 0 { ComicProbe.pooled(pooled, inherited: inherited) }
+        #endif
     }
 
     private func dequeue() -> ComicPageView {
