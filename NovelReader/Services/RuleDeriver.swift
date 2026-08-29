@@ -42,8 +42,17 @@ final class RuleDeriver {
         var author: String?
         var chapterCount: Int
         var firstChapterTitle: String?
-        var excerpt: String
+        var evidence: Evidence
         var warnings: [String]
+
+        /// What the first chapter turned out to hold, and the load-bearing check
+        /// of the whole flow: a wrong selector shows up here as navigation text,
+        /// an advert, or the address of the site's logo — things anyone can spot
+        /// without being able to read a CSS selector.
+        enum Evidence: Equatable {
+            case text(String)
+            case pages(count: Int, first: String)
+        }
     }
 
     struct Draft: Equatable {
@@ -132,17 +141,64 @@ final class RuleDeriver {
         )
 
         guard let title = Self.title(from: bookPage) else { throw DeriveError.noTitle }
+        let catalogTemplate = URLPatternInference.template(
+            for: catalogURL.absoluteString, bookId: inferred.bookId
+        )
+        let catalogContainer = group.container ?? "body"
+
+        // Comics are decided first, and the order is the decision. A comic chapter
+        // page is not silent — it carries credits, navigation and a footer — so
+        // "is there text here?" answers yes on both kinds of page. "Is there a
+        // named run of page images?" only answers yes on one.
+        //
+        // The first version of this also required the page's largest text block to
+        // be short, on the theory that a comic page has little text. Measured, that
+        // was wrong in a way worth recording: a comic page is *prose*-poor, not
+        // text-poor, and `largestTextBlock` on one settles for the biggest thing
+        // going — an options bar, a contributors list — which on both comic sites
+        // tested ran past a thousand characters and sent them down the novel path.
+        // What separates the two kinds is the run of images, so that is the whole
+        // test, and the six novel sites in `testDerivesWorkingRulesFromScratch` are
+        // the evidence it is enough: none of them has three images a single
+        // selector can name exactly.
+        if let images = chapterProbe.images, images.count >= Self.comicPageFloor {
+            let rule = Self.assemble(
+                host: host,
+                inferred: inferred,
+                catalogTemplate: catalogTemplate,
+                catalogContainer: catalogContainer,
+                order: order,
+                bookPage: bookPage,
+                titleSelector: title.selector,
+                content: .comic(images)
+            )
+            // The same confirmation the novel path gets, and for the same reason:
+            // the probe agreeing with itself proves nothing. This runs the rule
+            // that will be saved.
+            let pages = try await extractImages(with: rule, at: firstChapterURL)
+            guard pages.count >= Self.comicPageFloor else { throw DeriveError.emptyChapter }
+            return Draft(
+                rule: rule,
+                preview: Preview(
+                    bookTitle: title.text,
+                    author: bookPage.metas["og:novel:author"],
+                    chapterCount: chapters.count,
+                    firstChapterTitle: firstChapter.text.isEmpty ? nil : firstChapter.text,
+                    evidence: .pages(count: pages.count, first: pages.first ?? ""),
+                    warnings: [String(localized: "derive.warning.noSearch")]
+                )
+            )
+        }
+
         var rule = Self.assemble(
             host: host,
             inferred: inferred,
-            catalogTemplate: URLPatternInference.template(
-                for: catalogURL.absoluteString, bookId: inferred.bookId
-            ),
-            catalogContainer: group.container ?? "body",
+            catalogTemplate: catalogTemplate,
+            catalogContainer: catalogContainer,
             order: order,
             bookPage: bookPage,
             titleSelector: title.selector,
-            chapterProbe: chapterProbe
+            content: .novel(chapterProbe)
         )
 
         // Confirmation: run the rule that will be saved against a real chapter.
@@ -170,11 +226,16 @@ final class RuleDeriver {
                 author: bookPage.metas["og:novel:author"],
                 chapterCount: chapters.count,
                 firstChapterTitle: firstChapter.text.isEmpty ? nil : firstChapter.text,
-                excerpt: String(Self.joined(paragraphs).prefix(160)),
+                evidence: .text(String(Self.joined(paragraphs).prefix(160))),
                 warnings: warnings
             )
         )
     }
+
+    /// How many page images make a comic. Three, because two is a chapter header
+    /// and its first panel on a novel site's illustrated page, and because every
+    /// comic chapter worth reading has more.
+    private static let comicPageFloor = 3
 
     private func extractChapter(with rule: SiteRule, at url: URL) async throws -> [String] {
         let payload = try await fetcher.fetch(
@@ -183,7 +244,22 @@ final class RuleDeriver {
         return payload.paragraphs
     }
 
+    private func extractImages(with rule: SiteRule, at url: URL) async throws -> [String] {
+        let payload = try await fetcher.fetch(
+            url, extracting: try ExtractorScript.comicImages(rule),
+            as: ExtractorScript.ComicImagesPayload.self
+        )
+        return payload.imageURLs
+    }
+
     // MARK: - Assembly
+
+    /// Which kind of chapter the probe found, carrying what the matching block
+    /// needs to be written.
+    private enum Content {
+        case novel(ChapterProbe)
+        case comic(ChapterProbe.Images)
+    }
 
     private static func assemble(
         host: String,
@@ -193,18 +269,22 @@ final class RuleDeriver {
         order: SiteRule.Catalog.Order,
         bookPage: PageProbe,
         titleSelector: String?,
-        chapterProbe: ChapterProbe
+        content: Content
     ) -> SiteRule {
         // The host is the id. A prettier short name would risk two different
         // sites sharing a file name in the rule store, where the second import
         // would silently replace the first.
-        let contentSelectors = (chapterProbe.unique ? chapterProbe.contentSelector.map { [$0] } : nil) ?? []
-        let titleSelectors = [chapterProbe.titleSelector, "h1", "h2"].compactMap { $0 }.uniqued()
+        let chapterProbe: ChapterProbe? = if case .novel(let probe) = content { probe } else { nil }
+        let images: ChapterProbe.Images? = if case .comic(let found) = content { found } else { nil }
+        let contentSelectors = (chapterProbe?.unique == true
+            ? chapterProbe?.contentSelector.map { [$0] } : nil) ?? []
+        let titleSelectors = [chapterProbe?.titleSelector, "h1", "h2"].compactMap { $0 }.uniqued()
 
         return SiteRule(
             id: host,
             name: shortName(for: host),
             host: host,
+            kind: images == nil ? .novel : .comic,
             urls: SiteRule.URLTemplates(
                 book: inferred.bookTemplate,
                 catalog: catalogTemplate,
@@ -222,7 +302,7 @@ final class RuleDeriver {
             search: nil,
             book: bookFields(from: bookPage, titleSelector: titleSelector),
             catalog: SiteRule.Catalog(container: catalogContainer, linkSelector: "a", order: order),
-            chapter: SiteRule.Chapter(
+            chapter: chapterProbe == nil ? nil : SiteRule.Chapter(
                 titleSelectors: titleSelectors,
                 contentSelectors: contentSelectors,
                 // Universally junk inside a content node, and cheap insurance:
@@ -233,9 +313,19 @@ final class RuleDeriver {
                 prevSelector: nil,
                 nextSelector: nil
             ),
+            images: images.map {
+                SiteRule.Images(strategies: [
+                    SiteRule.Images.Strategy(
+                        type: .dom, selector: $0.selector, attributes: $0.attributes
+                    )
+                ])
+            },
             notes: [
                 "Auto-derived from \(inferred.bookTemplate)",
-                "Content selector: \(contentSelectors.first ?? "(largest text block heuristic)")",
+                images.map {
+                    "Image selector: \($0.selector) via \($0.attributes.joined(separator: ", ")) "
+                        + "— \($0.count) pages on the chapter that was probed"
+                } ?? "Content selector: \(contentSelectors.first ?? "(largest text block heuristic)")",
                 "Catalog container: \(catalogContainer), order: \(order.rawValue)",
             ]
         )
@@ -438,6 +528,23 @@ final class RuleDeriver {
         let unique: Bool
         let title: String?
         let titleSelector: String?
+        /// A run of page images, if the page carries one. What tells a comic
+        /// chapter from a novel one.
+        let images: Images?
+
+        struct Images: Decodable {
+            /// A selector reaching exactly these images and nothing else.
+            let selector: String
+            /// The attributes their addresses were actually found in, in the order
+            /// the rule should try them. A lazy-loading site keeps the real address
+            /// in one of its own choosing and leaves `src` empty until the image
+            /// scrolls into view, so this is rarely just `src`.
+            let attributes: [String]
+            let count: Int
+            /// The first address, absolute. Shown to the user as the evidence: a
+            /// selector that found the site's furniture says so here.
+            let first: String
+        }
     }
 
     // MARK: - Probes
@@ -599,7 +706,12 @@ final class RuleDeriver {
     }
 
     /// Names the node the largest-text-block heuristic settles on, so the saved
-    /// rule can point at it directly instead of re-deriving it on every read.
+    /// rule can point at it directly instead of re-deriving it on every read — and
+    /// looks for a run of page images, which is what a comic chapter has instead.
+    ///
+    /// Both in one visit. The chapter page is fetched once and the two questions are
+    /// about the same document; asking them separately would double every derivation's
+    /// cost against a host that throttles.
     static let chapterProbe = """
     (function () {
       \(ExtractorScript.helpers)
@@ -622,11 +734,95 @@ final class RuleDeriver {
         var text = clean(el.textContent);
         if (text && text.length <= 80) { title = text; titleSelector = sel; }
       });
+
+      // The page images, if this is a comic.
+      //
+      // Ordered by how these sites actually behave rather than by the spec: an
+      // unloaded lazy image has an empty `src` and its real address in an attribute
+      // of the site's own choosing, so `src` alone finds a fraction of a chapter.
+      var ATTRS = ['src', 'data-src', 'data-original', 'data-echo', 'data-lazy-src'];
+      function addressOf(img) {
+        for (var i = 0; i < ATTRS.length; i++) {
+          var v = img.getAttribute(ATTRS[i]);
+          // A placeholder pixel and a vector both mean furniture, not a page: a
+          // lazy loader parks a `data:` gif in `src`, and every navigation arrow
+          // and flag on these pages is an `.svg`.
+          if (v && !/^data:/i.test(v) && !/\\.svg(\\?|#|$)/i.test(v)) {
+            return { attr: ATTRS[i], url: v };
+          }
+        }
+        return null;
+      }
+      // Every way to name one image, widening: each of its own classes alone, its
+      // first two together, then its parent's and its grandparent's. A comic page is
+      // usually wrapped, and the wrapper is often what carries the meaningful class
+      // while the image carries none.
+      //
+      // Classes one at a time as well as in pairs, and that is not thoroughness for
+      // its own sake. On a utility-CSS site the meaningful class sits among layout
+      // ones — `class="lozad page w-full mx-auto"` — so taking the first two yields
+      // `img.lozad.page`, which is accidentally specific: the images already loaded
+      // have no `lozad` and land under a different name, splitting one chapter into
+      // two partial selectors that each match a fraction of it. `img.page` names the
+      // whole run. Scoring below is what picks between the candidates, so offering
+      // more of them costs nothing but a few counts.
+      function namesFor(img) {
+        var out = [];
+        (img.getAttribute('class') || '').trim().split(/\\s+/).forEach(function (c) {
+          if (c && /^[A-Za-z][-_A-Za-z0-9]*$/.test(c)) out.push('img.' + c);
+        });
+        var own = selectorFor(img);
+        if (own) out.push(own);
+        var p = img.parentElement, ps = p ? selectorFor(p) : null;
+        if (ps) out.push(ps + ' img');
+        var g = p ? p.parentElement : null, gs = g ? selectorFor(g) : null;
+        if (gs) out.push(gs + ' img');
+        return out;
+      }
+      var found = [];
+      Array.prototype.slice.call(document.querySelectorAll('img')).forEach(function (img) {
+        var a = addressOf(img);
+        if (a) found.push({ img: img, attr: a.attr, url: a.url });
+      });
+      var tally = {};
+      found.forEach(function (e) {
+        namesFor(e.img).forEach(function (sel) { tally[sel] = (tally[sel] || 0) + 1; });
+      });
+      var best = null;
+      Object.keys(tally).forEach(function (sel) {
+        // The selector has to reach these images and no others. One that also
+        // sweeps up the site logo is not a description of the chapter, and the
+        // count is what proves it: reaching more nodes than were counted means it
+        // reaches something that had no address.
+        var reached;
+        try { reached = document.querySelectorAll(sel).length; } catch (e) { return; }
+        if (reached !== tally[sel]) return;
+        if (!best || tally[sel] > best.count
+            || (tally[sel] === best.count && sel.length < best.selector.length)) {
+          best = { selector: sel, count: tally[sel] };
+        }
+      });
+      var images = null;
+      if (best) {
+        var mine = found.filter(function (e) { return e.img.matches(best.selector); });
+        var attrs = [];
+        ATTRS.forEach(function (a) {
+          if (mine.some(function (e) { return e.attr === a; })) attrs.push(a);
+        });
+        images = {
+          selector: best.selector,
+          attributes: attrs,
+          count: mine.length,
+          first: mine.length ? new URL(mine[0].url, location.href).href : ''
+        };
+      }
+
       return {
         contentSelector: selector,
         unique: selector ? document.querySelectorAll(selector).length === 1 : false,
         title: title,
-        titleSelector: titleSelector
+        titleSelector: titleSelector,
+        images: images
       };
     })()
     """

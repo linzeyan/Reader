@@ -70,12 +70,29 @@ struct DeriveRuleView: View {
             if let first = draft.preview.firstChapterTitle {
                 LabeledContent("derive.firstChapter", value: first)
             }
-            // The excerpt is the load-bearing check: a wrong content selector
-            // shows up here as navigation text or an ad, which anyone can spot.
-            Text(draft.preview.excerpt)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("derive.excerpt")
+            // The load-bearing check, whichever kind was found: a wrong selector
+            // shows up here as navigation text, an advert, or the address of the
+            // site's logo — things anyone can spot without reading a selector.
+            switch draft.preview.evidence {
+            case .text(let excerpt):
+                Text(excerpt)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("derive.excerpt")
+            case .pages(let count, let first):
+                LabeledContent("derive.pages", value: "\(count)")
+                    .accessibilityIdentifier("derive.pages")
+                // The address, not the picture. Drawing it would need the site's
+                // own Referer, which is the reader's request to make and not this
+                // screen's — and the address is the better evidence anyway: a
+                // selector that found the furniture says so in the file name.
+                Text(first)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("derive.firstPage")
+            }
         }
 
         if !draft.preview.warnings.isEmpty {

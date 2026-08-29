@@ -1703,6 +1703,30 @@
         }
       }
     },
+    "derive.pages" : {
+      "comment" : "Row label: how many page images the derived comic rule found.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pages"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页数"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頁數"
+          }
+        }
+      }
+    },
     "derive.preview" : {
       "comment" : "Section header for the derivation result.",
       "extractionState" : "manual",

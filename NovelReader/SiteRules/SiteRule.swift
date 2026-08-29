@@ -251,6 +251,31 @@ struct SiteRule: Codable, Identifiable, Hashable {
             /// Origin to resolve `prefixPath` against when the site's own global
             /// holds a path with no host.
             let baseURL: String?
+
+            /// Spelled out so a strategy can be written the way it is documented:
+            /// name its `type` and the fields that type uses, and let the rest be
+            /// absent. The synthesised memberwise init would demand all eight,
+            /// which for a `dom` strategy is five explicit nils. `Catalog` carries
+            /// one for the same reason.
+            init(
+                type: Kind,
+                selector: String? = nil,
+                attributes: [String]? = nil,
+                unescape: Bool? = nil,
+                arrayPath: String? = nil,
+                prefixPath: String? = nil,
+                queryPath: String? = nil,
+                baseURL: String? = nil
+            ) {
+                self.type = type
+                self.selector = selector
+                self.attributes = attributes
+                self.unescape = unescape
+                self.arrayPath = arrayPath
+                self.prefixPath = prefixPath
+                self.queryPath = queryPath
+                self.baseURL = baseURL
+            }
         }
     }
 

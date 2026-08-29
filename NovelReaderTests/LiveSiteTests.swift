@@ -25,6 +25,10 @@ final class LiveSiteTests: XCTestCase {
         var title: String?
         var chapterCount: Int?
         var paragraphCount: Int?
+        /// Set instead of `paragraphCount` when derivation decided the site is a
+        /// comic. Two fields rather than one relabelled, so a report that says
+        /// "pages" is a report about a comic and cannot be read as anything else.
+        var pageCount: Int?
         var searchHits: Int?
         var failures: [String] = []
         /// Stages that stopped at a wall only a person can get past — an
@@ -39,7 +43,8 @@ final class LiveSiteTests: XCTestCase {
                 "book=\(bookId ?? "—")",
                 "title=\(title ?? "—")",
                 "chapters=\(chapterCount.map(String.init) ?? "—")",
-                "paragraphs=\(paragraphCount.map(String.init) ?? "—")",
+                pageCount.map { "pages=\($0)" }
+                    ?? "paragraphs=\(paragraphCount.map(String.init) ?? "—")",
                 "search=\(searchHits.map(String.init) ?? "n/a")",
             ]
             let verdict = !failures.isEmpty ? "FAIL" : (challenges.isEmpty ? "OK  " : "WARN")
@@ -163,6 +168,56 @@ final class LiveSiteTests: XCTestCase {
         }
     }
 
+    /// The same, for the comic sites derivation can reach.
+    ///
+    /// Two halves of that reach are read off the hand-written rule, because both
+    /// are real limits of derivation rather than ways of avoiding red:
+    ///
+    /// - `images` has to come from the DOM. Derivation looks for a run of `<img>`
+    ///   it can name with a selector, so a site that builds its page list inside a
+    ///   packed script or hangs it off a global is out of reach by construction.
+    /// - `catalog.linkAttribute` has to be absent. A rule needs that field when the
+    ///   site's chapter links carry no address — 8comic writes
+    ///   `<a href="#" onclick="cview('103-1.html', 3)">` — and a catalog nobody can
+    ///   read out of `href` stops derivation before the question of images comes up.
+    ///   Guarding catalog inference is `testDerivesWorkingRulesFromScratch`'s job.
+    ///
+    /// The third is named, because nothing in the rule spells it. Derivation
+    /// anchors on a token the book URL and its chapter links share, and on
+    /// mycomic there is none: a book is `/comics/19799` and its chapters are a
+    /// flat `/chapters/9771` apiece, saying nothing about which book they belong
+    /// to. peppercarrot has no `{bookId}` in its chapter template either and is
+    /// still reachable, because its book id happens to be spelled in its host —
+    /// a coincidence of that site, not a property a filter could read. So the
+    /// honest version of this exclusion is the site's name and the reason.
+    func testDerivesWorkingComicRulesFromScratch() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["NOVELREADER_LIVE"] == "1",
+            "Live site tests are opt-in: run `make test-live`."
+        )
+        let rules = try LiveSiteRules.seeded().filter { rule in
+            rule.kind == .comic
+                && rule.catalog.linkAttribute == nil
+                && rule.images?.strategies.contains { $0.type == .dom } == true
+                && rule.id != "mycomic"
+        }
+        try XCTSkipIf(rules.isEmpty, "No comic rule is within derivation's reach")
+
+        var reports: [Report] = []
+        for rule in rules {
+            reports.append(await deriveAndExercise(rule))
+        }
+
+        print("\n=== comic rule derivation report ===\n"
+              + reports.map(\.line).joined(separator: "\n") + "\n")
+
+        let broken = reports.filter { !$0.failures.isEmpty }
+        if !broken.isEmpty {
+            XCTFail("comic derivation failed for \(broken.count)/\(reports.count) sites:\n"
+                    + broken.map(\.line).joined(separator: "\n"))
+        }
+    }
+
     /// Derives each site's *search* from its own search box, and checks the
     /// derived block really returns books.
     ///
@@ -239,7 +294,6 @@ final class LiveSiteTests: XCTestCase {
                 .derive(from: bookURL)
             report.title = draft.preview.bookTitle
             report.chapterCount = draft.preview.chapterCount
-            report.paragraphCount = draft.preview.excerpt.count
 
             // The derived rule has to be able to find the book again from the
             // same URL, or the user could add the source but not the book.
@@ -248,8 +302,27 @@ final class LiveSiteTests: XCTestCase {
                     "derived bookId pattern does not recover \(report.bookId ?? "—") from the book URL"
                 )
             }
-            if draft.preview.excerpt.count < 60 {
-                report.failures.append("derived rule extracted only \(draft.preview.excerpt.count) characters")
+            // What kind derivation decided this site is, asserted against what the
+            // hand-written rule says it is rather than assumed. The two are told
+            // apart by one thing — whether a single selector names a run of images
+            // — and a novel whose chapters carry a few illustrations is exactly the
+            // page that could tip the wrong way, silently, into a source that shows
+            // the reader nothing.
+            switch (known.kind, draft.preview.evidence) {
+            case (.novel, .text(let excerpt)):
+                report.paragraphCount = excerpt.count
+                if excerpt.count < 60 {
+                    report.failures.append("derived rule extracted only \(excerpt.count) characters")
+                }
+            case (.comic, .pages(let count, let first)):
+                report.pageCount = count
+                if !first.hasPrefix("http") {
+                    report.failures.append("first page address is not absolute: \(first)")
+                }
+            case (.novel, .pages(let count, let first)):
+                report.failures.append("derived as a comic: \(count) pages, first \(first)")
+            case (.comic, .text(let excerpt)):
+                report.failures.append("derived as a novel: \(excerpt.prefix(60))")
             }
             // A template missing its placeholder builds the same URL for every
             // chapter — which still previews fine, because the preview reads a
