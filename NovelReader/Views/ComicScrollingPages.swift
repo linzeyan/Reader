@@ -188,6 +188,7 @@ final class ComicScrollCoordinator {
             // banner over a chapter that is still readable would be the app stopping
             // the reader to tell them about something they can see.
             store.onFailure = { [weak self] _, _ in self?.refreshVisible() }
+            store.onSlow = { [weak self] _ in self?.refreshVisible() }
             placed.insert(
                 entry,
                 at: placed.firstIndex { $0.chapterIndex > entry.chapterIndex } ?? placed.count
@@ -425,7 +426,7 @@ final class ComicScrollCoordinator {
                 let store = chapter.store
                 #if DEBUG
                 drawn.append(page)
-                if store.hasFailed(page: page) { marked.append(page) }
+                if store.offersRetry(page: page) { marked.append(page) }
                 #endif
                 pages.append(ComicScrollView.VisiblePage(
                     key: "\(chapter.chapterId)#\(page)",
@@ -433,6 +434,7 @@ final class ComicScrollCoordinator {
                     image: store.image(page: page),
                     number: page + 1,
                     failed: store.hasFailed(page: page),
+                    offersRetry: store.offersRetry(page: page),
                     onRetry: { [weak self] in
                         store.retry(page: page)
                         self?.refreshVisible()

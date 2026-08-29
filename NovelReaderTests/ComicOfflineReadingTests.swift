@@ -188,6 +188,40 @@ final class ComicOfflineReadingTests: XCTestCase {
         XCTAssertTrue(store.hasFailed(page: 0))
     }
 
+    /// A page that has neither arrived nor failed still gives the reader something to do.
+    ///
+    /// The app cannot tell a page arriving slowly from one that is never arriving: these
+    /// CDNs stall with the connection held open rather than refusing, so "we do not know
+    /// yet" lasts the whole of the fetch's deadline, and until then the page is a black
+    /// rectangle with nothing on it. After a few seconds it grows its retry button while
+    /// the request carries on underneath — and it must not claim the page failed, because
+    /// it has not, and if it lands the button is replaced by the picture.
+    func testAPageThatKeepsTheReaderWaitingOffersARetryWithoutClaimingItFailed() async throws {
+        let store = ComicPageStore(
+            urls: [URL(string: "https://comic.test/1/000.jpg")!],
+            chapterPage: URL(string: "https://comic.test/1")!,
+            fetcher: ImageFetcher(session: Self.stallingSession())
+        )
+        defer { store.cancel() }
+        store.onFailure = { page, _ in XCTFail("page \(page) was only slow, not failed") }
+        let offered = expectation(description: "offered a retry")
+        store.onSlow = { page in
+            XCTAssertEqual(page, 0)
+            offered.fulfill()
+        }
+
+        store.setWindow(0..<1, width: 80)
+        await fulfillment(of: [offered], timeout: 10)
+
+        XCTAssertTrue(store.offersRetry(page: 0), "The reader has something to tap")
+        XCTAssertFalse(store.hasFailed(page: 0), "and it does not say the page is gone")
+
+        // The tap abandons the request nobody expects to answer and asks again, which puts
+        // the page back to showing its number until the new one has something to say.
+        store.retry(page: 0)
+        XCTAssertFalse(store.offersRetry(page: 0))
+    }
+
     /// The same promise for a chapter nobody downloaded.
     ///
     /// A page read online is kept, and the next look finds it — which is what lets the
@@ -240,6 +274,14 @@ final class ComicOfflineReadingTests: XCTestCase {
         config.protocolClasses = [RefusingOrigin.self]
         return URLSession(configuration: config)
     }
+
+    /// The state these CDNs actually get into: connected, and silent. Not the same test as
+    /// refusing — a refusal is an answer, and this is the absence of one.
+    private static func stallingSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StallingOrigin.self]
+        return URLSession(configuration: config)
+    }
 }
 
 /// Answers every request with "no network", so any page that reaches for one fails
@@ -251,6 +293,18 @@ private final class RefusingOrigin: URLProtocol {
     override func startLoading() {
         client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
     }
+
+    override func stopLoading() {}
+}
+
+/// Accepts the request and then says nothing at all, for as long as the test lets it.
+/// What `i.hamreus.com` was measured doing on a real device, and the reason a page can be
+/// neither drawn nor failed for ten seconds together.
+private final class StallingOrigin: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {}
 
     override func stopLoading() {}
 }

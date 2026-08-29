@@ -111,6 +111,13 @@ enum ComicProbe {
         NSLog("[DEBUG-page] failed page=%d/%d %@", page, pages, String(describing: error))
     }
 
+    /// A page that has kept the reader waiting long enough to be offered a retry while its
+    /// request carries on. Not a failure — if `failed` never follows for the same page,
+    /// the request answered in the end.
+    static func pageSlow(_ page: Int, after seconds: TimeInterval) {
+        NSLog("[DEBUG-page] slow page=%d after=%.0fs", page, seconds)
+    }
+
     static func pageRetried(_ page: Int, hadBytes: Bool, width: CGFloat?) {
         NSLog(
             "[DEBUG-page] retry page=%d bytes=%d width=%.1f",

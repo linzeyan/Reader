@@ -25,8 +25,13 @@ final class ComicScrollView: UIScrollView {
         let image: UIImage?
         /// 1-based, for the placeholder that stands in until the image arrives.
         let number: Int
+        /// Whether the page will not be coming, which is what it says under its button.
         let failed: Bool
-        /// What the button drawn in a failed page's place does.
+        /// Whether it carries a retry button at all. A page that failed does; so does one
+        /// that has simply kept the reader waiting, which has not failed and says its own
+        /// number instead — see `ComicPageStore.offersRetry(page:)`.
+        let offersRetry: Bool
+        /// What the button drawn in the page's place does.
         let onRetry: () -> Void
     }
 
@@ -252,7 +257,7 @@ final class ComicScrollView: UIScrollView {
             view.frame = page.frame
             view.show(
                 image: page.image, number: page.number, failed: page.failed,
-                onRetry: page.onRetry
+                offersRetry: page.offersRetry, onRetry: page.onRetry
             )
             kept[page.key] = view
         }
@@ -271,7 +276,7 @@ final class ComicScrollView: UIScrollView {
 
     private func recycle(_ view: ComicPageView) {
         view.removeFromSuperview()
-        view.show(image: nil, number: 0, failed: false)
+        view.show(image: nil, number: 0, failed: false, offersRetry: false)
         // Bounded: a window is a handful of pages, and a pool that grew with the chapter
         // would be holding views for pages nobody is near.
         guard pool.count < Self.poolLimit else { return }
@@ -458,7 +463,9 @@ final class ComicPageView: UIView {
     private let label = UILabel()
     private let retryButton = UIButton(type: .system)
     private var onRetry: (() -> Void)?
-    private var isFailed = false
+    /// Which of the two layouts is up: the button and a line under it, or the page number
+    /// filling the frame.
+    private var isOfferingRetry = false
     #if DEBUG
     /// Only so the probe's lines can be matched to a page. See `ComicProbe`.
     private var drawnNumber = 0
@@ -503,7 +510,7 @@ final class ComicPageView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         imageView.frame = bounds
-        guard isFailed else {
+        guard isOfferingRetry else {
             label.frame = bounds
             return
         }
@@ -530,11 +537,14 @@ final class ComicPageView: UIView {
         onRetry?()
     }
 
-    func show(image: UIImage?, number: Int, failed: Bool, onRetry: (() -> Void)? = nil) {
+    func show(
+        image: UIImage?, number: Int, failed: Bool, offersRetry: Bool,
+        onRetry: (() -> Void)? = nil
+    ) {
         imageView.image = image
         #if DEBUG
         drawnNumber = number
-        if failed {
+        if offersRetry {
             ComicProbe.drew(
                 number: number, failed: true, hasImage: image != nil,
                 page: bounds, button: retryButton.frame
@@ -544,9 +554,9 @@ final class ComicPageView: UIView {
         // Re-assigned on every pass because these views are pooled: the closure knows
         // which page it is for, and a recycled view is a different page.
         self.onRetry = onRetry
-        let showsRetry = image == nil && failed
-        if isFailed != showsRetry {
-            isFailed = showsRetry
+        let showsRetry = image == nil && offersRetry
+        if isOfferingRetry != showsRetry {
+            isOfferingRetry = showsRetry
             setNeedsLayout()
         }
         retryButton.isHidden = !showsRetry

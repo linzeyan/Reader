@@ -44,6 +44,11 @@ final class ComicPageStore {
     /// disk read rather than the network — see `ChapterCache.page(_:of:siteChapterId:)`.
     /// Absent for a chapter read off the device, which is already nothing but files.
     var cached: ((Int) -> URL?)?
+    /// A page has been waited on long enough to be worth offering a retry for, though it
+    /// has not failed and is still being waited on. The same consequence as `onFailure`
+    /// for whoever is drawing — the page grows a button — and a different thing to say
+    /// under it, which is why it is not the same callback.
+    var onSlow: ((Int) -> Void)?
     /// A page could not be fetched, so whatever is drawing it should draw that instead.
     /// Not an error anyone is asked about: one dead image out of fifty is an ordinary
     /// thing on these sites, and a banner over the page the reader is on — with the
@@ -62,8 +67,16 @@ final class ComicPageStore {
     /// stretching yesterday's bitmap across a wider screen.
     private var decodedFor: [Int: CGFloat] = [:]
     private var fetching: [Int: Task<Void, Never>] = [:]
+    /// The three-second countdown running beside each fetch. See `waitPatiently`.
+    private var waiting: [Int: Task<Void, Never>] = [:]
+    /// Which attempt at a page is the current one, so an abandoned request that answers
+    /// late cannot report itself over the top of the one that replaced it.
+    private var attempts: [Int: Int] = [:]
     private var decoding: Set<Int> = []
     private var failed: Set<Int> = []
+    /// Asked for, not answered, and waited on long enough that the reader is owed a way
+    /// to act. Not a failure: the request underneath is still running.
+    private var slow: Set<Int> = []
     /// Read once for the whole chapter — see `ImageFetcher.siteCookies`.
     private var cookies: [HTTPCookie]?
     private var cookieTask: Task<[HTTPCookie], Never>?
@@ -89,6 +102,8 @@ final class ComicPageStore {
     func cancel() {
         for task in fetching.values { task.cancel() }
         fetching = [:]
+        for task in waiting.values { task.cancel() }
+        waiting = [:]
         cookieTask?.cancel()
         releaseImages()
     }
@@ -100,6 +115,14 @@ final class ComicPageStore {
     func size(page: Int) -> CGSize? { sizes[page] }
 
     func hasFailed(page: Int) -> Bool { failed.contains(page) }
+
+    /// Whether this page should be drawn with a retry button on it.
+    ///
+    /// Two different states with the same answer, and telling them apart is the caller's
+    /// business: a page that failed says so under its button, while one that is merely
+    /// slow says its number, because it has not failed and the app saying it has would be
+    /// giving up on the reader's behalf.
+    func offersRetry(page: Int) -> Bool { failed.contains(page) || slow.contains(page) }
 
     #if DEBUG
     /// Every page this store has given up on, whether or not anything is drawing it.
@@ -142,18 +165,28 @@ final class ComicPageStore {
         }
     }
 
-    /// Asks for a page that failed, again, because the reader tapped its retry button.
+    /// Asks for a page again, because the reader tapped its retry button.
     ///
     /// The mark is cleared *before* the request goes out, so the page goes back to
     /// showing its number while the request is in flight and the button reappearing is
     /// the answer to "did that work". Nothing here decides whether a retry is worth
     /// making — the reader looking at the gap is better placed to know that a chapter
     /// full of failures means the site is refusing them today.
+    ///
+    /// A retry offered while the first request is still out — the slow case — cancels it
+    /// rather than racing it. These hosts stall with the connection held open, so the old
+    /// request is not going to answer first, and leaving it running spends one of the few
+    /// connections per host that the new one needs.
     func retry(page: Int) {
         #if DEBUG
         ComicProbe.pageRetried(page, hadBytes: bytes[page] != nil, width: pendingWidth)
         #endif
-        guard failed.remove(page) != nil, let width = pendingWidth else { return }
+        let hadFailed = failed.remove(page) != nil
+        let wasSlow = slow.remove(page) != nil
+        guard hadFailed || wasSlow, let width = pendingWidth else { return }
+        stopWaiting(page: page)
+        fetching[page]?.cancel()
+        fetching[page] = nil
         if let data = bytes[page] {
             decode(page: page, data: data, width: width)
         } else {
@@ -177,15 +210,22 @@ final class ComicPageStore {
         // look, and because a lookup that came back stale — the file evicted or deleted
         // between the answer and the read — would be a page that never loads.
         let url = cached?(page) ?? urls[page]
+        let attempt = (attempts[page] ?? 0) + 1
+        attempts[page] = attempt
         fetching[page] = Task { [weak self] in
             guard let self else { return }
             do {
                 let data = try await self.bytes(of: url, page: page)
+                guard self.attempts[page] == attempt else { return }
                 self.received(data, page: page, from: url)
             } catch is CancellationError {
-                // The reader left. Not a failure, and nothing to report.
+                // The reader left, or asked for this page again. Not a failure, and
+                // nothing to report.
             } catch {
+                guard self.attempts[page] == attempt else { return }
                 self.fetching[page] = nil
+                self.stopWaiting(page: page)
+                self.slow.remove(page)
                 self.failed.insert(page)
                 #if DEBUG
                 ComicProbe.pageFailed(page, of: self.urls.count, error: error)
@@ -193,7 +233,38 @@ final class ComicPageStore {
                 self.onFailure?(page, error)
             }
         }
+        waitPatiently(page: page, attempt: attempt)
     }
+
+    /// Offers a retry for a page that has been asked for and has not answered yet.
+    ///
+    /// The request keeps running underneath — this is not a deadline, it is the reader
+    /// being given something to do. Which matters because the app cannot tell a page that
+    /// is arriving slowly from one that is never arriving: these CDNs stall with the
+    /// connection open rather than refusing, so "we do not know yet" can last the whole of
+    /// `ImageFetcher`'s ten second silence. Three seconds of a black rectangle with no way
+    /// to act is already too long, and if the page does land the button is replaced by it.
+    private func waitPatiently(page: Int, attempt: Int) {
+        waiting[page] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.patience))
+            guard !Task.isCancelled, let self, self.attempts[page] == attempt,
+                  self.fetching[page] != nil, !self.failed.contains(page)
+            else { return }
+            self.slow.insert(page)
+            #if DEBUG
+            ComicProbe.pageSlow(page, after: Self.patience)
+            #endif
+            self.onSlow?(page)
+        }
+    }
+
+    private func stopWaiting(page: Int) {
+        waiting[page]?.cancel()
+        waiting[page] = nil
+    }
+
+    /// How long a page may keep the reader looking at nothing before it grows a button.
+    private static let patience: TimeInterval = 3
 
     /// One page's bytes, from wherever that page is.
     ///
@@ -241,6 +312,9 @@ final class ComicPageStore {
 
     private func received(_ data: Data, page: Int, from url: URL) {
         fetching[page] = nil
+        stopWaiting(page: page)
+        // It arrived, so whatever button the wait grew is no longer the answer for it.
+        slow.remove(page)
         // Only what would have to come back over the network. A page that came off the
         // disk is already kept — downloaded, or cached by a previous read — and a second
         // copy of it in memory buys a decode that was never the expensive part.
