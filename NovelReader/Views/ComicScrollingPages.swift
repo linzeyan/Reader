@@ -410,14 +410,24 @@ final class ComicScrollCoordinator {
         let top = view.readingOffset
         let bottom = top + view.visibleHeight
         let margin = view.screenSize.height * Self.decodeMargin
+        // A magnification reaches its destination in the model before the reader has seen
+        // it move, so `visibleHeight` says 448 points while 896 are still on the glass —
+        // and the pages outside the new window would be taken off the screen they are
+        // still on, blacking out the top and bottom for the length of the animation. A
+        // screen either side covers the whole of what the zoom travels through; the views
+        // are recycled the moment it settles, which is what `magnificationEnded` redraws
+        // for.
+        let drawn = view.isMagnifying ? view.screenSize.height : 0
         var pages: [ComicScrollView.VisiblePage] = []
         for chapter in placed {
             let wanted = chapter.column.pages(
                 in: (top - margin - chapter.top)..<(bottom + margin - chapter.top)
             )
             chapter.store.setWindow(wanted, width: view.pageWidth)
-            guard chapter.bottom > top, chapter.top < bottom else { continue }
-            for page in chapter.column.pages(in: (top - chapter.top)..<(bottom - chapter.top)) {
+            guard chapter.bottom > top - drawn, chapter.top < bottom + drawn else { continue }
+            for page in chapter.column.pages(
+                in: (top - drawn - chapter.top)..<(bottom + drawn - chapter.top)
+            ) {
                 let frame = chapter.column.frame(ofPage: page)
                 let store = chapter.store
                 pages.append(ComicScrollView.VisiblePage(
