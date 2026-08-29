@@ -24,6 +24,11 @@ final class ComicReaderModel {
         let imageURLs: [URL]
         /// The page the images were listed on, sent as `Referer` for every one of them.
         let chapterPage: URL
+        /// Called with a page that came off the network for a chapter that is otherwise
+        /// on the device, so the gap it was fetched for can be filled in for good.
+        /// Absent for a chapter with no gaps, and for one being read online — there is
+        /// nothing on disk for either to write into.
+        let fillGap: ((Int, Data) -> Void)?
         var id: String { chapter.id }
     }
 
@@ -192,7 +197,7 @@ final class ComicReaderModel {
         let stored = await storedPages(of: chapter)
         guard mine == generation else { return nil }
         if !stored.isEmpty {
-            return LoadedChapter(chapter: chapter, imageURLs: stored, chapterPage: page)
+            return await opening(chapter, from: stored, page: page, generation: mine)
         }
         guard let rule = env.sites.rule(id: book.siteId) else {
             error = String(localized: "book.missingRule")
@@ -201,12 +206,60 @@ final class ComicReaderModel {
         do {
             let urls = try await env.bookService.chapterImageURLs(rule: rule, chapter: chapter)
             guard mine == generation else { return nil }
-            return LoadedChapter(chapter: chapter, imageURLs: urls, chapterPage: page)
+            return LoadedChapter(
+                chapter: chapter, imageURLs: urls, chapterPage: page, fillGap: nil
+            )
         } catch {
             guard mine == generation else { return nil }
             report(error)
             return nil
         }
+    }
+
+    /// A chapter that is on the device, with the pages it is short fetched from the site.
+    ///
+    /// A gap is a page the download could not get (`ChapterFileStore.writePages`), and
+    /// it is written as an empty marker so that it keeps its number. Left alone it stays
+    /// a gap for the life of the chapter: the reader's retry button would re-read the
+    /// same empty file and fail the same way, because nothing on the device can fill it.
+    ///
+    /// So the addresses are asked for again — once, only for a chapter that has a gap,
+    /// and only when there is a rule to ask with. The marker's slot is given the live
+    /// address, which the store fetches like any online page, and `fillGap` writes what
+    /// comes back into the hole so the next open has nothing to fetch.
+    ///
+    /// Everything about this fails soft. No rule, no network, a list that no longer has
+    /// the same number of pages in it — the chapter still opens, still reads, and still
+    /// shows a retry button on the page it is short. A downloaded chapter must never
+    /// need the network to be readable, and one page of it is not worth breaking that.
+    private func opening(
+        _ chapter: Chapter, from stored: [URL], page: URL, generation mine: Int
+    ) async -> LoadedChapter? {
+        let gaps = stored.indices.filter { ChapterFileStore.isGap(stored[$0]) }
+        guard !gaps.isEmpty, let rule = env.sites.rule(id: book.siteId),
+              let live = try? await env.bookService.chapterImageURLs(rule: rule, chapter: chapter),
+              live.count == stored.count
+        else {
+            return LoadedChapter(
+                chapter: chapter, imageURLs: stored, chapterPage: page, fillGap: nil
+            )
+        }
+        guard mine == generation else { return nil }
+        var urls = stored
+        for gap in gaps { urls[gap] = live[gap] }
+        let siteChapterId = chapter.siteChapterId
+        let downloads = env.downloads
+        let book = self.book
+        let fillable = Set(gaps)
+        return LoadedChapter(
+            chapter: chapter, imageURLs: urls, chapterPage: page,
+            fillGap: { index, bytes in
+                guard fillable.contains(index) else { return }
+                try? downloads.fillPage(
+                    bytes, index: index, book: book, siteChapterId: siteChapterId
+                )
+            }
+        )
     }
 
     /// A downloaded chapter's pages, listed off the main actor.

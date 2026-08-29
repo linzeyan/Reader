@@ -55,6 +55,16 @@ struct DownloadStore {
         }
     }
 
+    /// Fills in one page of a chapter that is already on the device, and touches nothing
+    /// in the database: the chapter was downloaded before this and is downloaded after
+    /// it. See `ChapterFileStore.fillPage`.
+    func fillPage(_ bytes: Data, index: Int, book: Book, siteChapterId: String) throws {
+        try files.fillPage(
+            bytes, index: index, siteId: book.siteId, siteBookId: book.siteBookId,
+            siteChapterId: siteChapterId
+        )
+    }
+
     func readParagraphs(book: Book, siteChapterId: String) throws -> [String] {
         try files.readParagraphs(
             siteId: book.siteId, siteBookId: book.siteBookId, siteChapterId: siteChapterId

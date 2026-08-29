@@ -144,7 +144,8 @@ struct ChapterFileStore {
             let name = String(format: "%03d", index)
             guard let bytes = page else {
                 try Data().write(
-                    to: partial.appendingPathComponent(name).appendingPathExtension("missing"),
+                    to: partial.appendingPathComponent(name)
+                        .appendingPathExtension(Self.gapExtension),
                     options: .atomic
                 )
                 continue
@@ -165,6 +166,44 @@ struct ChapterFileStore {
         try fileManager.moveItem(at: partial, to: final)
     }
 
+    /// What a page the site would not give up is called on disk: `012.missing`, empty,
+    /// holding page 12's place in the numbering.
+    static let gapExtension = "missing"
+
+    static func isGap(_ url: URL) -> Bool { url.pathExtension == gapExtension }
+
+    /// Fills in a gap in a chapter that is already on the device.
+    ///
+    /// The one page a reader asked for again and got — see `ComicReaderModel.opening`.
+    /// Written straight into the finished directory rather than through `.partial`,
+    /// because that is for a chapter appearing all at once and this is a chapter that is
+    /// already there and getting better. The real page lands first and the marker goes
+    /// afterwards, so the crash in between leaves both — which `pageURLs` resolves in
+    /// favour of the page, since the alternative order leaves the chapter one page short
+    /// with nothing to say so.
+    ///
+    /// Does nothing when the chapter is not on disk after all: healing a gap in
+    /// something that was deleted while it was open would recreate one page of it.
+    func fillPage(
+        _ bytes: Data, index: Int, siteId: String, siteBookId: String, siteChapterId: String
+    ) throws {
+        let directory = pageDirectory(
+            siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId
+        )
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else { return }
+        let name = String(format: "%03d", index)
+        let file = ImageFormat(sniffing: bytes)
+            .map { directory.appendingPathComponent(name).appendingPathExtension($0.fileExtension) }
+            ?? directory.appendingPathComponent(name)
+        try bytes.write(to: file, options: .atomic)
+        try? fileManager.removeItem(
+            at: directory.appendingPathComponent(name).appendingPathExtension(Self.gapExtension)
+        )
+    }
+
     /// A downloaded chapter's pages, in reading order.
     ///
     /// Sorted by the number in the name rather than by the name, so a chapter of more
@@ -172,6 +211,11 @@ struct ChapterFileStore {
     /// Empty for a chapter that is not downloaded, which is also the answer for one
     /// whose directory is there and empty — a chapter of no pages is not readable, and
     /// saying so here is what keeps the caller from having to ask twice.
+    ///
+    /// One number, one page: a real page wins over a marker for the same number, which
+    /// is the state `fillPage` leaves behind if it is interrupted. Two entries for page
+    /// 12 would make the chapter one page longer than it is, and every page after it
+    /// off by one.
     func pageURLs(siteId: String, siteBookId: String, siteChapterId: String) -> [URL] {
         let directory = pageDirectory(
             siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId
@@ -179,13 +223,14 @@ struct ChapterFileStore {
         guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
             return []
         }
-        return names
-            .compactMap { name -> (Int, URL)? in
-                guard let number = Int(name.prefix { $0.isNumber }) else { return nil }
-                return (number, directory.appendingPathComponent(name))
-            }
-            .sorted { $0.0 < $1.0 }
-            .map(\.1)
+        var byNumber: [Int: URL] = [:]
+        for name in names {
+            guard let number = Int(name.prefix { $0.isNumber }) else { continue }
+            let url = directory.appendingPathComponent(name)
+            if let existing = byNumber[number], !Self.isGap(existing) { continue }
+            byNumber[number] = url
+        }
+        return byNumber.sorted { $0.key < $1.key }.map(\.value)
     }
 
     func hasPages(siteId: String, siteBookId: String, siteChapterId: String) -> Bool {

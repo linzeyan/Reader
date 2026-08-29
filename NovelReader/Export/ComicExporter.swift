@@ -149,7 +149,7 @@ struct ComicExporter {
             let pages = files.pageURLs(
                 siteId: book.siteId, siteBookId: book.siteBookId,
                 siteChapterId: chapter.siteChapterId
-            ).filter { $0.pathExtension != "missing" }
+            ).filter { !ChapterFileStore.isGap($0) }
             guard !pages.isEmpty else { return nil }
             let number = String(format: "%0\(width)d", index + 1)
             let folder = "\(root)/\(number) \(BookExporter.filename(from: chapter.title))"

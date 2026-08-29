@@ -85,6 +85,45 @@ final class ComicChapterFilesTests: XCTestCase {
         )
     }
 
+    /// A gap the reader asked for again and got. The page arrives, the marker goes, and
+    /// the chapter is simply one page better than it was — no flag to change, because it
+    /// was downloaded before and is downloaded after.
+    func testFillingAGapReplacesTheMarkerWithThePage() throws {
+        try files.writePages(
+            [Data("page 0".utf8), nil], siteId: site, siteBookId: book, siteChapterId: chapter
+        )
+
+        try files.fillPage(
+            Data("page 1".utf8), index: 1, siteId: site, siteBookId: book, siteChapterId: chapter
+        )
+
+        let urls = files.pageURLs(siteId: site, siteBookId: book, siteChapterId: chapter)
+        XCTAssertEqual(urls.count, 2)
+        XCTAssertFalse(ChapterFileStore.isGap(urls[1]))
+        XCTAssertEqual(try Data(contentsOf: urls[1]), Data("page 1".utf8))
+    }
+
+    /// `fillPage` writes the page before it removes the marker, so a crash between the
+    /// two leaves both on disk. Counting them both would make the chapter a page longer
+    /// than it is and put every page after the gap under the wrong number — worse than
+    /// either of the states this is choosing between.
+    func testAPageAndItsLeftoverMarkerCountOnce() throws {
+        try files.writePages(
+            [Data("page 0".utf8), nil], siteId: site, siteBookId: book, siteChapterId: chapter
+        )
+        let directory = files.pageDirectory(
+            siteId: site, siteBookId: book, siteChapterId: chapter
+        )
+        try Data("page 1".utf8).write(to: directory.appendingPathComponent("001.jpg"))
+
+        let urls = files.pageURLs(siteId: site, siteBookId: book, siteChapterId: chapter)
+        XCTAssertEqual(urls.count, 2)
+        XCTAssertEqual(
+            try Data(contentsOf: urls[1]), Data("page 1".utf8),
+            "The page wins over the marker it was meant to replace"
+        )
+    }
+
     /// The whole point of writing through `.partial`: until the last page has landed
     /// there is nothing for a reader to find, so a chapter that was interrupted reads
     /// as absent rather than as short.

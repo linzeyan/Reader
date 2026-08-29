@@ -34,6 +34,11 @@ final class ComicPageStore {
     var onSize: ((Int, CGSize) -> Void)?
     /// A page's image became available, so whatever is on screen should be redrawn.
     var onImage: ((Int) -> Void)?
+    /// A page arrived from the network. Set only for a chapter that is on the device and
+    /// short a page or two, and only the gaps are acted on — see `ComicReaderModel`.
+    /// Here rather than in the fetch itself because a store has no idea what a chapter
+    /// is or where one is kept; it has addresses and bytes.
+    var onFetched: ((Int, Data) -> Void)?
     /// A page could not be fetched, so whatever is drawing it should draw that instead.
     /// Not an error anyone is asked about: one dead image out of fifty is an ordinary
     /// thing on these sites, and a banner over the page the reader is on — with the
@@ -208,6 +213,7 @@ final class ComicPageStore {
         if !urls[page].isFileURL {
             bytes[page] = data
             trimBytes()
+            onFetched?(page, data)
         }
         // The size first and separately: it comes from the file's header without
         // decoding anything, and it is what lets the column correct its estimate for a

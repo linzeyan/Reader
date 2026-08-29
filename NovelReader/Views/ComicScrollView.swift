@@ -94,11 +94,20 @@ final class ComicScrollView: UIScrollView {
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         tap.cancelsTouchesInView = false
+        // Both recognizers sit on the scroll view and neither cancels touches, so a tap
+        // on a page's retry button would otherwise reach the button *and* the tap zone
+        // it happens to be sitting in — and a comic page is taller than the screen, so
+        // that zone is wherever the page put the button. Asked here rather than
+        // hit-tested inside the handler: `touch.view` is the view UIKit itself decided
+        // this touch belongs to, and re-deriving it from a point is how the first
+        // attempt at this got a different answer than UIKit did.
+        tap.delegate = self
         addGestureRecognizer(tap)
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
         doubleTap.numberOfTapsRequired = 2
         doubleTap.cancelsTouchesInView = false
+        doubleTap.delegate = self
         addGestureRecognizer(doubleTap)
         // The cost of double-tap zoom: showing the controls now waits to find out whether
         // a second tap is coming. Worth it — a page of scanned lettering at phone width
@@ -242,25 +251,33 @@ final class ComicScrollView: UIScrollView {
     }
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        let point = gesture.location(in: self)
-        // The recognizer is on the scroll view and does not cancel touches, so a tap on
-        // a page's retry button reaches both. Turning the page as well would make the
-        // one control inside the reader impossible to press on purpose.
-        if hitTest(point, with: nil) is UIControl { return }
-        coordinator?.handleTap(at: onScreen(point))
+        coordinator?.handleTap(at: onScreen(gesture.location(in: self)))
     }
 
     /// Magnifies around what they tapped, or gives up the magnification entirely.
     ///
-    /// Zooming *to a rect* rather than setting a scale, so the panel under their finger
-    /// is the panel they end up looking at — a scale alone magnifies around the middle of
-    /// the screen, which is rarely what they pointed at.
+    /// Zooming *to a rect* rather than setting a scale, in both directions and for the
+    /// same reason: the reader has a place they are looking at, and a scale on its own
+    /// has no opinion about where that is.
+    ///
+    /// Going in, the rect is around their finger, so the panel they pointed at is the
+    /// panel they get. Coming out, it is the window as it stands — same top edge, full
+    /// width — because `setZoomScale` preserves the *centre*, and for a page taller than
+    /// the screen that is not where anyone is reading. At 2x the window holds half a
+    /// screen of content, so dropping back to 1x with the centre pinned moves the top
+    /// edge up by a quarter of a screen, every time. That is the "jump": not a redraw,
+    /// an actual scroll nobody asked for.
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
         // Set here rather than left to `scrollViewWillBeginZooming`, which is about the
         // gesture: the whole cost of a double tap is paid by the animation after it.
         isMagnifying = true
         guard zoomScale == minimumZoomScale else {
-            setZoomScale(minimumZoomScale, animated: true)
+            zoom(
+                to: CGRect(
+                    x: 0, y: readingOffset, width: bounds.width, height: bounds.height
+                ),
+                animated: true
+            )
             return
         }
         let point = gesture.location(in: content)
@@ -274,6 +291,20 @@ final class ComicScrollView: UIScrollView {
             ),
             animated: true
         )
+    }
+}
+
+extension ComicScrollView: UIGestureRecognizerDelegate {
+    /// Keeps the reader's taps and the pages' own controls apart.
+    ///
+    /// Refusing the double tap as well is deliberate: a reader who taps a retry button
+    /// twice — because the first tap did not appear to do anything — means "try again",
+    /// not "magnify". It also means the button answers on the first touch instead of
+    /// waiting to find out whether a second one is coming.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch
+    ) -> Bool {
+        !(touch.view is UIControl)
     }
 }
 

@@ -182,6 +182,7 @@ final class ComicScrollCoordinator {
                 self?.apply(size: size, page: page, chapterId: chapterId)
             }
             store.onImage = { [weak self] _ in self?.refreshVisible() }
+            store.onFetched = chapter.fillGap
             // Redrawn, not reported. The page draws its own retry button; a failure
             // banner over a chapter that is still readable would be the app stopping
             // the reader to tell them about something they can see.
