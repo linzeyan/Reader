@@ -195,11 +195,6 @@ final class ComicScrollView: UIScrollView {
         let size = CGSize(width: bounds.width, height: height)
         let old = content.bounds.size
         if old != size {
-            #if DEBUG
-            ComicProbe.resized(
-                from: old.height, to: size.height, zoom: zoomScale, offset: contentOffset.y
-            )
-            #endif
             content.bounds = CGRect(origin: .zero, size: size)
             content.center = CGPoint(
                 x: content.center.x + (size.width - old.width) / 2 * zoomScale,
@@ -217,28 +212,15 @@ final class ComicScrollView: UIScrollView {
     /// this runs tens of times per chapter rather than once per insert.
     func shift(by amount: CGFloat) {
         guard amount != 0 else { return }
-        #if DEBUG
-        let before = contentOffset.y
-        #endif
         setContentOffset(
             CGPoint(x: contentOffset.x, y: contentOffset.y + amount * zoomScale), animated: false
         )
-        #if DEBUG
-        ComicProbe.shifted(
-            by: amount, before: before, after: contentOffset.y, zoom: zoomScale
-        )
-        #endif
         lastOffset = contentOffset.y
     }
 
     func setReadingOffset(_ y: CGFloat, animated: Bool) {
         let maximum = max(0, contentSize.height - bounds.height)
         let landed = min(max(y * zoomScale, 0), maximum)
-        #if DEBUG
-        ComicProbe.movedTo(
-            asked: y * zoomScale, landed: landed, animated: animated, zoom: zoomScale
-        )
-        #endif
         setContentOffset(CGPoint(x: contentOffset.x, y: landed), animated: animated)
     }
 
@@ -263,21 +245,15 @@ final class ComicScrollView: UIScrollView {
     /// view out of the pool still holds the frame of the page it last was — usually the far
     /// edge of the window, since that is where pages get recycled — and assigning the new
     /// frame under an inherited animation sends it across the screen over a third of a
-    /// second, showing a page where no page is.
+    /// second, showing a page where no page is. Measured on device: three pooled views
+    /// taken with `UIView.inheritedAnimationDuration` at 0.3 on the way in, five on the way
+    /// out, on every double tap.
     func show(_ pages: [VisiblePage]) {
-        #if DEBUG
-        let inherited = UIView.inheritedAnimationDuration
-        var pooled = 0
-        #endif
         UIView.performWithoutAnimation {
             var kept: [String: ComicPageView] = [:]
             kept.reserveCapacity(pages.count)
             for page in pages {
-                let reused = live.removeValue(forKey: page.key)
-                #if DEBUG
-                if reused == nil { pooled += 1 }
-                #endif
-                let view = reused ?? dequeue()
+                let view = live.removeValue(forKey: page.key) ?? dequeue()
                 view.frame = page.frame
                 view.show(
                     image: page.image, number: page.number, failed: page.failed,
@@ -288,9 +264,6 @@ final class ComicScrollView: UIScrollView {
             for (_, view) in live { recycle(view) }
             live = kept
         }
-        #if DEBUG
-        if inherited > 0, pooled > 0 { ComicProbe.pooled(pooled, inherited: inherited) }
-        #endif
     }
 
     private func dequeue() -> ComicPageView {
@@ -353,9 +326,6 @@ final class ComicScrollView: UIScrollView {
         coordinator?.magnificationBegan()
         let target: CGRect
         if zoomScale == minimumZoomScale {
-            #if DEBUG
-            probe("tap.in")
-            #endif
             offsetBeforeZoom = readingOffset
             let point = gesture.location(in: content)
             let size = CGSize(
@@ -367,9 +337,6 @@ final class ComicScrollView: UIScrollView {
                 width: size.width, height: size.height
             )
         } else {
-            #if DEBUG
-            probe("tap.out")
-            #endif
             let middle = readingOffset + visibleHeight / 2
             target = CGRect(
                 x: 0, y: offsetBeforeZoom ?? (middle - bounds.height / 2),
@@ -392,29 +359,13 @@ final class ComicScrollView: UIScrollView {
         ) {
             self.zoom(to: target, animated: false)
         } completion: { [weak self] _ in
-            guard let self else { return }
-            self.endMagnifying()
-            #if DEBUG
-            self.probe("zoom.released")
-            #endif
+            self?.endMagnifying()
         }
     }
 
     /// How long a double tap's zoom runs. `UIScrollView`'s own is about this, and matching
     /// it matters less than owning it — what the corrections wait for is this number.
     private static let doubleTapDuration: TimeInterval = 0.3
-
-    #if DEBUG
-    /// Every number the reader's position is computed from, in one place, so the step
-    /// that moved them is the line where `reading` changed. See `ComicProbe`.
-    func probe(_ step: String, throttled: Bool = false) {
-        let report = throttled ? ComicProbe.zoomStep : ComicProbe.zoom
-        report(
-            step, readingOffset, contentOffset.y, zoomScale,
-            contentSize.height, content.bounds.height, bounds.height
-        )
-    }
-    #endif
 }
 
 extension ComicScrollView: UIGestureRecognizerDelegate {
@@ -448,24 +399,15 @@ extension ComicScrollView: UIScrollViewDelegate {
     /// the one this is really here for. Everything held back while the content was
     /// travelling is let go here, in the order it would have happened in.
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
-        #if DEBUG
-        probe("zoom.ended")
-        #endif
         // A double tap says when it is over from its own completion. This fires as the
         // model settles, which for that one is before the reader has seen anything move.
         guard !isDoubleTapZooming else { return }
         endMagnifying()
-        #if DEBUG
-        probe("zoom.released")
-        #endif
     }
 
     /// Magnifying changes how much of the book the screen holds, so the window of pages
     /// that are worth having decoded changes with it.
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
-        #if DEBUG
-        probe("zoom.step", throttled: true)
-        #endif
         coordinator?.scrolled()
     }
 

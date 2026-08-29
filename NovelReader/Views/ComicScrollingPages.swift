@@ -265,13 +265,6 @@ final class ComicScrollCoordinator {
         // Which page was corrected makes no difference to that: what disturbs the zoom is
         // the resize, and every correction is a resize.
         let holding = view.isMagnifying || (isAbove && isTouching)
-        #if DEBUG
-        ComicProbe.correction(
-            page: page, from: chapter.column.height(ofPage: page),
-            to: size.height / size.width * chapter.column.width, above: isAbove,
-            held: holding, reading: view.readingOffset
-        )
-        #endif
         if holding {
             heldCorrections.append((chapterId, page, size))
             return
@@ -365,23 +358,10 @@ final class ComicScrollCoordinator {
 
     /// Everything a magnification held back, once it is over.
     func magnificationEnded() {
-        #if DEBUG
-        let held = heldCorrections.count
-        ComicProbe.magnification("start", held: held, reading: view?.readingOffset ?? -1)
-        #endif
         applyHeldCorrections()
-        #if DEBUG
-        ComicProbe.magnification("corrected", held: held, reading: view?.readingOffset ?? -1)
-        #endif
         reportPlace()
         askForMoreIfNeeded()
-        #if DEBUG
-        ComicProbe.magnification("asked", held: held, reading: view?.readingOffset ?? -1)
-        #endif
         refreshVisible()
-        #if DEBUG
-        ComicProbe.magnification("drawn", held: held, reading: view?.readingOffset ?? -1)
-        #endif
     }
 
     private func askForMoreIfNeeded() {
