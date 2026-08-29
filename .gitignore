@@ -8,7 +8,11 @@ xcuserdata/
 DerivedData/
 
 # --- Build output ---
+# `build/` is the Makefile's derived data path. `.build/` is nobody's convention here
+# — it is SwiftPM's default, and what an ad-hoc `xcodebuild -derivedDataPath .build`
+# leaves behind. Once, that was six thousand object files in a commit.
 build/
+.build/
 
 # --- macOS ---
 .DS_Store
