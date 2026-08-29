@@ -416,7 +416,9 @@ final class ComicScrollCoordinator {
         // still on, blacking out the top and bottom for the length of the animation. A
         // screen either side covers the whole of what the zoom travels through; the views
         // are recycled the moment it settles, which is what `magnificationEnded` redraws
-        // for.
+        // for. It matches `margin` on purpose: a page drawn past the decoded window is a
+        // grey rectangle, which is the blackout again by another route. Widen one and the
+        // other has to follow.
         let drawn = view.isMagnifying ? view.screenSize.height : 0
         var pages: [ComicScrollView.VisiblePage] = []
         for chapter in placed {
