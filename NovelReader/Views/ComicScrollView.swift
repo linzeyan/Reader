@@ -164,6 +164,11 @@ final class ComicScrollView: UIScrollView {
         let size = CGSize(width: bounds.width, height: height)
         let old = content.bounds.size
         if old != size {
+            #if DEBUG
+            ComicProbe.resized(
+                from: old.height, to: size.height, zoom: zoomScale, offset: contentOffset.y
+            )
+            #endif
             content.bounds = CGRect(origin: .zero, size: size)
             content.center = CGPoint(
                 x: content.center.x + (size.width - old.width) / 2 * zoomScale,
@@ -181,9 +186,17 @@ final class ComicScrollView: UIScrollView {
     /// this runs tens of times per chapter rather than once per insert.
     func shift(by amount: CGFloat) {
         guard amount != 0 else { return }
+        #if DEBUG
+        let before = contentOffset.y
+        #endif
         setContentOffset(
             CGPoint(x: contentOffset.x, y: contentOffset.y + amount * zoomScale), animated: false
         )
+        #if DEBUG
+        ComicProbe.shifted(
+            by: amount, before: before, after: contentOffset.y, zoom: zoomScale
+        )
+        #endif
         lastOffset = contentOffset.y
     }
 
@@ -272,6 +285,9 @@ final class ComicScrollView: UIScrollView {
         // gesture: the whole cost of a double tap is paid by the animation after it.
         isMagnifying = true
         guard zoomScale == minimumZoomScale else {
+            #if DEBUG
+            probe("tap.out")
+            #endif
             zoom(
                 to: CGRect(
                     x: 0, y: readingOffset, width: bounds.width, height: bounds.height
@@ -280,6 +296,9 @@ final class ComicScrollView: UIScrollView {
             )
             return
         }
+        #if DEBUG
+        probe("tap.in")
+        #endif
         let point = gesture.location(in: content)
         let size = CGSize(
             width: bounds.width / Self.doubleTapZoom, height: bounds.height / Self.doubleTapZoom
@@ -292,6 +311,18 @@ final class ComicScrollView: UIScrollView {
             animated: true
         )
     }
+
+    #if DEBUG
+    /// Every number the reader's position is computed from, in one place, so the step
+    /// that moved them is the line where `reading` changed. See `ComicProbe`.
+    func probe(_ step: String, throttled: Bool = false) {
+        let report = throttled ? ComicProbe.zoomStep : ComicProbe.zoom
+        report(
+            step, readingOffset, contentOffset.y, zoomScale,
+            contentSize.height, content.bounds.height, bounds.height
+        )
+    }
+    #endif
 }
 
 extension ComicScrollView: UIGestureRecognizerDelegate {
@@ -319,12 +350,21 @@ extension ComicScrollView: UIScrollViewDelegate {
     /// the one this is really here for. Everything held back while the content was
     /// travelling is let go here, in the order it would have happened in.
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+        #if DEBUG
+        probe("zoom.ended")
+        #endif
         endMagnifying()
+        #if DEBUG
+        probe("zoom.released")
+        #endif
     }
 
     /// Magnifying changes how much of the book the screen holds, so the window of pages
     /// that are worth having decoded changes with it.
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        #if DEBUG
+        probe("zoom.step", throttled: true)
+        #endif
         coordinator?.scrolled()
     }
 
@@ -382,6 +422,10 @@ final class ComicPageView: UIView {
     private let retryButton = UIButton(type: .system)
     private var onRetry: (() -> Void)?
     private var isFailed = false
+    #if DEBUG
+    /// Only so the probe's lines can be matched to a page. See `ComicProbe`.
+    private var drawnNumber = 0
+    #endif
 
     init() {
         super.init(frame: .zero)
@@ -437,6 +481,12 @@ final class ComicPageView: UIView {
         label.frame = CGRect(
             x: 0, y: retryButton.frame.maxY + 12, width: bounds.width, height: 24
         )
+        #if DEBUG
+        ComicProbe.drew(
+            number: drawnNumber, failed: true, hasImage: imageView.image != nil,
+            page: bounds, button: retryButton.frame
+        )
+        #endif
     }
 
     @objc private func tappedRetry() {
@@ -445,6 +495,15 @@ final class ComicPageView: UIView {
 
     func show(image: UIImage?, number: Int, failed: Bool, onRetry: (() -> Void)? = nil) {
         imageView.image = image
+        #if DEBUG
+        drawnNumber = number
+        if failed {
+            ComicProbe.drew(
+                number: number, failed: true, hasImage: image != nil,
+                page: bounds, button: retryButton.frame
+            )
+        }
+        #endif
         // Re-assigned on every pass because these views are pooled: the closure knows
         // which page it is for, and a recycled view is a different page.
         self.onRetry = onRetry

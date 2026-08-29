@@ -256,6 +256,13 @@ final class ComicScrollCoordinator {
         // the shift this would compute is measured against a position that exists on
         // neither side of the zoom. That was the double tap's "jump" — not the pages
         // re-drawing, but the content being moved under an animation.
+        #if DEBUG
+        ComicProbe.correction(
+            page: page, from: chapter.column.height(ofPage: page),
+            to: size.height / size.width * chapter.column.width, above: isAbove,
+            held: isAbove && (isTouching || view.isMagnifying), reading: view.readingOffset
+        )
+        #endif
         if isAbove, isTouching || view.isMagnifying {
             heldCorrections.append((chapterId, page, size))
             return
@@ -334,10 +341,23 @@ final class ComicScrollCoordinator {
 
     /// Everything a magnification held back, once it is over.
     func magnificationEnded() {
+        #if DEBUG
+        let held = heldCorrections.count
+        ComicProbe.magnification("start", held: held, reading: view?.readingOffset ?? -1)
+        #endif
         applyHeldCorrections()
+        #if DEBUG
+        ComicProbe.magnification("corrected", held: held, reading: view?.readingOffset ?? -1)
+        #endif
         reportPlace()
         askForMoreIfNeeded()
+        #if DEBUG
+        ComicProbe.magnification("asked", held: held, reading: view?.readingOffset ?? -1)
+        #endif
         refreshVisible()
+        #if DEBUG
+        ComicProbe.magnification("drawn", held: held, reading: view?.readingOffset ?? -1)
+        #endif
     }
 
     private func askForMoreIfNeeded() {
@@ -373,9 +393,17 @@ final class ComicScrollCoordinator {
             )
             chapter.store.setWindow(wanted, width: view.pageWidth)
             guard chapter.bottom > top, chapter.top < bottom else { continue }
+            #if DEBUG
+            var drawn: [Int] = []
+            var marked: [Int] = []
+            #endif
             for page in chapter.column.pages(in: (top - chapter.top)..<(bottom - chapter.top)) {
                 let frame = chapter.column.frame(ofPage: page)
                 let store = chapter.store
+                #if DEBUG
+                drawn.append(page)
+                if store.hasFailed(page: page) { marked.append(page) }
+                #endif
                 pages.append(ComicScrollView.VisiblePage(
                     key: "\(chapter.chapterId)#\(page)",
                     frame: frame.offsetBy(dx: 0, dy: chapter.top),
@@ -388,6 +416,12 @@ final class ComicScrollCoordinator {
                     }
                 ))
             }
+            #if DEBUG
+            ComicProbe.window(
+                chapter: chapter.chapterIndex, visible: drawn, failed: marked,
+                known: chapter.store.failedPages
+            )
+            #endif
         }
         view.show(pages)
     }

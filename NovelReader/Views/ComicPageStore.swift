@@ -91,6 +91,12 @@ final class ComicPageStore {
 
     func hasFailed(page: Int) -> Bool { failed.contains(page) }
 
+    #if DEBUG
+    /// Every page this store has given up on, whether or not anything is drawing it.
+    /// See `ComicProbe.window`.
+    var failedPages: [Int] { failed.sorted() }
+    #endif
+
     // MARK: - The window
 
     /// Says which pages are worth having in memory, and at what width.
@@ -131,6 +137,9 @@ final class ComicPageStore {
     /// making — the reader looking at the gap is better placed to know that a chapter
     /// full of failures means the site is refusing them today.
     func retry(page: Int) {
+        #if DEBUG
+        ComicProbe.pageRetried(page, hadBytes: bytes[page] != nil, width: pendingWidth)
+        #endif
         guard failed.remove(page) != nil, let width = pendingWidth else { return }
         if let data = bytes[page] {
             decode(page: page, data: data, width: width)
@@ -165,6 +174,9 @@ final class ComicPageStore {
             } catch {
                 self.fetching[page] = nil
                 self.failed.insert(page)
+                #if DEBUG
+                ComicProbe.pageFailed(page, of: self.urls.count, error: error)
+                #endif
                 self.onFailure?(page, error)
             }
         }
