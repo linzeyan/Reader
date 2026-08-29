@@ -26,6 +26,8 @@ final class ComicScrollView: UIScrollView {
         /// 1-based, for the placeholder that stands in until the image arrives.
         let number: Int
         let failed: Bool
+        /// What the button drawn in a failed page's place does.
+        let onRetry: () -> Void
     }
 
     /// Everything that scrolls, and the one view the zoom scales.
@@ -42,6 +44,16 @@ final class ComicScrollView: UIScrollView {
 
     /// Whether the last movement carried the reader towards the front of the book.
     private(set) var isMovingUp = false
+
+    /// Whether a magnification is in flight — the pinch, and the animated zoom a double
+    /// tap starts.
+    ///
+    /// Its own flag rather than `UIScrollView.isZooming`, which answers for the gesture
+    /// and not for the animation that follows a programmatic zoom. That animation is
+    /// exactly the window that matters: `zoomScale` is already the value it is heading
+    /// for while `contentOffset` and `contentSize` are still travelling, so anything
+    /// that computes a position from the two together computes it from halfway.
+    private(set) var isMagnifying = false
 
     /// Where the top of the window sits in the content — the reading position exactly.
     ///
@@ -190,7 +202,10 @@ final class ComicScrollView: UIScrollView {
         for page in pages {
             let view = live.removeValue(forKey: page.key) ?? dequeue()
             view.frame = page.frame
-            view.show(image: page.image, number: page.number, failed: page.failed)
+            view.show(
+                image: page.image, number: page.number, failed: page.failed,
+                onRetry: page.onRetry
+            )
             kept[page.key] = view
         }
         for (_, view) in live { recycle(view) }
@@ -227,7 +242,12 @@ final class ComicScrollView: UIScrollView {
     }
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        coordinator?.handleTap(at: onScreen(gesture.location(in: self)))
+        let point = gesture.location(in: self)
+        // The recognizer is on the scroll view and does not cancel touches, so a tap on
+        // a page's retry button reaches both. Turning the page as well would make the
+        // one control inside the reader impossible to press on purpose.
+        if hitTest(point, with: nil) is UIControl { return }
+        coordinator?.handleTap(at: onScreen(point))
     }
 
     /// Magnifies around what they tapped, or gives up the magnification entirely.
@@ -236,6 +256,9 @@ final class ComicScrollView: UIScrollView {
     /// is the panel they end up looking at — a scale alone magnifies around the middle of
     /// the screen, which is rarely what they pointed at.
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        // Set here rather than left to `scrollViewWillBeginZooming`, which is about the
+        // gesture: the whole cost of a double tap is paid by the animation after it.
+        isMagnifying = true
         guard zoomScale == minimumZoomScale else {
             setZoomScale(minimumZoomScale, animated: true)
             return
@@ -257,6 +280,17 @@ final class ComicScrollView: UIScrollView {
 extension ComicScrollView: UIScrollViewDelegate {
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { content }
 
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        isMagnifying = true
+    }
+
+    /// The end of the pinch *and* the end of a programmatic zoom's animation, which is
+    /// the one this is really here for. Everything held back while the content was
+    /// travelling is let go here, in the order it would have happened in.
+    func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+        endMagnifying()
+    }
+
     /// Magnifying changes how much of the book the screen holds, so the window of pages
     /// that are worth having decoded changes with it.
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -276,7 +310,18 @@ extension ComicScrollView: UIScrollViewDelegate {
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // The safety net. A magnification that somehow never reported its end would
+        // otherwise leave the reader in a book that never loads its next chapter, and
+        // a finger dragging the page is a magnification that is over whatever WebKit
+        // said about it.
+        endMagnifying()
         coordinator?.handleTouch(down: true)
+    }
+
+    private func endMagnifying() {
+        guard isMagnifying else { return }
+        isMagnifying = false
+        coordinator?.magnificationEnded()
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate: Bool) {
@@ -295,9 +340,17 @@ extension ComicScrollView: UIScrollViewDelegate {
 /// heights, so the reader can scroll the whole chapter immediately — and a screen of
 /// identical grey rectangles gives them nothing to navigate by, while "12" says exactly
 /// where they are.
+///
+/// A page that failed gets a button in its place instead of a message, and that is the
+/// difference between one dead image and an interrupted read: the chapter carries on
+/// scrolling either way, and the one page that did not arrive is a thing the reader can
+/// tap when they get to it — or scroll straight past.
 final class ComicPageView: UIView {
     private let imageView = UIImageView()
     private let label = UILabel()
+    private let retryButton = UIButton(type: .system)
+    private var onRetry: (() -> Void)?
+    private var isFailed = false
 
     init() {
         super.init(frame: .zero)
@@ -307,23 +360,70 @@ final class ComicPageView: UIView {
         // from the aspect ratio — so there is nothing to clip and no letterboxing.
         imageView.clipsToBounds = true
         addSubview(imageView)
-        label.font = .preferredFont(forTextStyle: .largeTitle)
         label.textColor = UIColor.white.withAlphaComponent(0.25)
         label.textAlignment = .center
         addSubview(label)
+        retryButton.setImage(
+            UIImage(
+                systemName: "arrow.clockwise",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .regular)
+            ),
+            for: .normal
+        )
+        retryButton.tintColor = UIColor.white.withAlphaComponent(0.6)
+        // A ring, so it reads as something to press rather than as an icon printed on
+        // the page. A comic page's own artwork is what everything else here is.
+        retryButton.layer.borderColor = UIColor.white.withAlphaComponent(0.3).cgColor
+        retryButton.layer.borderWidth = 1
+        retryButton.layer.cornerRadius = Self.retrySide / 2
+        retryButton.isHidden = true
+        retryButton.accessibilityIdentifier = "comic.page.retry"
+        retryButton.accessibilityLabel = String(localized: "comic.page.retry")
+        retryButton.addTarget(self, action: #selector(tappedRetry), for: .touchUpInside)
+        addSubview(retryButton)
         accessibilityIdentifier = "comic.page"
     }
 
     required init?(coder: NSCoder) { nil }
 
+    private static let retrySide: CGFloat = 64
+
     override func layoutSubviews() {
         super.layoutSubviews()
         imageView.frame = bounds
-        label.frame = bounds
+        guard isFailed else {
+            label.frame = bounds
+            return
+        }
+        // Centred on the page, with the reason under it. A page is usually taller than
+        // the screen, so this is the middle of the *page* and not of the window — which
+        // is where the reader ends up when they scroll to look at what is wrong.
+        let side = Self.retrySide
+        retryButton.frame = CGRect(
+            x: (bounds.width - side) / 2, y: (bounds.height - side) / 2,
+            width: side, height: side
+        )
+        label.frame = CGRect(
+            x: 0, y: retryButton.frame.maxY + 12, width: bounds.width, height: 24
+        )
     }
 
-    func show(image: UIImage?, number: Int, failed: Bool) {
+    @objc private func tappedRetry() {
+        onRetry?()
+    }
+
+    func show(image: UIImage?, number: Int, failed: Bool, onRetry: (() -> Void)? = nil) {
         imageView.image = image
+        // Re-assigned on every pass because these views are pooled: the closure knows
+        // which page it is for, and a recycled view is a different page.
+        self.onRetry = onRetry
+        let showsRetry = image == nil && failed
+        if isFailed != showsRetry {
+            isFailed = showsRetry
+            setNeedsLayout()
+        }
+        retryButton.isHidden = !showsRetry
+        label.font = .preferredFont(forTextStyle: showsRetry ? .footnote : .largeTitle)
         if image != nil {
             label.text = nil
             accessibilityLabel = String(localized: "comic.page \(number)")
@@ -333,7 +433,9 @@ final class ComicPageView: UIView {
                 ? String(localized: "comic.page.failed \(number)")
                 : (number > 0 ? "\(number)" : nil)
             accessibilityLabel = label.text
-            isAccessibilityElement = number > 0
+            // Never the container when the button is showing: two elements at the same
+            // place, one of which does nothing, is what VoiceOver reads as a dead end.
+            isAccessibilityElement = number > 0 && !showsRetry
         }
     }
 }

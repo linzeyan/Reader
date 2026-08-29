@@ -106,8 +106,7 @@ struct ComicReaderView: View {
                     showControls.toggle()
                     return false
                 },
-                onTargetReached: { model.clearScrollTarget() },
-                onFailure: { model.report($0) }
+                onTargetReached: { model.clearScrollTarget() }
             )
             .ignoresSafeArea()
 

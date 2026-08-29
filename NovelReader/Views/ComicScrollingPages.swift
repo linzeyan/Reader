@@ -50,7 +50,6 @@ struct ComicScrollingPages: UIViewRepresentable {
     /// - Returns: whether the tap should go on to turn a page.
     let onTap: (ReaderTapZone.Zone) -> Bool
     let onTargetReached: () -> Void
-    let onFailure: (any Error) -> Void
 
     func makeUIView(context: Context) -> ComicScrollView {
         let view = ComicScrollView()
@@ -104,6 +103,14 @@ final class ComicScrollCoordinator {
     /// How far past the screen a page is kept decoded, in screens. One either side, so a
     /// turn lands on a page that is already there and the one behind survives a glance
     /// backwards.
+    ///
+    /// Measured against the glass rather than against `visibleHeight`, and that is the
+    /// difference zoom makes. Magnifying to 2x halves how much of the book the screen
+    /// holds, so a margin taken from `visibleHeight` would halve with it and release the
+    /// bitmaps either side — which the double tap back out then has to decode again,
+    /// with the reader watching a page they were already looking at turn into a grey
+    /// rectangle and back. What is worth keeping decoded is a property of the reader's
+    /// attention, and magnifying does not narrow that.
     private static let decodeMargin: CGFloat = 1
 
     // MARK: - Updating
@@ -175,10 +182,10 @@ final class ComicScrollCoordinator {
                 self?.apply(size: size, page: page, chapterId: chapterId)
             }
             store.onImage = { [weak self] _ in self?.refreshVisible() }
-            store.onFailure = { [weak self] _, error in
-                self?.refreshVisible()
-                self?.config?.onFailure(error)
-            }
+            // Redrawn, not reported. The page draws its own retry button; a failure
+            // banner over a chapter that is still readable would be the app stopping
+            // the reader to tell them about something they can see.
+            store.onFailure = { [weak self] _, _ in self?.refreshVisible() }
             placed.insert(
                 entry,
                 at: placed.firstIndex { $0.chapterIndex > entry.chapterIndex } ?? placed.count
@@ -242,7 +249,12 @@ final class ComicScrollCoordinator {
         let chapter = placed[index]
         let isAbove = chapter.top + chapter.column.top(ofPage: page)
             + chapter.column.height(ofPage: page) <= view.readingOffset
-        if isAbove, isTouching {
+        // A magnification is held back for the same reason a drag is, and harder: the
+        // offset is mid-animation while `zoomScale` is already at its destination, so
+        // the shift this would compute is measured against a position that exists on
+        // neither side of the zoom. That was the double tap's "jump" — not the pages
+        // re-drawing, but the content being moved under an animation.
+        if isAbove, isTouching || view.isMagnifying {
             heldCorrections.append((chapterId, page, size))
             return
         }
@@ -302,14 +314,32 @@ final class ComicScrollCoordinator {
         askForMoreIfNeeded()
     }
 
+    /// Where the reader is, published to the model.
+    ///
+    /// Not while magnifying, and that is not an optimisation. Zooming does not move
+    /// anyone in the book — it changes how much of one page fills the screen — but it
+    /// does change `fractionRead`, so reporting through a zoom writes "you have read
+    /// less of this chapter" to the reading position. Worse, it writes it on every
+    /// frame of the animation, and every write brings SwiftUI back through
+    /// `updateUIView` while the scroll view is still travelling.
     private func reportPlace() {
-        guard let config, let place = currentPlace(), place != reported else { return }
+        guard let config, view?.isMagnifying != true,
+              let place = currentPlace(), place != reported
+        else { return }
         reported = place
         config.onPlaceChange(place)
     }
 
+    /// Everything a magnification held back, once it is over.
+    func magnificationEnded() {
+        applyHeldCorrections()
+        reportPlace()
+        askForMoreIfNeeded()
+        refreshVisible()
+    }
+
     private func askForMoreIfNeeded() {
-        guard let config, let view, !placed.isEmpty else { return }
+        guard let config, let view, !placed.isEmpty, !view.isMagnifying else { return }
         let lead = view.visibleHeight * Self.leadWindows
         if contentHeight - (view.readingOffset + view.visibleHeight) < lead {
             config.onNeedsNext()
@@ -333,7 +363,7 @@ final class ComicScrollCoordinator {
         guard let view else { return }
         let top = view.readingOffset
         let bottom = top + view.visibleHeight
-        let margin = view.visibleHeight * Self.decodeMargin
+        let margin = view.screenSize.height * Self.decodeMargin
         var pages: [ComicScrollView.VisiblePage] = []
         for chapter in placed {
             let wanted = chapter.column.pages(
@@ -343,12 +373,17 @@ final class ComicScrollCoordinator {
             guard chapter.bottom > top, chapter.top < bottom else { continue }
             for page in chapter.column.pages(in: (top - chapter.top)..<(bottom - chapter.top)) {
                 let frame = chapter.column.frame(ofPage: page)
+                let store = chapter.store
                 pages.append(ComicScrollView.VisiblePage(
                     key: "\(chapter.chapterId)#\(page)",
                     frame: frame.offsetBy(dx: 0, dy: chapter.top),
-                    image: chapter.store.image(page: page),
+                    image: store.image(page: page),
                     number: page + 1,
-                    failed: chapter.store.hasFailed(page: page)
+                    failed: store.hasFailed(page: page),
+                    onRetry: { [weak self] in
+                        store.retry(page: page)
+                        self?.refreshVisible()
+                    }
                 ))
             }
         }
