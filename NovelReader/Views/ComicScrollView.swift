@@ -60,6 +60,32 @@ final class ComicScrollView: UIScrollView {
     /// that computes a position from the two together computes it from halfway.
     private(set) var isMagnifying = false
 
+    /// Where the reader was before a double tap magnified them, so the double tap back out
+    /// puts them there again.
+    ///
+    /// A double tap in and straight back out has to be a no-op on position. The reader
+    /// magnified a panel to read it and tapped again to carry on, and any displacement is
+    /// them having to find their place on a page they never asked to leave. Zooming in is
+    /// around the *finger*, which is what makes it useful — the panel they pointed at
+    /// travels to the middle of the screen — and without this, coming out leaves it there.
+    /// Measured on device: in at 29858, out at 30182, a third of a screen from where they
+    /// started, and the same displacement on every pair.
+    ///
+    /// Dropped the moment they move themselves. Someone who pans across a magnified page
+    /// has gone somewhere on purpose, and hauling them back would be this same complaint in
+    /// reverse; that case falls through to keeping the middle of the screen still, which is
+    /// true whatever they did in between.
+    private var offsetBeforeZoom: CGFloat?
+
+    /// Whether the magnification now starting is the double tap's own animation rather than
+    /// the reader's fingers.
+    ///
+    /// `scrollViewWillBeginZooming` reports both, and they mean opposite things for
+    /// `offsetBeforeZoom`: a pinch discards it, while the double tap wrote it two lines
+    /// before starting the zoom that reports here. Without the distinction the position is
+    /// wiped by the very animation it was written for.
+    private var isDoubleTapZooming = false
+
     /// Where the top of the window sits in the content — the reading position exactly.
     ///
     /// In *unzoomed* content points, which is the space the columns are laid out in and
@@ -283,35 +309,33 @@ final class ComicScrollView: UIScrollView {
     /// has no opinion about where that is.
     ///
     /// Going in, the rect is around their finger, so the panel they pointed at is the
-    /// panel they get. Coming out, it is the window centred where the window already is —
-    /// *not* the same top edge, which is what the jump was.
+    /// panel they get. Coming out, it is where they were before going in — and failing
+    /// that, the window centred where the window already is.
     ///
-    /// The arithmetic, from the device log: at 2x a 896pt screen holds 448 points of book,
-    /// so a reader at 2634 is looking at the middle of 2634…3082, about 2858. Coming out
-    /// with the top edge kept at 2634 makes the screen hold 896 points, and the middle
-    /// becomes 3082 — everything under their eyes slides up 224 points, every time,
-    /// unconditionally. Keeping the middle is what makes the page shrink in place instead
-    /// of shrinking and running away.
-    ///
-    /// Which is also why there is no memory of where they were before zooming in. The
-    /// reader who magnifies a panel, pans across it, and taps back out has *moved*, and a
-    /// remembered offset would haul them back somewhere they left on purpose. The middle
-    /// of the screen is the one anchor that is true whatever they did in between.
+    /// Both halves of that were measured, and each was a jump on its own. Keeping the same
+    /// *top edge* is the first: at 2x a 896pt screen holds 448 points of book, so a reader
+    /// at 2634 is looking at about 2858, and coming out on the top edge makes the middle
+    /// 3082 — everything under their eyes slides up a quarter screen. Keeping the middle
+    /// instead fixes that but leaves the second: the tapped panel travelled to the centre
+    /// on the way in and stays there on the way out, so the pair moves the reader by
+    /// however far their finger was from the middle. On device that was 324 points, every
+    /// time. A double tap in and back out is a request to look closer and then carry on,
+    /// so it has to leave the page exactly where it found it.
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
         // Set here rather than left to `scrollViewWillBeginZooming`, which is about the
         // gesture: the whole cost of a double tap is paid by the animation after it.
         isMagnifying = true
+        isDoubleTapZooming = true
         coordinator?.magnificationBegan()
         guard zoomScale == minimumZoomScale else {
             #if DEBUG
             probe("tap.out")
             #endif
             let middle = readingOffset + visibleHeight / 2
+            let y = offsetBeforeZoom ?? (middle - bounds.height / 2)
+            offsetBeforeZoom = nil
             zoom(
-                to: CGRect(
-                    x: 0, y: middle - bounds.height / 2,
-                    width: bounds.width, height: bounds.height
-                ),
+                to: CGRect(x: 0, y: y, width: bounds.width, height: bounds.height),
                 animated: true
             )
             return
@@ -319,6 +343,7 @@ final class ComicScrollView: UIScrollView {
         #if DEBUG
         probe("tap.in")
         #endif
+        offsetBeforeZoom = readingOffset
         let point = gesture.location(in: content)
         let size = CGSize(
             width: bounds.width / Self.doubleTapZoom, height: bounds.height / Self.doubleTapZoom
@@ -365,6 +390,11 @@ extension ComicScrollView: UIScrollViewDelegate {
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
         isMagnifying = true
         coordinator?.magnificationBegan()
+        // A pinch is not half of a toggle: whatever the reader does with their fingers from
+        // here is where they meant to be. The double tap's own animation reports its
+        // beginning here too, and that one *is* half of a toggle — see `isDoubleTapZooming`.
+        guard !isDoubleTapZooming else { return }
+        offsetBeforeZoom = nil
     }
 
     /// The end of the pinch *and* the end of a programmatic zoom's animation, which is
@@ -407,12 +437,16 @@ extension ComicScrollView: UIScrollViewDelegate {
         // a finger dragging the page is a magnification that is over whatever WebKit
         // said about it.
         endMagnifying()
+        // Where they are is theirs now, so the double tap back out has nothing to restore
+        // and falls through to keeping the middle of the screen still.
+        offsetBeforeZoom = nil
         coordinator?.handleTouch(down: true)
     }
 
     private func endMagnifying() {
         guard isMagnifying else { return }
         isMagnifying = false
+        isDoubleTapZooming = false
         coordinator?.magnificationEnded()
     }
 
