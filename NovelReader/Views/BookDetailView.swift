@@ -447,6 +447,12 @@ struct BookDetailView: View {
                     }
                 }
                 .font(.footnote)
+                // Not decoration. A `List` row is one tappable control, so two
+                // buttons sharing a row both fire on any tap in it: "pause" ran
+                // `pause()` and then `cancel()`, and the download queue the reader
+                // meant to keep was gone — with the row that would have explained it.
+                // `.borderless` is what gives each button its own hit area back.
+                .buttonStyle(.borderless)
             }
         }
     }
