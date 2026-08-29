@@ -162,10 +162,24 @@ final class ImageFetcher {
     /// - Parameter page: 1-based, and only used to name the page in an error.
     func image(at url: URL, chapterPage: URL, page: Int, cookies: [HTTPCookie]) async throws -> Data {
         try await Self.load(
-            Self.request(for: url, referer: chapterPage, cookies: cookies),
+            Self.request(for: url, referer: chapterPage, cookies: cookies, timeout: Self.readTimeout),
             page: page, in: session
         )
     }
+
+    /// How long one page waits, while somebody is looking at it, before it is called a
+    /// failure.
+    ///
+    /// Twenty seconds, against `URLSession`'s default sixty. These CDNs stall rather than
+    /// refuse — a page that is never going to answer holds the connection open instead of
+    /// closing it — and until the request gives up the reader has a black rectangle with
+    /// no retry button on it, because nothing yet knows the page failed. Sixty seconds of
+    /// that is the retry button being absent for the whole time it is wanted.
+    ///
+    /// The reading path only. A download runs with nobody watching, and a shorter deadline
+    /// there would write gaps into a chapter somebody is keeping for a flight — the one
+    /// place waiting is cheaper than failing.
+    private static let readTimeout: TimeInterval = 20
 
     /// One book cover's bytes.
     ///
@@ -187,8 +201,11 @@ final class ImageFetcher {
         )
     }
 
-    private static func request(for url: URL, referer: URL?, cookies: [HTTPCookie]) -> URLRequest {
+    private static func request(
+        for url: URL, referer: URL?, cookies: [HTTPCookie], timeout: TimeInterval? = nil
+    ) -> URLRequest {
         var request = URLRequest(url: url)
+        if let timeout { request.timeoutInterval = timeout }
         // The page the image is on, which for a chapter's images is always known.
         // Three of the four surveyed sites answer 403 without it and 200 with it, and
         // this is exactly what a browser sends. Deliberately not a rule field — no

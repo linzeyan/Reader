@@ -34,6 +34,10 @@ final class ComicReaderModel {
         /// `keepPage`, and absent for the same reasons: nothing was kept, or what was
         /// kept is the chapter itself.
         let cachedPage: ((Int) -> URL?)?
+        /// The pages this chapter is short — the gaps in a download, whose slots hold a
+        /// live address rather than the page itself. Named here so the store can offer
+        /// them as retries instead of quietly fetching them; see `ComicPageStore.init`.
+        let missingPages: Set<Int>
         var id: String { chapter.id }
     }
 
@@ -219,6 +223,11 @@ final class ComicReaderModel {
             let cache = env.cache
             let book = self.book
             let siteChapterId = chapter.siteChapterId
+            #if DEBUG
+            ComicProbe.opened(
+                chapter: chapter.index, pages: urls.count, source: "web", missing: []
+            )
+            #endif
             return LoadedChapter(
                 chapter: chapter, imageURLs: urls, chapterPage: page,
                 keepPage: { index, bytes in
@@ -226,7 +235,8 @@ final class ComicReaderModel {
                 },
                 cachedPage: { index in
                     cache.page(index, of: book, siteChapterId: siteChapterId)
-                }
+                },
+                missingPages: []
             )
         } catch {
             guard mine == generation else { return nil }
@@ -244,8 +254,15 @@ final class ComicReaderModel {
     ///
     /// So the addresses are asked for again — once, only for a chapter that has a gap,
     /// and only when there is a rule to ask with. The marker's slot is given the live
-    /// address, which the store fetches like any online page, and `keepPage` writes what
-    /// comes back into the hole so the next open has nothing to fetch.
+    /// address, and the page is handed to the store as one it already knows is missing:
+    /// the reader sees its retry button straight away, and the address is what that button
+    /// aims at. `keepPage` writes what comes back into the hole, so a gap the reader
+    /// bothered to fill stays filled.
+    ///
+    /// Offered rather than fetched, because the alternative was measured and is worse. A
+    /// gap fetched silently on open shows nothing at all while the request runs, and these
+    /// CDNs stall rather than refuse — a whole `URLSession` timeout of black page with no
+    /// button on it, which is the retry disappearing exactly when it is needed.
     ///
     /// Everything about this fails soft. No rule, no network, a list that no longer has
     /// the same number of pages in it — the chapter still opens, still reads, and still
@@ -259,9 +276,17 @@ final class ComicReaderModel {
               let live = try? await env.bookService.chapterImageURLs(rule: rule, chapter: chapter),
               live.count == stored.count
         else {
+            #if DEBUG
+            ComicProbe.opened(
+                chapter: chapter.index, pages: stored.count, source: "device", missing: gaps
+            )
+            #endif
+            // No `missingPages`, and that is not an oversight: every slot here still holds
+            // the marker file itself, which reads as a failure the instant it is opened.
+            // Naming them would only replace one immediate button with another.
             return LoadedChapter(
                 chapter: chapter, imageURLs: stored, chapterPage: page,
-                keepPage: nil, cachedPage: nil
+                keepPage: nil, cachedPage: nil, missingPages: []
             )
         }
         guard mine == generation else { return nil }
@@ -271,6 +296,11 @@ final class ComicReaderModel {
         let downloads = env.downloads
         let book = self.book
         let fillable = Set(gaps)
+        #if DEBUG
+        ComicProbe.opened(
+            chapter: chapter.index, pages: urls.count, source: "device+web", missing: gaps
+        )
+        #endif
         return LoadedChapter(
             chapter: chapter, imageURLs: urls, chapterPage: page,
             keepPage: { index, bytes in
@@ -284,7 +314,12 @@ final class ComicReaderModel {
             // Nothing to look up. Every page of this chapter but the gaps is already a
             // file address, and a gap filled during this read is one page of fifty — not
             // worth a lookup on every page of every downloaded chapter to save.
-            cachedPage: nil
+            cachedPage: nil,
+            // Offered rather than fetched. The addresses above are what a retry aims at,
+            // not a second download starting behind the reader's back: a gap asked for
+            // silently on open is a black page for as long as the site takes to answer,
+            // and on a CDN that stalls that is a minute with nothing to tap.
+            missingPages: fillable
         )
     }
 

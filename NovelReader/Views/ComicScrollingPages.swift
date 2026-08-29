@@ -165,7 +165,7 @@ final class ComicScrollCoordinator {
             let anchor = readingAnchor()
             let store = ComicPageStore(
                 urls: chapter.imageURLs, chapterPage: chapter.chapterPage,
-                fetcher: config.fetcher
+                fetcher: config.fetcher, missing: chapter.missingPages
             )
             let entry = PlacedComicChapter(
                 chapterIndex: chapter.chapter.index,
@@ -427,7 +427,7 @@ final class ComicScrollCoordinator {
             #if DEBUG
             ComicProbe.window(
                 chapter: chapter.chapterIndex, visible: drawn, failed: marked,
-                known: chapter.store.failedPages
+                known: chapter.store.failedPages, pending: chapter.store.pendingPages
             )
             #endif
         }

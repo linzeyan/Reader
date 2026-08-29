@@ -118,17 +118,33 @@ enum ComicProbe {
         )
     }
 
-    /// What the coordinator handed the scroll view. `failed` is the pages it marked, and
+    /// How a chapter opened, which decides what every line after it means. A chapter read
+    /// off the device fails a page the instant it opens the marker; one read online waits
+    /// for the network to give up first, and a black page with no button is that wait.
+    /// `missing` is the gaps a download left behind.
+    static func opened(chapter: Int, pages: Int, source: String, missing: [Int]) {
+        NSLog(
+            "[DEBUG-page] open ch=%d pages=%d source=%@ missing=%@",
+            chapter, pages, source, list(missing)
+        )
+    }
+
+    /// What the coordinator handed the scroll view. `failed` is the pages it marked,
     /// `known` is every page the store considers failed — a page in `known` but not in
-    /// `visible` is one whose button exists nowhere on screen.
-    static func window(chapter: Int, visible: [Int], failed: [Int], known: [Int]) {
-        guard !failed.isEmpty || !known.isEmpty else { return }
+    /// `visible` is one whose button exists nowhere on screen — and `pending` is every
+    /// request still out. A visible page in none of the three is one nothing is doing
+    /// anything about; a visible page in `pending` alone is the black rectangle the reader
+    /// is waiting on, and how long it stays there is how long the button takes to appear.
+    static func window(
+        chapter: Int, visible: [Int], failed: [Int], known: [Int], pending: [Int]
+    ) {
+        guard !failed.isEmpty || !known.isEmpty || !pending.isEmpty else { return }
         let now = CACurrentMediaTime()
         guard now - lastWindow >= 0.25 else { return }
         lastWindow = now
         NSLog(
-            "[DEBUG-page] window ch=%d visible=%@ failed=%@ known=%@",
-            chapter, list(visible), list(failed), list(known)
+            "[DEBUG-page] window ch=%d visible=%@ failed=%@ known=%@ pending=%@",
+            chapter, list(visible), list(failed), list(known), list(pending)
         )
     }
 

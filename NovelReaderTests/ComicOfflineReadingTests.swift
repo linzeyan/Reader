@@ -154,6 +154,40 @@ final class ComicOfflineReadingTests: XCTestCase {
         XCTAssertTrue(store.hasFailed(page: 1))
     }
 
+    /// A gap the app already knows about offers its button without asking the network
+    /// first.
+    ///
+    /// The slot holds a live address — `ComicReaderModel.opening` puts one there so the
+    /// retry has somewhere to aim — and fetching it on open is the failure this is about:
+    /// these CDNs stall rather than refuse, so the reader gets a black page with nothing on
+    /// it for the length of a timeout, in a chapter the app told them was downloaded. The
+    /// button has to be there when the page is, and the network is what the *tap* is for.
+    func testAKnownGapOffersItsButtonBeforeAnythingIsAskedOfTheNetwork() async throws {
+        let store = ComicPageStore(
+            urls: [URL(string: "https://comic.test/1/000.jpg")!],
+            chapterPage: URL(string: "https://comic.test/1")!,
+            fetcher: ImageFetcher(session: Self.refusingSession()),
+            missing: [0]
+        )
+        store.onFailure = { page, _ in
+            XCTFail("page \(page) was fetched on open; the gap was already known")
+        }
+
+        store.setWindow(0..<1, width: 80)
+        XCTAssertTrue(store.hasFailed(page: 0), "The gap draws its retry button at once")
+
+        // And the button still does what it says: the tap is the fetch, which here reaches
+        // a session that refuses everything and comes back as the same offered retry.
+        let asked = expectation(description: "the retry reached the network")
+        store.onFailure = { page, _ in
+            XCTAssertEqual(page, 0)
+            asked.fulfill()
+        }
+        store.retry(page: 0)
+        await fulfillment(of: [asked], timeout: 5)
+        XCTAssertTrue(store.hasFailed(page: 0))
+    }
+
     /// The same promise for a chapter nobody downloaded.
     ///
     /// A page read online is kept, and the next look finds it — which is what lets the

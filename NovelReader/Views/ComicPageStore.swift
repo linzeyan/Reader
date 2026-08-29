@@ -68,10 +68,20 @@ final class ComicPageStore {
     private var cookies: [HTTPCookie]?
     private var cookieTask: Task<[HTTPCookie], Never>?
 
-    init(urls: [URL], chapterPage: URL, fetcher: ImageFetcher) {
+    /// - Parameter missing: pages the caller already knows will not arrive on their own —
+    ///   the gaps in a downloaded chapter, whose live addresses were substituted so that a
+    ///   retry has somewhere to go (`ComicReaderModel.opening`). Marked failed from the
+    ///   start rather than fetched, and that is the difference between a gap the reader can
+    ///   act on and one they can only stare at: a gap is a page the download already
+    ///   reported it could not get, so asking the site for it silently on open leaves them
+    ///   in front of a black rectangle for as long as the request takes to give up, with
+    ///   nothing to tap the whole time. The button is the honest answer, and tapping it is
+    ///   the fetch.
+    init(urls: [URL], chapterPage: URL, fetcher: ImageFetcher, missing: Set<Int> = []) {
         self.urls = urls
         self.chapterPage = chapterPage
         self.fetcher = fetcher
+        self.failed = missing
     }
 
     /// Stops everything in flight. Called when the chapter leaves the loaded window;
@@ -95,6 +105,9 @@ final class ComicPageStore {
     /// Every page this store has given up on, whether or not anything is drawing it.
     /// See `ComicProbe.window`.
     var failedPages: [Int] { failed.sorted() }
+    /// Every page whose request is still out. A page that is neither drawn, nor failed,
+    /// nor here is a page nothing is doing anything about.
+    var pendingPages: [Int] { fetching.keys.sorted() }
     #endif
 
     // MARK: - The window
