@@ -15,9 +15,12 @@ import UIKit
 /// - **sizes**, forever. Sixteen bytes a page, and the column cannot keep its stack
 ///   without them — a page whose bitmap was released must not go back to being an
 ///   estimate, or leaving a chapter and coming back would move everything under it.
-/// - **bytes**, for as long as the chapter is loaded. Compressed, so a chapter is
-///   5–20MB rather than hundreds, and re-decoding from them is local work with no
-///   network in it.
+/// - **bytes**, for the last `retainedPages` pages the reader was near, and only for
+///   pages that came off the network. Compressed, so they are cheap next to a bitmap
+///   — but "cheap" times a whole chapter times the three chapters the reader has
+///   loaded is over a hundred megabytes held for pages nobody is near, which is what
+///   made a long session get slower and slower. A downloaded chapter keeps none at
+///   all: its pages are files this app wrote, and reading one back is a disk read.
 /// - **decoded images**, only for the pages in the window the coordinator asks for.
 ///
 /// Decoding downsamples to the width the page is drawn at. A 1600px scan on a 400pt
@@ -31,8 +34,11 @@ final class ComicPageStore {
     var onSize: ((Int, CGSize) -> Void)?
     /// A page's image became available, so whatever is on screen should be redrawn.
     var onImage: ((Int) -> Void)?
-    /// A page could not be fetched. Reported once per page, so a chapter with one dead
-    /// image says so without burying the reader in fifty identical banners.
+    /// A page could not be fetched, so whatever is drawing it should draw that instead.
+    /// Not an error anyone is asked about: one dead image out of fifty is an ordinary
+    /// thing on these sites, and a banner over the page the reader is on — with the
+    /// chapter still perfectly readable underneath it — is the wrong size of answer.
+    /// The page itself offers the retry; see `retry(page:)`.
     var onFailure: ((Int, any Error) -> Void)?
 
     let urls: [URL]
@@ -107,6 +113,22 @@ final class ComicPageStore {
         }
     }
 
+    /// Asks for a page that failed, again, because the reader tapped its retry button.
+    ///
+    /// The mark is cleared *before* the request goes out, so the page goes back to
+    /// showing its number while the request is in flight and the button reappearing is
+    /// the answer to "did that work". Nothing here decides whether a retry is worth
+    /// making — the reader looking at the gap is better placed to know that a chapter
+    /// full of failures means the site is refusing them today.
+    func retry(page: Int) {
+        guard failed.remove(page) != nil, let width = pendingWidth else { return }
+        if let data = bytes[page] {
+            decode(page: page, data: data, width: width)
+        } else {
+            fetch(page: page)
+        }
+    }
+
     /// Releases every decoded bitmap. What a chapter scrolled off the loaded window
     /// gets before it is dropped, and what a memory warning asks of the ones that stay.
     func releaseImages() {
@@ -152,9 +174,14 @@ final class ComicPageStore {
         // whole page's bytes. Copied rather than memory-mapped — the storage screen can
         // delete these files while the chapter is open, and a mapped file that goes away
         // under a decode takes the app with it.
-        return try await Task.detached(priority: .userInitiated) {
+        let data = try await Task.detached(priority: .userInitiated) {
             try Data(contentsOf: url)
         }.value
+        // The marker the download left where this page should have been. Reported as a
+        // failure so the reader draws "page 12 is missing" rather than a page number
+        // that will never fill in — see `ChapterFileStore.writePages`.
+        guard !data.isEmpty else { throw ImageFetchError.missing(page: page + 1) }
+        return data
     }
 
     /// The cookie jar, read once and shared by every page of the chapter.
@@ -175,7 +202,13 @@ final class ComicPageStore {
 
     private func received(_ data: Data, page: Int) {
         fetching[page] = nil
-        bytes[page] = data
+        // Only what would have to come back over the network. A page from disk is
+        // already stored, in a file the reader chose to keep, and holding a second
+        // copy in memory buys a decode that was never the expensive part.
+        if !urls[page].isFileURL {
+            bytes[page] = data
+            trimBytes()
+        }
         // The size first and separately: it comes from the file's header without
         // decoding anything, and it is what lets the column correct its estimate for a
         // page that is nowhere near the screen.
@@ -193,6 +226,32 @@ final class ComicPageStore {
     /// still being looked at.
     private var wantedPages: Range<Int> = 0..<0
     private var pendingWidth: CGFloat?
+
+    /// How many pages' compressed bytes one chapter keeps.
+    ///
+    /// Six, which is a screen either side of the window and no more: the reader can
+    /// glance back a page or two without anything being asked for again, and a chapter
+    /// read end to end stops carrying its whole self. Three loaded chapters at six
+    /// pages is a couple of dozen megabytes rather than the hundred and eighty a full
+    /// window of long chapters used to hold — which is what made a long session get
+    /// slower and slower.
+    ///
+    /// Scrolling further back than that re-asks, and today that costs a download,
+    /// because the only thing behind this is `URLCache` at its default ten megabytes.
+    /// The chapter cache is what makes it a disk read instead.
+    private static let retainedPages = 6
+
+    /// Drops the retained pages furthest from what the reader is looking at.
+    ///
+    /// By distance rather than by age: someone reading forwards and someone flicking
+    /// back through a fight scene both want the pages *around them*, and the page that
+    /// arrived longest ago may be the one directly above the window.
+    private func trimBytes() {
+        guard bytes.count > Self.retainedPages else { return }
+        let centre = (wantedPages.lowerBound + wantedPages.upperBound) / 2
+        let ordered = bytes.keys.sorted { abs($0 - centre) < abs($1 - centre) }
+        for page in ordered.dropFirst(Self.retainedPages) { bytes[page] = nil }
+    }
 
     // MARK: - Decoding
 

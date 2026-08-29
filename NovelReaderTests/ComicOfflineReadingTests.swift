@@ -110,6 +110,47 @@ final class ComicOfflineReadingTests: XCTestCase {
         XCTAssertNotNil(store.image(page: 0))
     }
 
+    /// The page a download could not get, on the other side of the same promise.
+    ///
+    /// Its marker on disk is empty, and the store has to report that as a failure —
+    /// which is what puts the retry button in the page's place. Retrying reads the same
+    /// empty file and fails again, and the button comes back, which is the honest answer
+    /// for a gap only the site can fill. What must never happen is the third
+    /// possibility: a blank page indistinguishable from one that is still loading, in a
+    /// chapter the app has already called downloaded.
+    func testAMissingPageReadsAsAFailureAndStillDoesAfterARetry() async throws {
+        try env.downloads.save(
+            pages: [Self.png(width: 80, height: 120), nil],
+            book: book, siteChapterId: siteChapterId
+        )
+        let urls = files.pageURLs(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId)
+        XCTAssertEqual(urls.count, 2, "The gap keeps its place in the numbering")
+
+        let store = ComicPageStore(
+            urls: urls,
+            chapterPage: URL(string: "https://comic.test/1")!,
+            fetcher: ImageFetcher(session: Self.refusingSession())
+        )
+        var pending: XCTestExpectation?
+        store.onFailure = { page, _ in
+            XCTAssertEqual(page, 1, "Only the page that is missing may fail")
+            pending?.fulfill()
+        }
+
+        let first = expectation(description: "reported missing")
+        pending = first
+        store.setWindow(0..<2, width: 80)
+        await fulfillment(of: [first], timeout: 5)
+        XCTAssertTrue(store.hasFailed(page: 1))
+        XCTAssertFalse(store.hasFailed(page: 0), "The page that is there is unaffected")
+
+        let again = expectation(description: "reported missing again")
+        pending = again
+        store.retry(page: 1)
+        await fulfillment(of: [again], timeout: 5)
+        XCTAssertTrue(store.hasFailed(page: 1))
+    }
+
     // MARK: - Helpers
 
     /// A real PNG, because this is the one test that decodes rather than counting
