@@ -67,6 +67,30 @@ struct ChapterFileStore {
             .appendingPathComponent(Self.safeComponent(siteChapterId), isDirectory: true)
     }
 
+    /// Where an article's structure lives: the blocks, as JSON, beside the `.txt` a novel
+    /// chapter of the same book would have.
+    ///
+    /// A second file rather than a replacement for the text one, because they hold
+    /// different things and only feeds have both. What is stored here is the article as it
+    /// will be laid out — headings, listings, the addresses of its links, the file names of
+    /// its pictures — and none of that survives the flattening into lines that `.txt` is.
+    func blocksURL(siteId: String, siteBookId: String, siteChapterId: String) -> URL {
+        directory(siteId: siteId, siteBookId: siteBookId)
+            .appendingPathComponent(Self.safeComponent(siteChapterId))
+            .appendingPathExtension("json")
+    }
+
+    /// Where an article's pictures live — the same directory a comic chapter's pages would
+    /// use, and deliberately so.
+    ///
+    /// A chapter is only ever one kind, so the two can never both be there; and sharing
+    /// the path means the delete scopes, the size recursion and the storage screen already
+    /// know about article images without being told. The alternative is a third tree and
+    /// three of everything that walks one.
+    func imageDirectory(siteId: String, siteBookId: String, siteChapterId: String) -> URL {
+        pageDirectory(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId)
+    }
+
     /// Ids arrive from user-imported rule files and from remote URLs, so a raw
     /// id can legitimately contain `/`, `..`, or characters no filesystem wants.
     /// Whitelist the allowed set, then disambiguate with a hash whenever the
@@ -101,6 +125,47 @@ struct ChapterFileStore {
         let url = fileURL(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId)
         let text = try String(contentsOf: url, encoding: .utf8)
         return text.components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
+
+    /// Writes an article's blocks, and the plain text beside them.
+    ///
+    /// Both, always. The text file is what every part of this app that predates articles
+    /// reads — the export to txt and EPUB, the cache accounting, `readParagraphs` — and
+    /// keeping it in step here is what let structure be added without teaching any of them
+    /// about blocks. It is also the answer if the JSON is ever unreadable: the article
+    /// still opens, as prose.
+    func write(
+        blocks: [ArticleBlock], siteId: String, siteBookId: String, siteChapterId: String
+    ) throws {
+        let url = blocksURL(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId)
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try JSONEncoder().encode(blocks).write(to: url, options: .atomic)
+        try write(
+            paragraphs: blocks.map(\.plainText).filter { !$0.isEmpty },
+            siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId
+        )
+    }
+
+    /// The article's blocks, or nil where there are none — an article stored before this
+    /// app knew about structure, or a chapter of a novel, both of which read as prose.
+    func readBlocks(siteId: String, siteBookId: String, siteChapterId: String) -> [ArticleBlock]? {
+        let url = blocksURL(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode([ArticleBlock].self, from: data)
+    }
+
+    /// Stores one of an article's pictures under a name the blocks refer to it by.
+    func write(
+        image data: Data, named name: String,
+        siteId: String, siteBookId: String, siteChapterId: String
+    ) throws {
+        let directory = imageDirectory(
+            siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId
+        )
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: directory.appendingPathComponent(name), options: .atomic)
     }
 
     func exists(siteId: String, siteBookId: String, siteChapterId: String) -> Bool {
@@ -255,6 +320,7 @@ struct ChapterFileStore {
             )
             return [
                 fileURL(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId),
+                blocksURL(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId),
                 pages,
                 pages.appendingPathExtension("partial"),
             ]

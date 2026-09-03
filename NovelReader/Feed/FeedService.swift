@@ -10,10 +10,10 @@ import Foundation
 /// to be read. `SiteStore.importRule(fromRemote:)` and `ImageFetcher` take the same
 /// exit for the same reason.
 ///
-/// The web view is still used for one thing: turning an article's markup into paragraphs,
-/// which is `ExtractorScript.chapter` and the isolated import view — the very same path
-/// an EPUB's documents take. That is where a refresh spends its time, and it is why only
-/// articles that have no text yet are put through it.
+/// The web view is still used for one thing: turning an article's markup into the blocks it
+/// will be laid out as, which is `ExtractorScript.article` and the isolated import view —
+/// the very same path an EPUB's documents take. That is where a refresh spends its time,
+/// and it is why only articles that have no text yet are put through it.
 @MainActor
 final class FeedService {
     enum FeedError: LocalizedError {
@@ -38,6 +38,7 @@ final class FeedService {
     private let downloads: DownloadStore
     private let fetcher: WebFetcher
     private let session: URLSession
+    private let images: ArticleImages
 
     init(
         repo: LibraryRepo,
@@ -49,6 +50,7 @@ final class FeedService {
         self.downloads = downloads
         self.fetcher = fetcher
         self.session = session
+        self.images = ArticleImages(session: session, downloads: downloads)
     }
 
     // MARK: - Subscribing
@@ -242,14 +244,14 @@ final class FeedService {
 
     // MARK: - Storing
 
-    /// Writes what the document said into the book: the catalog first, then the text of
+    /// Writes what the document said into the book: the catalog first, then the body of
     /// every article that has none yet.
     ///
     /// That second half is the expensive one and is deliberately scoped to what is
-    /// missing. It runs each article's markup through the shared web view, which is one
-    /// round trip apiece and is queued behind whatever the reader is doing, so a refresh
-    /// that put all fifty of a feed's articles through it every time would be a refresh
-    /// nobody could read during.
+    /// missing. It runs each article's markup through the shared web view and then fetches
+    /// its pictures, which is several round trips apiece and is queued behind whatever the
+    /// reader is doing, so a refresh that put all fifty of a feed's articles through it
+    /// every time would be a refresh nobody could read during.
     private func store(_ parsed: ParsedFeed, in book: Book) async throws {
         try repo.mergeCatalog(
             bookId: book.id,
@@ -287,48 +289,36 @@ final class FeedService {
         // because this type is main-actor isolated and giving the view back is therefore
         // not a hop it would have to await.
         defer { fetcher.releaseImportView() }
-        let script = try ExtractorScript.chapter(Self.articleRule)
         for item in pending {
             // Before the extraction, not after: each article is a round trip through the
             // web view, and one of those is the whole distance between "it stopped" and
             // "it stops eventually".
             try Task.checkCancellation()
             guard let html = item.contentHTML?.nonBlank else { continue }
+            // The article's own address as the base for everything relative inside it.
+            // The import view reads this markup with a base of `about:blank`, so without
+            // one every relative link and picture in the document resolves to nothing. The
+            // feed's address stands in where an item published none — same host, usually,
+            // which is the whole of what a base is being asked for.
+            let script = try ExtractorScript.article(
+                baseURL: item.url?.nonBlank ?? book.siteBookId, title: item.title
+            )
             // One article that will not read must not cost the refresh the other
             // forty-nine. It simply stays without text, which the reader reports as an
             // article with no content — the same state as one the publisher summarised
             // to nothing.
             guard let payload = try? await fetcher.extract(
                 html: Data(html.utf8), extracting: script,
-                as: ExtractorScript.ChapterPayload.self
-            ), !payload.paragraphs.isEmpty else { continue }
-            try? downloads.save(
-                paragraphs: payload.paragraphs, book: book, siteChapterId: item.identity
+                as: ExtractorScript.ArticlePayload.self
+            ), payload.blocks.contains(where: { !$0.plainText.isEmpty || $0.kind == .image })
+            else { continue }
+            let illustrated = try await images.stored(
+                payload.blocks, book: book, siteChapterId: item.identity,
+                referer: item.url.flatMap { URL(string: $0) }
             )
+            try? downloads.save(blocks: illustrated, book: book, siteChapterId: item.identity)
         }
     }
-
-    /// How an article's markup is read.
-    ///
-    /// The shape `LocalBookImporter` uses for an EPUB document, and for the same reason:
-    /// what arrives is a fragment that *is* the article — there is no site chrome to
-    /// select away — so `body` is the content node once WebKit has wrapped it in a
-    /// document. Reusing `ExtractorScript.chapter` rather than writing an HTML reader in
-    /// Swift is the whole trick, since it already turns `<br>`, `<p>` and `<div>` into
-    /// paragraph breaks; a second one would be a worse copy of it that drifts.
-    ///
-    /// `h1` is named as the title selector even though the feed, not the body, is what
-    /// names an article here. It is what arms the extractor's echo check, and publishers
-    /// routinely repeat the headline as the first line of the body — without it every
-    /// such article opens with its own title printed twice.
-    static let articleRule = SiteRule.Chapter(
-        titleSelectors: ["h1"],
-        contentSelectors: ["body"],
-        stripSelectors: ["script", "style", "svg", "figure", "iframe"],
-        dropParagraphPatterns: nil,
-        prevSelector: nil,
-        nextSelector: nil
-    )
 
     // MARK: - Addresses
 

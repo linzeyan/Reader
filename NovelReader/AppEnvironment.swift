@@ -420,7 +420,7 @@ final class AppEnvironment {
                 try await feeds.subscribe(to: subscription.address)
             } catch {
                 guard let address = FeedService.url(from: subscription.address) else { continue }
-                try? repo.bookmark(
+                _ = try? repo.bookmark(
                     siteId: Book.feedSiteId, siteBookId: address.absoluteString, kind: .feed,
                     title: subscription.title ?? address.host() ?? address.absoluteString
                 )

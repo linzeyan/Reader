@@ -106,7 +106,11 @@ struct SelectionEdgeRule {
 /// two renderers may not mean two copies of the chapter logic.
 struct PaginatedChapterView: View {
     let title: String
-    let paragraphs: [String]
+    /// The line under the title, where an article's date goes.
+    let subtitle: String?
+    let blocks: [ArticleBlock]
+    /// Where this chapter's pictures are, for an article that has any.
+    let imageDirectory: URL?
     /// Identity of the chapter on screen. A change here means the pages measured so
     /// far describe text that is no longer being shown.
     let chapterKey: String
@@ -165,6 +169,10 @@ struct PaginatedChapterView: View {
     @State private var isDragging = false
     /// The highlight a tap landed on, waiting to be removed or dismissed.
     @State private var picked: TextHighlight?
+    /// For the links inside an article's sentences. From the environment rather than a
+    /// closure of its own: where a link goes is nothing this view's owner has an opinion
+    /// about, unlike every other callback here.
+    @Environment(\.openURL) private var openURL
 
     /// A finger resting against the top or bottom of the page while extending a
     /// selection.
@@ -260,6 +268,13 @@ struct PaginatedChapterView: View {
             SpatialTapGesture().onEnded { value in
                 if let hit = highlight(at: value.location) {
                     picked = hit
+                } else if let url = paginator?.link(at: value.location, onPage: pageIndex) {
+                    // Opened here rather than reported upwards, unlike the scrolling
+                    // reader: that renderer hands its taps back because the *order* of
+                    // decisions is the reader view's business, while this one already
+                    // decides its own — highlight, then edges, then the middle. A link
+                    // takes its place in that order.
+                    openURL(url)
                 } else if value.location.x < size.width * 0.25 {
                     turn(-1)
                 } else if value.location.x > size.width * 0.75 {
@@ -576,9 +591,26 @@ struct PaginatedChapterView: View {
         clearSelection()
         let fresh = renderedKey != chapterKey
         let carried = fresh ? nil : paginator?.anchor(at: pageIndex)
+        let typography = ReaderTypography(settings: settings)
         let next = ChapterPaginator(
             text: ChapterText(
-                title: title, paragraphs: paragraphs, typography: ReaderTypography(settings: settings)
+                title: title, subtitle: subtitle, blocks: blocks, typography: typography,
+                layout: imageDirectory.map {
+                    ArticleLayout(
+                        width: size.width,
+                        // Short of the whole page by the space a picture's own paragraph
+                        // carries and the leading of the line it sits on. A picture
+                        // measured against the full height lays out as a line taller than
+                        // a page, which is the one line the paginator cannot move to a
+                        // page of its own — it stays and is drawn clipped.
+                        maxImageHeight: max(
+                            0,
+                            size.height - typography.paragraphSpacing * 2
+                                - typography.body.lineHeight
+                        ),
+                        directory: $0
+                    )
+                }
             ),
             pageSize: size
         )

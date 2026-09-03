@@ -12,6 +12,9 @@ import Foundation
 final class StubProtocol: URLProtocol {
     enum Answer {
         case ok(String, headers: [String: String] = [:])
+        /// A body that is not text: an article's pictures, which are sniffed rather than
+        /// decoded and would not survive a round trip through `String`.
+        case bytes(Data, headers: [String: String] = [:])
         case notModified
         case status(Int)
     }
@@ -47,6 +50,7 @@ final class StubProtocol: URLProtocol {
         let answer = Self.answersByURL[request.url?.absoluteString ?? ""] ?? Self.answer
         let (status, body, headers): (Int, Data?, [String: String]) = switch answer {
         case .ok(let text, let headers): (200, Data(text.utf8), headers)
+        case .bytes(let data, let headers): (200, data, headers)
         case .notModified: (304, nil, [:])
         case .status(let code): (code, nil, [:])
         }

@@ -49,6 +49,8 @@ struct ReaderTap {
     let chapterIndex: Int?
     let paragraph: Int?
     let highlight: TextHighlight?
+    /// The address under the finger, for an article with links in its sentences.
+    let link: URL?
 }
 
 /// The scrolling reader's text surface: one continuous TextKit 2 column per chapter,
@@ -220,12 +222,25 @@ final class ReaderScrollCoordinator {
             let index = chapter.chapter.index
             let siteId = chapter.chapter.siteChapterId
             let title = chapter.chapter.title
-            let paragraphs = chapter.paragraphs
+            let subtitle = chapter.subtitle
+            let blocks = chapter.blocks
             let typography = ReaderTypography(settings: config.settings)
+            // A screenful, which is as tall as a picture may usefully be here: taller and
+            // the reader scrolls past it without ever seeing it whole. Falls back to the
+            // measure when the view has not been sized yet, which is a portrait-ish
+            // rectangle rather than a number that would let an image grow without limit.
+            let layout = chapter.imageDirectory.map {
+                ArticleLayout(
+                    width: key.width,
+                    maxImageHeight: max(view?.visibleHeight ?? 0, key.width),
+                    directory: $0
+                )
+            }
             layoutQueue.async { [weak self] in
                 let column = ChapterColumn(
                     text: ChapterText(
-                        title: title, paragraphs: paragraphs, typography: typography,
+                        title: title, subtitle: subtitle, blocks: blocks,
+                        typography: typography, layout: layout,
                         // Ragged, unlike a page: this column has no visible right edge
                         // to justify against.
                         alignment: .natural
@@ -508,7 +523,8 @@ final class ReaderScrollCoordinator {
             ),
             chapterIndex: hit?.chapter.chapterIndex,
             paragraph: hit?.paragraph,
-            highlight: hit.flatMap { highlight(at: point, in: $0.chapter) }
+            highlight: hit.flatMap { highlight(at: point, in: $0.chapter) },
+            link: hit.flatMap { link(at: point, in: $0.chapter, paragraph: $0.paragraph) }
         )
         guard config.onTap(tap) else { return }
         turnPage(tap.zone)
@@ -541,6 +557,34 @@ final class ReaderScrollCoordinator {
                 }
             }
         }
+    }
+
+    /// The link under a point, hit against the ink the same way a stored mark is.
+    ///
+    /// Narrowed to the tapped paragraph first: an article's links are a list over the
+    /// whole chapter, and asking where each of them was drawn would be a layout question
+    /// per link per tap. The paragraph under the finger is already known, and a link
+    /// cannot cross one.
+    private func link(at point: CGPoint, in chapter: PlacedColumn, paragraph: Int) -> URL? {
+        guard let view, !chapter.column.text.links.isEmpty,
+              chapter.column.text.paragraphRanges.indices.contains(paragraph)
+        else { return nil }
+        let inColumn = CGPoint(
+            x: point.x - ReaderTextScrollView.textMargin,
+            y: point.y + view.readingOffset - chapter.top
+        )
+        let span = chapter.column.text.paragraphRanges[paragraph]
+        for link in chapter.column.text.links
+        where NSIntersectionRange(link.range, span).length > 0 {
+            // A couple of words in the middle of a sentence is a smaller target than
+            // anything else here that can be tapped, so the ink is given a little room —
+            // but only a little, or the whole line becomes a link.
+            let hit = chapter.column.rects(for: link.range).contains {
+                $0.insetBy(dx: -4, dy: -4).contains(inColumn)
+            }
+            if hit { return link.url }
+        }
+        return nil
     }
 
     // MARK: - Drawing

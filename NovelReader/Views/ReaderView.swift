@@ -287,6 +287,14 @@ struct ReaderView: View {
             markChoice = nil
             return false
         }
+        // After the open question and before the zones. A tap is how the reader says no
+        // to a bar that is asking them something, and that must keep working over a
+        // sentence that happens to have a link in it — but everywhere else, a link under
+        // the finger is what the finger came for.
+        if let link = tap.link {
+            openURL(link)
+            return false
+        }
         guard settings.tapToTurnPage, tap.zone != .controls else {
             showControls.toggle()
             return false
@@ -303,7 +311,9 @@ struct ReaderView: View {
         if let current = model.currentLoadedChapter {
             PaginatedChapterView(
                 title: current.chapter.title,
-                paragraphs: current.paragraphs,
+                subtitle: current.subtitle,
+                blocks: current.blocks,
+                imageDirectory: current.imageDirectory,
                 chapterKey: current.chapter.id,
                 settings: settings,
                 landing: openAtLastPage == current.chapter.id
@@ -689,8 +699,39 @@ struct MarkActionBar: View {
 final class ReaderModel {
     struct LoadedChapter: Identifiable {
         let chapter: Chapter
+        /// What is drawn. One block per anchor paragraph — see `ArticleBlock` — so a
+        /// chapter of prose is one paragraph block per line of the file and nothing about
+        /// the anchor arithmetic changes for having gained the possibility of structure.
+        let blocks: [ArticleBlock]
+        /// The same content flattened, kept beside the blocks rather than derived at every
+        /// use: this is asked for on every scrolled frame (the accessibility labels), on
+        /// every long press and on every progress write, and `map(\.plainText)` down a
+        /// chapter of two hundred blocks is not free at that rate.
         let paragraphs: [String]
+        /// Where this chapter's pictures are, for an article that has any. Resolved when
+        /// the chapter is loaded because the renderers have no business knowing the shape
+        /// of the download tree — they are handed a measure and a directory.
+        let imageDirectory: URL?
+        /// A line under the chapter's title. An article's date, which is what the
+        /// scrolling reader marks the boundary between two articles with: one piece runs
+        /// into the next, and a title alone was a thin thing to make that seam out of.
+        let subtitle: String?
         var id: String { chapter.id }
+
+        init(
+            chapter: Chapter, blocks: [ArticleBlock], imageDirectory: URL? = nil,
+            subtitle: String? = nil
+        ) {
+            self.chapter = chapter
+            self.blocks = blocks
+            self.paragraphs = blocks.map(\.plainText)
+            self.imageDirectory = imageDirectory
+            self.subtitle = subtitle
+        }
+
+        init(chapter: Chapter, paragraphs: [String]) {
+            self.init(chapter: chapter, blocks: paragraphs.map(ArticleBlock.paragraph))
+        }
     }
 
     private(set) var chapters: [Chapter] = []
@@ -1029,8 +1070,8 @@ final class ReaderModel {
         guard chapters.indices.contains(target) else { return }
         isLoading = true
         defer { isLoading = false }
-        guard let text = try? await paragraphs(for: chapters[target]) else { return }
-        pendingPrevious = LoadedChapter(chapter: chapters[target], paragraphs: text)
+        guard let content = try? await content(of: chapters[target]) else { return }
+        pendingPrevious = content
         showPreviousChapter()
     }
 
@@ -1057,10 +1098,10 @@ final class ReaderModel {
     private func loadStoredPrevious() async {
         guard pendingPrevious == nil, let first = loaded.first else { return }
         let target = first.chapter.index - 1
-        guard chapters.indices.contains(target), chapters[target].isDownloaded,
-              let text = await storedParagraphs(for: chapters[target]), !text.isEmpty
+        guard chapters.indices.contains(target),
+              let content = await storedContent(of: chapters[target])
         else { return }
-        pendingPrevious = LoadedChapter(chapter: chapters[target], paragraphs: text)
+        pendingPrevious = content
         showPreviousChapter()
     }
 
@@ -1117,7 +1158,7 @@ final class ReaderModel {
         error = nil
         defer { isLoading = false }
         do {
-            let text = try await paragraphs(for: chapter)
+            let content = try await content(of: chapter)
             // The world can move across the fetch's own suspension: a catalog jump
             // replaces `loaded`, and a chapter fetched for the old window belongs
             // nowhere. Valid only while it still extends the frontier it was asked
@@ -1127,8 +1168,8 @@ final class ReaderModel {
             guard mine == generation,
                   loaded.isEmpty || loaded.last?.chapter.index == chapter.index - 1
             else { return }
-            loaded.append(LoadedChapter(chapter: chapter, paragraphs: text))
-            probe("append idx=\(chapter.index) rows=\(text.count)")
+            loaded.append(content)
+            probe("append idx=\(chapter.index) rows=\(content.paragraphs.count)")
             startReadingAhead()
         } catch {
             guard mine == generation else { return }
@@ -1142,9 +1183,49 @@ final class ReaderModel {
         }
     }
 
-    /// Local text wins: a downloaded chapter must be readable with no network at
-    /// all, which is the entire point of downloading it.
+    /// One chapter, ready to be drawn.
     ///
+    /// The one place that decides what a chapter *is*: an article's stored blocks where
+    /// there are any, prose everywhere else. Every path that puts a chapter on screen goes
+    /// through here, so structure is either available to both renderers or to neither.
+    private func content(of chapter: Chapter) async throws -> LoadedChapter {
+        if let stored = await storedContent(of: chapter) { return stored }
+        return LoadedChapter(
+            chapter: chapter, blocks: try await paragraphs(for: chapter).map(ArticleBlock.paragraph)
+        )
+    }
+
+    /// What is on the device, or nil.
+    ///
+    /// Local text wins: a downloaded chapter must be readable with no network at all, which
+    /// is the entire point of downloading it.
+    private func storedContent(of chapter: Chapter) async -> LoadedChapter? {
+        guard chapter.isDownloaded else { return nil }
+        // Only a subscription has blocks, and only ones taken in since this app learned
+        // about structure. Everything else reads its text and is prose — including an
+        // article stored before then, which is why this falls through rather than failing.
+        if book.kind == .feed, let blocks = await storedBlocks(for: chapter), !blocks.isEmpty {
+            return LoadedChapter(
+                chapter: chapter, blocks: blocks,
+                imageDirectory: env.files.imageDirectory(
+                    siteId: book.siteId, siteBookId: book.siteBookId,
+                    siteChapterId: chapter.siteChapterId
+                ),
+                subtitle: Self.subtitle(of: chapter)
+            )
+        }
+        guard let text = await storedParagraphs(for: chapter), !text.isEmpty else { return nil }
+        return LoadedChapter(chapter: chapter, paragraphs: text)
+    }
+
+    /// The date an article was published, as the line under its title.
+    ///
+    /// Only for an article that has one — a feed that publishes no dates is a feed where
+    /// the reader gets the title alone, which is still the boundary they had before.
+    private static func subtitle(of chapter: Chapter) -> String? {
+        chapter.publishedAt?.formatted(date: .abbreviated, time: .shortened)
+    }
+
     /// Then whatever reading online left behind. That is a weaker claim than a
     /// download — `ChapterCache` may have thrown the chapter away to stay under its
     /// ceiling, and it is asked for the chapter rather than told about it — but when
@@ -1152,9 +1233,6 @@ final class ReaderModel {
     /// trip to the site. Which is also the polite thing: the page has not changed
     /// since the reader passed it two minutes ago.
     private func paragraphs(for chapter: Chapter) async throws -> [String] {
-        if chapter.isDownloaded, let stored = await storedParagraphs(for: chapter), !stored.isEmpty {
-            return stored
-        }
         if let cached = await env.cache.paragraphs(of: book, siteChapterId: chapter.siteChapterId) {
             return cached
         }
@@ -1212,6 +1290,18 @@ final class ReaderModel {
             try? files.readParagraphs(
                 siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId
             )
+        }.value
+    }
+
+    /// An article's blocks, off the main actor for the reason above — and rather more so:
+    /// this is a JSON decode of a whole article, not a split on newlines.
+    private func storedBlocks(for chapter: Chapter) async -> [ArticleBlock]? {
+        let files = env.files
+        let siteId = book.siteId
+        let siteBookId = book.siteBookId
+        let siteChapterId = chapter.siteChapterId
+        return await Task.detached(priority: .userInitiated) {
+            files.readBlocks(siteId: siteId, siteBookId: siteBookId, siteChapterId: siteChapterId)
         }.value
     }
 

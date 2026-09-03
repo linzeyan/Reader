@@ -40,6 +40,34 @@ struct DownloadStore {
         }
     }
 
+    /// The same contract for an article: its structure and the plain text it flattens to
+    /// both land before the flag says it is readable. See `ChapterFileStore.write(blocks:)`
+    /// for why both files are written.
+    func save(blocks: [ArticleBlock], book: Book, siteChapterId: String, now: Date = Date()) throws {
+        try files.write(
+            blocks: blocks, siteId: book.siteId, siteBookId: book.siteBookId,
+            siteChapterId: siteChapterId
+        )
+        try writer.write { db in
+            let id = Chapter.makeId(bookId: book.id, siteChapterId: siteChapterId)
+            guard var chapter = try Chapter.fetchOne(db, key: id) else { return }
+            chapter.downloadedAt = now
+            try chapter.update(db)
+        }
+    }
+
+    /// One of an article's pictures, before the blocks that name it are written.
+    ///
+    /// No flag of its own and deliberately no ordering promise beyond that: a picture that
+    /// lands and is then never referred to — because the article's blocks failed to
+    /// write — is bytes in a directory the chapter's own delete scope already covers.
+    func write(image data: Data, named name: String, book: Book, siteChapterId: String) throws {
+        try files.write(
+            image: data, named: name, siteId: book.siteId, siteBookId: book.siteBookId,
+            siteChapterId: siteChapterId
+        )
+    }
+
     /// The same contract for a comic chapter: the pages land first, and only a chapter
     /// that is on disk gets the flag that says so. A `nil` page is one the site would
     /// not give up; `ChapterFileStore.writePages` keeps its place in the numbering.
@@ -67,6 +95,22 @@ struct DownloadStore {
 
     func readParagraphs(book: Book, siteChapterId: String) throws -> [String] {
         try files.readParagraphs(
+            siteId: book.siteId, siteBookId: book.siteBookId, siteChapterId: siteChapterId
+        )
+    }
+
+    /// An article's blocks, or nil for anything stored as prose — which is every novel
+    /// chapter, and every article taken in before this app knew about structure.
+    func readBlocks(book: Book, siteChapterId: String) -> [ArticleBlock]? {
+        files.readBlocks(
+            siteId: book.siteId, siteBookId: book.siteBookId, siteChapterId: siteChapterId
+        )
+    }
+
+    /// Where an article's pictures are, which is what the layout resolves their file names
+    /// against.
+    func imageDirectory(book: Book, siteChapterId: String) -> URL {
+        files.imageDirectory(
             siteId: book.siteId, siteBookId: book.siteBookId, siteChapterId: siteChapterId
         )
     }

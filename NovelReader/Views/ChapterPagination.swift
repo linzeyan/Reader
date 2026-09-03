@@ -36,6 +36,57 @@ struct ReaderTypography: Equatable {
         // colours survive the bridge and resolve against the drawing view's traits.
         color = UIColor(settings.theme.foreground)
     }
+
+    // MARK: - Faces an article needs
+
+    /// Smaller than the body, for the things that are *about* the text rather than part
+    /// of it: an article's date, a picture's caption where the picture is missing.
+    var caption: UIFont { .systemFont(ofSize: max(11, body.pointSize - 3)) }
+
+    /// A heading, sized off the reader's own body size so that it scales with the slider
+    /// they actually use. Levels below three all read the same, because an article nested
+    /// four deep is one whose author has stopped distinguishing them too.
+    func heading(level: Int) -> UIFont {
+        let bump: CGFloat = switch level {
+        case ...1: 6
+        case 2: 4
+        case 3: 2
+        default: 1
+        }
+        return .systemFont(ofSize: body.pointSize + bump, weight: .semibold)
+    }
+
+    /// The monospaced face, for listings and inline code. A point smaller than the body:
+    /// monospaced faces run wider, and a listing set at the body size wraps where the same
+    /// sentence of prose would not.
+    var mono: UIFont { .monospacedSystemFont(ofSize: max(10, body.pointSize - 1), weight: .regular) }
+
+    var italicBody: UIFont { emphasised(body, bold: false, italic: true) }
+
+    /// The reader's own face with weight or slant added, falling back to the face itself
+    /// where it has no such variant — which is most CJK families, where a synthesised
+    /// italic is a smear rather than a style.
+    func emphasised(_ font: UIFont, bold: Bool, italic: Bool) -> UIFont {
+        var traits = font.fontDescriptor.symbolicTraits
+        if bold { traits.insert(.traitBold) }
+        if italic { traits.insert(.traitItalic) }
+        guard let descriptor = font.fontDescriptor.withSymbolicTraits(traits) else { return font }
+        return UIFont(descriptor: descriptor, size: font.pointSize)
+    }
+
+    /// Derived from the reader's own text colour rather than a fixed grey, because the
+    /// nine themes range from near-black on cream to near-white on black, and a grey that
+    /// is secondary on one is invisible on another.
+    var secondaryColor: UIColor { color.withAlphaComponent(0.62) }
+
+    /// Links are the one thing here that is not the reader's colour: they have to be
+    /// visibly *not* body text, and the tint is what the rest of the app already uses to
+    /// mean "this does something".
+    var linkColor: UIColor { .tintColor }
+
+    /// A wash rather than a colour, for the same reason `secondaryColor` is derived: it
+    /// has to sit a shade off the page in every theme, light or dark.
+    var codeBackground: UIColor { color.withAlphaComponent(0.06) }
 }
 
 /// One chapter as a single attributed string, plus the map back to paragraph
@@ -55,7 +106,23 @@ struct ChapterText {
     /// every offset in this type is a UTF-16 index, and a press-and-drag asks for
     /// characters dozens of times a second.
     private let characters: NSString
+    /// Every link in the chapter, in composed-string coordinates.
+    ///
+    /// Collected once here rather than looked up at the point of a tap, because a tap has
+    /// a *point* and the attribute has a *range*: turning one into the other means asking
+    /// where a range was drawn, which is what both renderers already do to hit a
+    /// highlight. The list is empty for everything but an article.
+    let links: [Link]
 
+    /// One link: the characters it covers, and where it goes.
+    struct Link: Equatable {
+        let range: NSRange
+        let url: URL
+    }
+
+    /// Prose, which is what a novel chapter and an imported document are: one paragraph
+    /// per string, nothing inside them to mark up.
+    ///
     /// - Parameter alignment: how body text sits in its measure. Justified for a page,
     ///   which has a visible right edge; ragged for the scrolling column, which has
     ///   none and where justification would only stretch lines against an edge nobody
@@ -65,6 +132,31 @@ struct ChapterText {
         title: String,
         paragraphs: [String],
         typography: ReaderTypography,
+        alignment: NSTextAlignment = .justified
+    ) {
+        self.init(
+            title: title, blocks: paragraphs.map(ArticleBlock.paragraph),
+            typography: typography, alignment: alignment
+        )
+    }
+
+    /// An article, which has shape: headings, a photograph, a listing, links inside its
+    /// sentences. Composed here rather than in a renderer of its own so that everything
+    /// downstream — the anchor arithmetic, both renderers, highlights, the position — goes
+    /// on working on one attributed string and one map of paragraph ranges.
+    ///
+    /// - Parameter subtitle: a line under the title, in the secondary colour. Where an
+    ///   article's date goes: the scrolling reader runs one article into the next, and the
+    ///   title alone was a thin thing to mark that boundary with.
+    /// - Parameter layout: what the images have to fit inside, and where they are stored.
+    ///   Nil lays the article out with its pictures left out, which is what a renderer that
+    ///   has no measure yet has to do.
+    init(
+        title: String,
+        subtitle: String? = nil,
+        blocks: [ArticleBlock],
+        typography: ReaderTypography,
+        layout: ArticleLayout? = nil,
         alignment: NSTextAlignment = .justified
     ) {
         let composed = NSMutableAttributedString()
@@ -84,7 +176,7 @@ struct ChapterText {
         titleStyle.lineSpacing = typography.lineSpacing
         // A heading needs more air under it than between two paragraphs, or the
         // first line of the chapter reads as part of the title.
-        titleStyle.paragraphSpacing = betweenParagraphs + 8
+        titleStyle.paragraphSpacing = subtitle == nil ? betweenParagraphs + 8 : 2
         composed.append(NSAttributedString(
             string: title,
             attributes: [
@@ -108,20 +200,271 @@ struct ChapterText {
             .paragraphStyle: bodyStyle,
         ]
 
-        for paragraph in paragraphs {
-            // The separator goes in front of each paragraph rather than behind it:
-            // a trailing newline would leave an empty final element, which lays out
-            // as a blank line and can push a page break past the end of the text.
+        if let subtitle {
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = typography.lineSpacing
+            style.paragraphSpacing = betweenParagraphs + 8
+            composed.append(NSAttributedString(
+                string: "\n" + subtitle,
+                attributes: [
+                    .font: typography.caption,
+                    .foregroundColor: typography.secondaryColor,
+                    .paragraphStyle: style,
+                ]
+            ))
+        }
+
+        for block in blocks {
+            // The separator goes in front of each block rather than behind it: a
+            // trailing newline would leave an empty final element, which lays out as a
+            // blank line and can push a page break past the end of the text.
             composed.append(NSAttributedString(string: "\n", attributes: bodyAttributes))
             let start = composed.length
-            composed.append(NSAttributedString(string: paragraph, attributes: bodyAttributes))
+            composed.append(Self.compose(
+                block, typography: typography, layout: layout,
+                bodyAttributes: bodyAttributes, betweenParagraphs: betweenParagraphs,
+                alignment: alignment
+            ))
             ranges.append(NSRange(location: start, length: composed.length - start))
         }
 
         attributed = composed
         paragraphRanges = ranges
         characters = composed.string as NSString
+
+        var found: [Link] = []
+        composed.enumerateAttribute(
+            .link, in: NSRange(location: 0, length: composed.length)
+        ) { value, range, _ in
+            if let url = value as? URL { found.append(Link(range: range, url: url)) }
+        }
+        links = found
     }
+
+    /// One block as attributed text.
+    ///
+    /// Everything here is styling one run of characters, with one exception: a picture is
+    /// an attachment, which TextKit lays out as a very large glyph. That is what keeps an
+    /// illustrated article inside the same laid-out column as a novel — one string, one
+    /// layout manager, one set of paragraph ranges — instead of needing a stack of views
+    /// with heights to reconcile.
+    private static func compose(
+        _ block: ArticleBlock,
+        typography: ReaderTypography,
+        layout: ArticleLayout?,
+        bodyAttributes: [NSAttributedString.Key: Any],
+        betweenParagraphs: CGFloat,
+        alignment: NSTextAlignment
+    ) -> NSAttributedString {
+        switch block.kind {
+        case .paragraph:
+            return runs(block.runs, typography: typography, attributes: bodyAttributes)
+
+        case .heading:
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = typography.lineSpacing
+            // More air above a heading than below it, which is what makes it read as
+            // belonging to what follows rather than to what it interrupts. The space
+            // above is the previous block's `paragraphSpacing`, so the heading takes
+            // its own from `paragraphSpacingBefore`.
+            style.paragraphSpacing = betweenParagraphs
+            style.paragraphSpacingBefore = betweenParagraphs
+            style.alignment = .natural
+            return runs(
+                block.runs, typography: typography,
+                attributes: [
+                    .font: typography.heading(level: block.level ?? 2),
+                    .foregroundColor: typography.color,
+                    .paragraphStyle: style,
+                ]
+            )
+
+        case .quote:
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = typography.lineSpacing
+            style.paragraphSpacing = betweenParagraphs
+            // Indented on both sides rather than given a rule down the left: a rule is
+            // drawing, and everything in this column is text the layout manager places.
+            style.firstLineHeadIndent = typography.body.pointSize
+            style.headIndent = typography.body.pointSize
+            style.tailIndent = -typography.body.pointSize
+            style.alignment = .natural
+            return runs(
+                block.runs, typography: typography,
+                attributes: [
+                    .font: typography.italicBody,
+                    .foregroundColor: typography.secondaryColor,
+                    .paragraphStyle: style,
+                ]
+            )
+
+        case .code:
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = typography.lineSpacing * 0.5
+            style.paragraphSpacing = betweenParagraphs
+            style.firstLineHeadIndent = 8
+            style.headIndent = 8
+            style.tailIndent = -8
+            // Wrapped by character, and it has to be: a listing has no visible right
+            // edge to scroll to in a laid-out column, so a long line either wraps or
+            // disappears off the measure. Wrapping by word would break identifiers at
+            // dots and read as a different program.
+            style.lineBreakMode = .byCharWrapping
+            style.alignment = .natural
+            return NSAttributedString(
+                string: block.runs.map(\.text).joined(),
+                attributes: [
+                    .font: typography.mono,
+                    .foregroundColor: typography.color,
+                    .backgroundColor: typography.codeBackground,
+                    .paragraphStyle: style,
+                ]
+            )
+
+        case .listItem:
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = typography.lineSpacing
+            style.paragraphSpacing = betweenParagraphs / 2
+            let indent = typography.body.pointSize * CGFloat(max(1, block.level ?? 1))
+            style.firstLineHeadIndent = indent
+            // Hanging: the second line of an item lines up under its first word, not
+            // under its bullet, which is the whole visual point of a list.
+            style.headIndent = indent + typography.body.pointSize
+            style.alignment = .natural
+            let marked = NSMutableAttributedString(
+                string: (block.marker ?? "•") + "\u{2002}",
+                attributes: [
+                    .font: typography.body,
+                    .foregroundColor: typography.secondaryColor,
+                    .paragraphStyle: style,
+                ]
+            )
+            marked.append(runs(
+                block.runs, typography: typography,
+                attributes: [
+                    .font: typography.body,
+                    .foregroundColor: typography.color,
+                    .paragraphStyle: style,
+                ]
+            ))
+            return marked
+
+        case .image:
+            return image(block, typography: typography, layout: layout, spacing: betweenParagraphs)
+
+        case .rule:
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = typography.lineSpacing
+            style.paragraphSpacing = betweenParagraphs
+            style.alignment = .center
+            return NSAttributedString(
+                string: "* * *",
+                attributes: [
+                    .font: typography.body,
+                    .foregroundColor: typography.secondaryColor,
+                    .paragraphStyle: style,
+                ]
+            )
+        }
+    }
+
+    /// Inline runs as one styled string. Where links become tappable — the attribute is
+    /// what the reader's tap looks up, so a run with an address is the whole mechanism.
+    private static func runs(
+        _ runs: [InlineRun],
+        typography: ReaderTypography,
+        attributes: [NSAttributedString.Key: Any]
+    ) -> NSAttributedString {
+        let composed = NSMutableAttributedString()
+        let baseFont = attributes[.font] as? UIFont ?? typography.body
+        for run in runs {
+            var attributes = attributes
+            if run.code {
+                attributes[.font] = typography.mono
+            } else if run.bold || run.italic {
+                attributes[.font] = typography.emphasised(baseFont, bold: run.bold, italic: run.italic)
+            }
+            if let href = run.href, let url = URL(string: href) {
+                attributes[.link] = url
+                // Coloured and underlined here rather than left to the renderer: these
+                // columns are drawn into a context, not put in a `UITextView`, so
+                // nothing else in the stack would ever make a link look like one.
+                attributes[.foregroundColor] = typography.linkColor
+                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
+            composed.append(NSAttributedString(string: run.text, attributes: attributes))
+        }
+        return composed
+    }
+
+    /// A picture as an attachment sized to the measure it is being read at.
+    ///
+    /// Scaled down to fit and never up: an author's 40-pixel inline icon blown across the
+    /// column is not what they published. The height cap is what keeps an illustration
+    /// from being taller than the page in the paginated renderer, where an attachment that
+    /// does not fit a page is one TextKit has nowhere to put.
+    private static func image(
+        _ block: ArticleBlock,
+        typography: ReaderTypography,
+        layout: ArticleLayout?,
+        spacing: CGFloat
+    ) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = typography.lineSpacing
+        style.paragraphSpacing = spacing
+        style.paragraphSpacingBefore = spacing
+        style.alignment = .center
+
+        guard let layout, let reference = block.image, let file = reference.file,
+              let width = reference.width, let height = reference.height, width > 0, height > 0,
+              let image = UIImage(contentsOfFile: layout.directory.appendingPathComponent(file).path)
+        else {
+            // Nothing to draw. The alt text stands in where there is one — it is the
+            // sentence the author wrote for exactly this case — and an empty block keeps
+            // the numbering that every anchor resolves through.
+            return NSAttributedString(
+                string: block.image?.alt ?? "",
+                attributes: [
+                    .font: typography.caption,
+                    .foregroundColor: typography.secondaryColor,
+                    .paragraphStyle: style,
+                ]
+            )
+        }
+
+        let scale = min(
+            layout.width / CGFloat(width),
+            layout.maxImageHeight / CGFloat(height),
+            1
+        )
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(
+            x: 0, y: 0,
+            width: (CGFloat(width) * scale).rounded(),
+            height: (CGFloat(height) * scale).rounded()
+        )
+        let composed = NSMutableAttributedString(attachment: attachment)
+        composed.addAttributes([.paragraphStyle: style], range: NSRange(location: 0, length: composed.length))
+        return composed
+    }
+}
+
+/// What an article's pictures have to fit inside, and where they are.
+///
+/// Passed in rather than read from the renderer, because the two renderers measure
+/// differently — a scrolling column has one width and no height worth speaking of, a page
+/// has both — and an image that ignored the second would be one the paginated reader
+/// cannot place at all.
+struct ArticleLayout: Equatable {
+    /// The measure text is set at, which is as wide as a picture may be.
+    var width: CGFloat
+    /// The tallest a picture may be drawn. A page's usable height for the paginated
+    /// renderer; a screenful for the scrolling one, where taller than that means the
+    /// reader scrolls past a picture without ever seeing it whole.
+    var maxImageHeight: CGFloat
+    /// The article's own image directory.
+    var directory: URL
 }
 
 // MARK: - Text coordinates
@@ -551,6 +894,29 @@ final class ChapterPaginator {
         }
         let offset = fragmentStart + inParagraph
         return min(max(offset, page.range.location), NSMaxRange(page.range))
+    }
+
+    /// The link under a point on a page, or nil.
+    ///
+    /// Hit against the rects the link is *drawn* in, the same rule `highlight(at:)`
+    /// answers by — and deliberately not through `offset(at:onPage:)`, which clamps an
+    /// unplaceable point to the nearest real character. That clamp is right for a
+    /// selection being dragged and wrong here: it would turn a tap in the margin beside a
+    /// line into a tap on whatever that line ends with.
+    ///
+    /// - Parameter slack: how far outside the ink still counts, in points. A link is
+    ///   often a couple of words in the middle of a sentence, which is a smaller target
+    ///   than anything else in this app that can be tapped.
+    func link(at point: CGPoint, onPage index: Int, slack: CGFloat = 4) -> URL? {
+        guard pages.indices.contains(index), !text.links.isEmpty else { return nil }
+        let page = pages[index]
+        for link in text.links where NSIntersectionRange(link.range, page.range).length > 0 {
+            let hit = rects(for: link.range, onPage: index).contains {
+                $0.insetBy(dx: -slack, dy: -slack).contains(point)
+            }
+            if hit { return link.url }
+        }
+        return nil
     }
 
     /// Rects covering a character range on one page, in the page's own coordinates.
