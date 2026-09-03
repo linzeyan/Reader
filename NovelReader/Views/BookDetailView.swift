@@ -79,7 +79,7 @@ struct BookDetailView: View {
             // An imported book has no rule and needs none: its text is already on
             // the device. Warning about a missing rule would be telling the user
             // to install something to fix a book that works.
-            if rule == nil && !current.isLocal {
+            if rule == nil && current.hasRule {
                 Section {
                     Label("book.missingRule", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
@@ -109,17 +109,21 @@ struct BookDetailView: View {
                     } label: {
                         Label("book.catalog.refresh", systemImage: "arrow.clockwise")
                     }
-                    .disabled(isRefreshing || rule == nil)
+                    // A subscription refreshes through its own service, so a missing rule
+                    // says nothing about it — gated on one, this button would be greyed
+                    // out on every feed there will ever be.
+                    .disabled(isRefreshing || (current.kind != .feed && rule == nil))
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                // A menu for a novel because there are two text formats to choose
-                // between; a button for a comic because there is one archive and a
-                // menu of one item is a tap nobody needs.
-                if current.kind == .novel {
-                    exportMenu
-                } else {
+                // A menu wherever there are two text formats to choose between; a button
+                // for a comic, because there is one archive and a menu of one item is a
+                // tap nobody needs. A subscription takes the text path — its articles
+                // are paragraphs on disk, which is what both text writers read.
+                if current.kind == .comic {
                     comicExportButton
+                } else {
+                    exportMenu
                 }
             }
         }
@@ -214,10 +218,10 @@ struct BookDetailView: View {
         //
         // One row for both kinds of mark: see `ReadingMarksView` for why they share a
         // screen rather than growing a row each.
-        // Novels only: a bookmark and a highlight are both anchored to text, and a
-        // comic has none to anchor to. Hidden rather than disabled because this one is
+        // Anything made of text: a bookmark and a highlight are both anchored to it, and
+        // a comic has none to anchor to. Hidden rather than disabled because this one is
         // not coming back — it is not a feature a comic is waiting for.
-        if current.kind == .novel {
+        if current.kind != .comic {
             NavigationLink {
                 ReadingMarksView(book: current)
             } label: {
@@ -232,8 +236,10 @@ struct BookDetailView: View {
         //
         // Absent for an imported book: every one of its chapters is already on the
         // device, so the screen would offer nothing but a way to delete the book's
-        // only copy of its own text.
-        if !current.isLocal {
+        // only copy of its own text. A subscription is in the same position for a
+        // different reason — its articles arrive with the refresh that found them, and
+        // the ones the publisher has since dropped could not be fetched again.
+        if current.hasRule {
             NavigationLink {
                 ChapterDownloadView(book: current)
             } label: {
@@ -264,7 +270,7 @@ struct BookDetailView: View {
                             book: current, position: .chapterStart(chapter.siteChapterId)
                         )
                     ) {
-                        ChapterRow(chapter: chapter, lastReadIndex: lastRead)
+                        ChapterRow(chapter: chapter, lastReadIndex: lastRead, kind: current.kind)
                     }
                 }
             }
@@ -534,11 +540,14 @@ struct BookDetailView: View {
     ///   leaves the cached list alone without an error banner. A challenge still
     ///   goes through — that one needs a human and nothing else will say so.
     private func refreshCatalog(silently: Bool = false) async {
-        guard let rule, !isRefreshing else { return }
+        // Nothing to refresh from — a book whose rule has been uninstalled, or one
+        // imported from a file. Silent, as it has always been: the screen already says
+        // the source is missing, and saying so again on every visit adds nothing.
+        guard !isRefreshing, current.kind == .feed || rule != nil else { return }
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            chapters = try await env.bookService.refreshCatalog(rule: rule, book: current)
+            chapters = try await refetched()
             // The write went to the database, not to the in-memory library, and
             // this is the moment new chapters appear — without this the shelf
             // keeps showing yesterday's count until something else reloads it.
@@ -546,6 +555,15 @@ struct BookDetailView: View {
         } catch {
             if WebFetcher.needsTheUser(error) || !silently { env.report(error) }
         }
+    }
+
+    /// Where a refresh goes, which is the one thing about this screen that a
+    /// subscription changes: it has no rule and never will, so it is read by the service
+    /// that reads feeds.
+    private func refetched() async throws -> [Chapter] {
+        if current.kind == .feed { return try await env.refreshFeed(current) }
+        guard let rule else { return chapters }
+        return try await env.bookService.refreshCatalog(rule: rule, book: current)
     }
 }
 
@@ -628,17 +646,40 @@ struct ChapterRow: View {
     /// no default: three screens draw this row, and a default would let one of them
     /// silently stop showing the marker.
     let lastReadIndex: Int?
+    /// What the book is, for the one thing the marker asks it: whether "new" wears off
+    /// after a day. It does for a novel and a comic and does not for a subscription —
+    /// see `Chapter.isNew(lastReadIndex:expiring:)`. Passed for the same reason the index
+    /// above is, and it has to agree with the shelf's count, which restates the rule in
+    /// SQL.
+    let kind: SiteRule.Kind
 
     var body: some View {
         HStack {
-            Text(chapter.title)
-                .lineLimit(1)
-                .foregroundStyle(chapter.isDownloaded ? .primary : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(chapter.title)
+                    // Two lines for an article, one for a chapter. A chapter is numbered
+                    // and a truncated one is still identifiable; a headline truncated at
+                    // half is the part of the row a reader is choosing by.
+                    .lineLimit(kind == .feed ? 2 : 1)
+                    .foregroundStyle(chapter.isDownloaded ? .primary : .secondary)
+                // Only for a subscription, where the list is chronological and *when*
+                // is half of what an article is. A novel's chapters are numbered in the
+                // order they are read, and a date beside each would be noise.
+                if kind == .feed, let publishedAt = chapter.publishedAt {
+                    Text(publishedAt, format: .dateTime.year().month().day())
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
             Spacer()
             // Deliberately the same weight as the downloaded arrow next to it:
             // this is a hint about one row, not a call to action.
-            if chapter.isNew(lastReadIndex: lastReadIndex) {
-                Text("chapter.new")
+            if chapter.isNew(lastReadIndex: lastReadIndex, expiring: kind != .feed) {
+                // Two words for one marker, because it means two things. On a novel it
+                // says the site published this while you were away; on a subscription
+                // there is no clock, so it says only that you have not read it — and an
+                // article from last year labelled "new" would be a plain untruth.
+                Text(kind == .feed ? "chapter.unread" : "chapter.new")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.red)
             }

@@ -51,7 +51,10 @@ enum DemoArt {
                 let art = CGRect(x: 40, y: 40, width: size.width - 80, height: size.height - 200)
                 draw(art, random: &random, in: context)
                 band(title, under: art, width: size.width)
-            case .novel:
+            // A subscription's real cover is the site's own icon, fetched like any other
+            // — the demo shelf has no network, and a feed is text, so it gets the same
+            // plain board a serialised novel gets.
+            case .novel, .feed:
                 boards(title: title, author: author, size: size)
             }
         }

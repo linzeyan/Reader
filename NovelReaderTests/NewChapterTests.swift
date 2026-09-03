@@ -9,6 +9,10 @@ import XCTest
 /// catalog that did not change, an update of the app itself — turns the shelf
 /// into a wall of red and the marker into decoration, so each of those is
 /// pinned separately here.
+///
+/// A subscription takes the other branch of the same rule — there the marker means
+/// unread, and it is the reading position alone that clears it — which is pinned under
+/// "Subscriptions" below.
 final class NewChapterTests: XCTestCase {
     private let day: TimeInterval = 24 * 60 * 60
 
@@ -22,6 +26,20 @@ final class NewChapterTests: XCTestCase {
 
     private func entries(_ count: Int) -> [(siteChapterId: String, title: String, url: String)] {
         entries((1...count).map(String.init))
+    }
+
+    /// The same, for the catalogs that come from a feed: dated, and merged rather than
+    /// replaced. Spaced a minute apart so publication order is the order given.
+    private func articles(
+        _ ids: [String], from start: Date
+    ) -> [(siteChapterId: String, title: String, url: String, publishedAt: Date?)] {
+        ids.enumerated().map { offset, id in
+            (
+                siteChapterId: id, title: "article \(id)",
+                url: "https://demo.test/feed/\(id)",
+                publishedAt: start.addingTimeInterval(Double(offset) * 60)
+            )
+        }
     }
 
     private func chapter(_ siteChapterId: String, of repo: LibraryRepo, bookId: String) throws -> Chapter {
@@ -38,7 +56,13 @@ final class NewChapterTests: XCTestCase {
         let book = try XCTUnwrap(repo.book(id: bookId))
         let chapters = try repo.chapters(bookId: bookId)
         let lastReadIndex = book.lastReadIndex(in: chapters)
-        return chapters.filter { $0.isNew(lastReadIndex: lastReadIndex, now: now) }
+        // The kind decides whether "new" expires, which is the one thing the two
+        // statements of this rule disagree about by design — see
+        // `Chapter.isNew(lastReadIndex:expiring:)`. Read off the book here so this helper
+        // stays what it claims to be: the per-row rule as a screen would ask it.
+        return chapters.filter {
+            $0.isNew(lastReadIndex: lastReadIndex, expiring: book.kind != .feed, now: now)
+        }
     }
 
     // MARK: - Migration
@@ -69,7 +93,11 @@ final class NewChapterTests: XCTestCase {
         }
         let stored = try XCTUnwrap(chapter)
         XCTAssertNil(stored.addedAt, "There is no honest answer for a row written before the column")
-        XCTAssertFalse(stored.isNew(lastReadIndex: try XCTUnwrap(book).lastReadIndex(in: [stored])))
+        XCTAssertFalse(
+            stored.isNew(
+                lastReadIndex: try XCTUnwrap(book).lastReadIndex(in: [stored]), expiring: true
+            )
+        )
     }
 
     // MARK: - Catalog diff
@@ -287,6 +315,66 @@ final class NewChapterTests: XCTestCase {
         XCTAssertNil(reloaded.lastReadIndex(in: try repo.chapters(bookId: book.id)))
         XCTAssertEqual(try newChapters(of: book.id, in: repo).map(\.siteChapterId), ["4"])
         XCTAssertEqual(try repo.newChapterCounts()[book.id], 1)
+    }
+
+    // MARK: - Subscriptions
+
+    /// A subscription answers a different question with the same machinery: not "did this
+    /// arrive while you were away" but "have you read it". Someone who opens the app twice
+    /// a week would find a novel's marker gone and rightly so — the chapter is not news
+    /// any more — but a feed row that reset to nothing every day would be a badge that is
+    /// blank exactly when there is most to read.
+    func testASubscriptionsUnreadCountDoesNotExpireTheWayANovelsDoes() throws {
+        let repo = try makeRepo()
+        let novel = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "novel")
+        let feed = try repo.bookmark(
+            siteId: Book.feedSiteId, siteBookId: "https://demo.test/feed.xml",
+            kind: .feed, title: "feed"
+        )
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        try repo.replaceCatalog(bookId: novel.id, entries: entries(1), now: first)
+        try repo.mergeCatalog(bookId: feed.id, entries: articles(["a"], from: first), now: first)
+        let appeared = first.addingTimeInterval(day)
+        try repo.replaceCatalog(bookId: novel.id, entries: entries(2), now: appeared)
+        try repo.mergeCatalog(
+            bookId: feed.id, entries: articles(["a", "b"], from: first), now: appeared
+        )
+
+        let aWeekOn = appeared.addingTimeInterval(7 * day)
+        let counts = try repo.newChapterCounts(now: aWeekOn)
+        XCTAssertNil(counts[novel.id], "a chapter published last week is not news")
+        XCTAssertEqual(
+            counts[feed.id], 2,
+            "both articles are still unread, the one the subscription arrived with included"
+        )
+        // The three statements of this rule again, for the kind that takes the other
+        // branch of it — the SQL exempts a feed by `book.kind`, the Swift by a parameter,
+        // and nothing but this checks that the two exemptions are the same shape.
+        XCTAssertEqual(try newChapters(of: feed.id, in: repo, now: aWeekOn).count, 2)
+        XCTAssertEqual(try repo.newChapterCount(bookId: feed.id, now: aWeekOn), 2)
+    }
+
+    /// Reading is what clears it, and the count has to fall as they go — that is the whole
+    /// of the rule once the clock is out of it.
+    func testReadingDownASubscriptionLowersItsCountOnBothSides() throws {
+        let repo = try makeRepo()
+        let feed = try repo.bookmark(
+            siteId: Book.feedSiteId, siteBookId: "https://demo.test/feed.xml",
+            kind: .feed, title: "feed"
+        )
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        try repo.mergeCatalog(
+            bookId: feed.id, entries: articles(["a", "b", "c"], from: first), now: first
+        )
+
+        try repo.updateProgress(bookId: feed.id, position: .chapterStart("b"))
+
+        let aWeekOn = first.addingTimeInterval(7 * day)
+        XCTAssertEqual(try repo.newChapterCounts(now: aWeekOn)[feed.id], 1)
+        XCTAssertEqual(try repo.newChapterCount(bookId: feed.id, now: aWeekOn), 1)
+        XCTAssertEqual(
+            try newChapters(of: feed.id, in: repo, now: aWeekOn).map(\.siteChapterId), ["c"]
+        )
     }
 
     /// The library shelf counts new chapters with one grouped query, which means the rule

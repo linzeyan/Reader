@@ -16,6 +16,7 @@ struct LibraryView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var adding = false
     @State private var picking = false
+    @State private var exportingSubscriptions = false
     /// 0…1 while an import runs, nil otherwise — so it doubles as "busy".
     @State private var importProgress: Double?
     @State private var renaming: Book?
@@ -56,7 +57,10 @@ struct LibraryView: View {
             // down a route and this decides what the end of it is.
             .navigationDestination(for: ReadingTarget.self) { target in
                 switch target.book.kind {
-                case .novel: ReaderView(book: target.book, position: target.position)
+                // An article is text, and the reader that draws text is this one. That a
+                // subscription needed no reader of its own is the whole return on filing
+                // a feed as a book and an article as a chapter.
+                case .novel, .feed: ReaderView(book: target.book, position: target.position)
                 case .comic: ComicReaderView(book: target.book, position: target.position)
                 }
             }
@@ -94,23 +98,28 @@ struct LibraryView: View {
                         Label("library.add", systemImage: "plus")
                     }
                     .accessibilityIdentifier("library.add")
-                    .disabled(env.sites.rules.isEmpty || importProgress != nil)
+                    // Rules gate the two media that are read through one. A feed address
+                    // is complete on its own, so gating the feed shelf on an empty rule
+                    // list would leave a fresh install unable to subscribe to anything.
+                    .disabled(
+                        (env.mediaMode.needsRules && env.sites.rules.isEmpty)
+                            || importProgress != nil
+                    )
                 }
-                // On both shelves, taking a different kind of file on each. What a
+                // On every shelf, taking a different kind of file on each. What a
                 // file can be imported *as* is decided by its type — text is a
-                // novel, an archive of pictures is a comic — so the shelf the
-                // reader is looking at is what says which one to offer. Offering
-                // the wrong one would take a file, succeed, and put the result on
-                // the shelf they are not looking at, which is indistinguishable
-                // from having failed.
+                // novel, an archive of pictures is a comic, a list of addresses is
+                // subscriptions — so the shelf the reader is looking at is what says
+                // which one to offer. Offering the wrong one would take a file,
+                // succeed, and put the result on the shelf they are not looking at,
+                // which is indistinguishable from having failed.
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        picking = true
-                    } label: {
-                        Label("library.import", systemImage: "square.and.arrow.down")
-                    }
-                    .accessibilityIdentifier("library.import")
-                    .disabled(importProgress != nil)
+                    // A menu on the feed shelf, because a subscription list goes both
+                    // ways: OPML is how forty feeds arrive from another reader, and a
+                    // reader who cannot get them out again is one who has to think twice
+                    // about putting them in. One control either way — the toolbar already
+                    // carries four.
+                    if env.mediaMode == .feed { subscriptionsMenu } else { importButton }
                 }
             }
             .overlay(alignment: .top) { importBanner }
@@ -128,6 +137,16 @@ struct LibraryView: View {
                 case .failure(let failure): env.report(failure)
                 }
             }
+            // Built when the sheet opens rather than held: the list is the shelf, and one
+            // taken a minute ago could be missing the feed just subscribed to.
+            .fileExporter(
+                isPresented: $exportingSubscriptions,
+                document: SubscriptionsDocument(env.subscriptionsDocument()),
+                contentType: .xml,
+                defaultFilename: "subscriptions.opml"
+            ) { result in
+                if case .failure(let error) = result { env.report(error) }
+            }
             .alert("library.rename", isPresented: renamingBinding) {
                 TextField("library.rename.placeholder", text: $draftName)
                 Button("common.cancel", role: .cancel) { renaming = nil }
@@ -139,6 +158,37 @@ struct LibraryView: View {
                 Text("library.rename.hint")
             }
         }
+    }
+
+    private var importButton: some View {
+        Button {
+            picking = true
+        } label: {
+            Label("library.import", systemImage: "square.and.arrow.down")
+        }
+        .accessibilityIdentifier("library.import")
+        .disabled(importProgress != nil)
+    }
+
+    /// The two halves of OPML. Export is disabled rather than hidden on an empty shelf:
+    /// it is not a feature that arrives with the first subscription, it is one there is
+    /// briefly nothing to do with.
+    private var subscriptionsMenu: some View {
+        Menu {
+            Button("library.opml.import", systemImage: "square.and.arrow.down") {
+                picking = true
+            }
+            .accessibilityIdentifier("library.opml.import")
+            Button("library.opml.export", systemImage: "square.and.arrow.up") {
+                exportingSubscriptions = true
+            }
+            .accessibilityIdentifier("library.opml.export")
+            .disabled(env.shelfBooks.isEmpty)
+        } label: {
+            Label("library.opml", systemImage: "square.and.arrow.up.on.square")
+        }
+        .accessibilityIdentifier("library.opml")
+        .disabled(importProgress != nil)
     }
 
     private var renamingBinding: Binding<Bool> {
@@ -224,6 +274,11 @@ struct LibraryView: View {
         switch env.mediaMode {
         case .novel: return [.plainText, .epub]
         case .comic: return [.zip]
+        // A subscription list travels as OPML, which no system declares a type for — the
+        // picker would grey out every `.opml` on the device if this asked only for `.xml`,
+        // and half the exports in the world are named `.xml` if it asked only for the
+        // dynamic type. Both, so that either file can be chosen.
+        case .feed: return [UTType(filenameExtension: "opml") ?? .xml, .xml]
         }
     }
 
@@ -234,6 +289,10 @@ struct LibraryView: View {
             switch env.mediaMode {
             case .novel: try await env.importLocalBook(from: url) { importProgress = $0 }
             case .comic: try await env.importComicArchive(from: url) { importProgress = $0 }
+            // The one import that is not a book: a list of addresses, each of which is
+            // then subscribed to for real. Determinate for the same reason a novel's is —
+            // forty feeds is forty requests, and a spinner would look stuck.
+            case .feed: try await env.importSubscriptions(from: url) { importProgress = $0 }
             }
         } catch is CancellationError {
             // Not reported. The user asked for this and the banner going away is
@@ -243,7 +302,22 @@ struct LibraryView: View {
         }
     }
 
+    /// The shelf, with the pull gesture on the one mode that has something to pull.
+    ///
+    /// Feeds only, and branched rather than made a no-op action: a pull that spins and
+    /// changes nothing is worse than no gesture at all. The novel and comic shelves refresh
+    /// a catalog at a time, from the book's own screen — forty catalogs behind one gesture
+    /// is a minute of the shared web view being unavailable to the reader who made it.
+    @ViewBuilder
     private func list(_ sections: [LibrarySection]) -> some View {
+        if env.mediaMode == .feed {
+            shelf(sections).refreshable { await env.refreshFeeds(force: true) }
+        } else {
+            shelf(sections)
+        }
+    }
+
+    private func shelf(_ sections: [LibrarySection]) -> some View {
         List {
             ForEach(sections) { section in
                 // Two branches rather than a header that conditionally draws
@@ -371,12 +445,16 @@ struct LibraryView: View {
     /// they had all gone missing, when what is empty is the half being looked at.
     private var emptyCopy: (heading: LocalizedStringKey, body: LocalizedStringKey, needsSource: Bool) {
         let mode = env.mediaMode
-        guard !env.sites.rules(of: mode).isEmpty else {
+        // A feed shelf is never waiting on a source: an address is the whole of what it
+        // takes to subscribe, so its empty state offers the button rather than sending
+        // the reader to settings for a rule it will never use.
+        if mode.needsRules, env.sites.rules(of: mode).isEmpty {
             return (mode.noSourcesTitleKey, mode.noSourcesHintKey, true)
         }
         switch mode {
         case .novel: return ("library.empty.books", "library.empty.hint", false)
         case .comic: return ("library.empty.comic.books", "library.empty.comic.hint", false)
+        case .feed: return ("library.empty.feed.title", "library.empty.feed.hint", false)
         }
     }
 
@@ -479,6 +557,28 @@ struct BookCover: View {
                 file = await env.covers.cover(for: book)
                 resolvedFor = book.id
             }
+    }
+}
+
+/// The subscription list as a file the save sheet can write.
+///
+/// Held in memory, unlike a book export, which streams through a temporary file: an OPML
+/// of forty feeds is a few kilobytes and a novel is forty megabytes.
+struct SubscriptionsDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.xml] }
+
+    private let text: String
+
+    init(_ text: String) { self.text = text }
+
+    init(configuration: ReadConfiguration) throws {
+        // Never read back. Importing a list is `OPML.subscriptions(in:)`, which takes the
+        // file the picker handed over rather than a document type declared for writing.
+        throw CocoaError(.fileReadUnsupportedScheme)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
     }
 }
 

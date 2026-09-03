@@ -71,6 +71,11 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings.storage")
                     NavigationLink("settings.cache") { CacheView() }
                         .accessibilityIdentifier("settings.cache")
+                    // Here rather than beside the feed shelf: it is the one setting in
+                    // the app that deletes things the reader did not ask it to, and this
+                    // is the section people come to when they are looking for space.
+                    NavigationLink("retention.title") { FeedRetentionView() }
+                        .accessibilityIdentifier("settings.retention")
                 }
 
                 Section {

@@ -368,6 +368,158 @@ struct LibraryRepo {
         }
     }
 
+    /// Adds a feed's newly published articles to what is already stored, and removes
+    /// nothing.
+    ///
+    /// The one place a feed's catalog behaves unlike a novel's, and it has to: a feed
+    /// document is a *window*, not an index. A site's catalog page lists every chapter
+    /// the book has, so a chapter missing from it is a chapter the site withdrew and
+    /// `replaceCatalog` is right to drop it. A feed lists the last ten or fifty items and
+    /// nothing else — run through `replaceCatalog`, a reader's whole archive would be
+    /// deleted every time the publisher posted, taking the downloaded text, the
+    /// bookmarks and the highlights with it, and the article they were half way through
+    /// would vanish under them.
+    ///
+    /// Reading order is chronological, oldest first, so that a feed behaves like a book
+    /// that gains chapters: new articles land at the end, which is what makes the reading
+    /// position, the unread count and "next chapter" work for a subscription without one
+    /// line of new code in any of them.
+    ///
+    /// Ties are broken by id rather than by the order the feed listed them. Publishers
+    /// batch-publish with identical timestamps and then reorder freely between two
+    /// fetches, and an order that is *stable* matters far more here than one that is
+    /// exactly right: `index` is what every mark resolves through, so an order that
+    /// changed on refresh would slide the reader's place onto a neighbouring article.
+    ///
+    /// - Parameter entries: `publishedAt` is nil for an item whose feed gave no date. It
+    ///   is stamped `now` on insert and never rewritten afterwards, so an undated article
+    ///   holds the moment it first arrived — which is the only honest thing known about
+    ///   when it appeared, and, unlike re-stamping it, does not march it up the list on
+    ///   every refresh.
+    func mergeCatalog(
+        bookId: String,
+        entries: [(siteChapterId: String, title: String, url: String, publishedAt: Date?)],
+        now: Date = Date()
+    ) throws {
+        try writer.write { db in
+            let stored = try Book.fetchOne(db, key: bookId)
+
+            // Everything already here moves into the negative range *before* a single
+            // article is written, and every new one is parked below that. This is
+            // `replaceCatalog`'s shuffle, and it is needed here for a second reason on
+            // top of that one: `chapter_book_index` is unique and SQLite checks it row by
+            // row, so two articles arriving in the same refresh cannot both be inserted
+            // holding some placeholder number, and no row can take a final number while
+            // another still holds it. An article dated in the middle of the order — which
+            // for a feed is any backdated post — is exactly the case a direct write fails
+            // on, and it fails the whole refresh, silently, forever.
+            try db.execute(
+                sql: #"UPDATE "chapter" SET "index" = -1 - "index" WHERE "bookId" = ?"#,
+                arguments: [bookId]
+            )
+            var parking = try Int.fetchOne(
+                db,
+                sql: #"SELECT MIN("index") FROM "chapter" WHERE "bookId" = ?"#,
+                arguments: [bookId]
+            ) ?? 0
+
+            for entry in entries {
+                let id = Chapter.makeId(bookId: bookId, siteChapterId: entry.siteChapterId)
+                if var existing = try Chapter.fetchOne(db, key: id) {
+                    existing.title =
+                        Chapter.fullerTitle(existing.title, extending: entry.title) ?? entry.title
+                    existing.url = entry.url
+                    // A date already stored wins over an absent one. It is only ever
+                    // absent because the publisher gives none, and the stored value is
+                    // then the arrival time recorded the first time this ran.
+                    existing.publishedAt = entry.publishedAt ?? existing.publishedAt
+                    try existing.update(db)
+                } else {
+                    parking -= 1
+                    // Stamped on every insert, the first fetch included. A subscription's
+                    // unread count is a matter of the reading position alone — see
+                    // `Chapter.isNew(lastReadIndex:expiring:)` — so this column is not
+                    // what decides it here, and the honest thing it can say is when the
+                    // article first reached this device.
+                    try Chapter(
+                        id: id, bookId: bookId, siteChapterId: entry.siteChapterId,
+                        index: parking, title: entry.title, url: entry.url,
+                        addedAt: now, publishedAt: entry.publishedAt ?? now, downloadedAt: nil
+                    ).insert(db)
+                }
+            }
+
+            // Oldest first, so a feed reads like a book that gains chapters. Nulls cannot
+            // occur here — every row this function writes gets a date — but SQLite sorts
+            // them first, which would put a novel chapter that somehow reached this
+            // function at the top rather than in an unreadable middle.
+            let ordered = try Chapter.fetchAll(db, sql: """
+                SELECT * FROM "chapter" WHERE "bookId" = ?
+                ORDER BY "publishedAt", "siteChapterId"
+                """, arguments: [bookId])
+            for (index, chapter) in ordered.enumerated() {
+                var renumbered = chapter
+                renumbered.index = index
+                try renumbered.update(db)
+            }
+
+            if var book = stored {
+                book.catalogUpdatedAt = now
+                try book.update(db)
+            }
+        }
+    }
+
+    /// Records that the index was read and found unchanged.
+    ///
+    /// For the one answer that carries no catalog with it: a `304`. The read really
+    /// happened and really found nothing, so the freshness this stamps is exactly as
+    /// true as the one `mergeCatalog` writes — and without it a feed that publishes
+    /// weekly would look stale every day and be asked again on every visit, which is
+    /// what conditional requests exist to stop.
+    func touchCatalog(bookId: String, now: Date = Date()) throws {
+        try writer.write { db in
+            guard var book = try Book.fetchOne(db, key: bookId) else { return }
+            book.catalogUpdatedAt = now
+            try book.update(db)
+        }
+    }
+
+    // MARK: - Feed fetch state
+
+    /// What this device sent last time, or nil for a feed it has never asked for — which
+    /// is the same as having no validators, and asks for the whole document.
+    func feedFetchState(bookId: String) throws -> FeedFetchState? {
+        try writer.read { db in try FeedFetchState.fetchOne(db, key: bookId) }
+    }
+
+    /// Records the validators a response carried, replacing whatever was there.
+    ///
+    /// Written even for a `304`, which is why `checkedAt` is on the row: a check that
+    /// found nothing is still a check, and a feed that has published nothing this month
+    /// must not look like one nobody has looked at this month.
+    func saveFeedFetchState(_ state: FeedFetchState) throws {
+        try writer.write { db in try state.save(db) }
+    }
+
+    /// Drops articles a subscription is no longer keeping.
+    ///
+    /// Rows, not just their text: for a feed the row is the article — the publisher's
+    /// window has long since moved past these, so a row with its text deleted is a
+    /// headline that opens onto nothing and can never be filled in again. Which articles
+    /// these are is `FeedRetention.purgeable`'s to decide, and the files are the caller's
+    /// to delete first (see `FeedService.purge`).
+    ///
+    /// Numbering is left with holes in it. `index` is only ever compared, never counted
+    /// on to be contiguous, and the next refresh renumbers the whole catalog anyway.
+    func removeChapters(bookId: String, siteChapterIds: [String]) throws {
+        guard !siteChapterIds.isEmpty else { return }
+        try writer.write { db in
+            let ids = siteChapterIds.map { Chapter.makeId(bookId: bookId, siteChapterId: $0) }
+            _ = try Chapter.deleteAll(db, keys: ids)
+        }
+    }
+
     /// Writes a chapter's whole name over the truncated one its catalog gave it.
     ///
     /// Its own row rather than something the reader holds in memory: the name has to
@@ -405,6 +557,15 @@ struct LibraryRepo {
     /// and the comparison needs the number, which only that chapter's own row has. A
     /// null `lastRead."index"` therefore covers both halves of `lastReadIndex(in:)`
     /// being nil — never opened, and a position naming a chapter the site has dropped.
+    ///
+    /// A subscription is exempt from the arrival clause entirely, and from nothing else.
+    /// For a novel "new" is a claim about recency — a chapter published last month is not
+    /// news, it is simply one the reader has not reached, which their position already
+    /// tells them. A feed is the opposite: unread *is* the question it is read for, an
+    /// article from last month that the reader has not got to is exactly the thing the
+    /// count is meant to say, and one that expired after a day would leave a shelf row
+    /// saying nothing to anyone who looks twice a week. The position half is shared, and
+    /// is what makes the count fall as they read.
     func newChapterCounts(now: Date = .now) throws -> [String: Int] {
         // `> cutoff` carries the null check with it — a null addedAt compares to null,
         // never to true — so the expiry and "was it ever stamped" stay one condition.
@@ -417,10 +578,10 @@ struct LibraryRepo {
                 LEFT JOIN chapter AS lastRead
                        ON lastRead."bookId" = book."id"
                       AND lastRead."siteChapterId" = book."lastReadSiteChapterId"
-                WHERE chapter."addedAt" > ?
+                WHERE (chapter."addedAt" > ? OR book."kind" = ?)
                   AND (lastRead."index" IS NULL OR chapter."index" > lastRead."index")
                 GROUP BY chapter."bookId"
-                """, arguments: [cutoff])
+                """, arguments: [cutoff, SiteRule.Kind.feed.rawValue])
             return rows.reduce(into: [String: Int]()) { counts, row in
                 counts[row["bookId"] as String] = row["newCount"] as Int
             }
@@ -476,9 +637,9 @@ struct LibraryRepo {
                        ON lastRead."bookId" = book."id"
                       AND lastRead."siteChapterId" = book."lastReadSiteChapterId"
                 WHERE chapter."bookId" = ?
-                  AND chapter."addedAt" > ?
+                  AND (chapter."addedAt" > ? OR book."kind" = ?)
                   AND (lastRead."index" IS NULL OR chapter."index" > lastRead."index")
-                """, arguments: [bookId, cutoff]) ?? 0
+                """, arguments: [bookId, cutoff, SiteRule.Kind.feed.rawValue]) ?? 0
         }
     }
 

@@ -27,12 +27,15 @@ struct AddBookSheet: View {
             Form {
                 if lines.isEmpty {
                     inputSection
-                    sourcesSection
+                    // Nothing to list on the feed shelf: an address is the whole of what
+                    // it takes, so a section headed "sources" would be an empty box
+                    // implying something is missing.
+                    if env.mediaMode != .feed { sourcesSection }
                 } else {
                     progressSection
                 }
             }
-            .navigationTitle("library.add")
+            .navigationTitle(env.mediaMode == .feed ? "library.subscribe" : "library.add")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { leadingButton }
@@ -54,7 +57,7 @@ struct AddBookSheet: View {
                 .keyboardType(.URL)
                 .accessibilityIdentifier("add.url")
         } footer: {
-            Text("library.add.hint")
+            Text(env.mediaMode == .feed ? "library.subscribe.hint" : "library.add.hint")
         }
     }
 
@@ -207,6 +210,12 @@ struct AddBookSheet: View {
     }
 
     private func add(_ address: String) async -> LineOutcome {
+        // A subscription is added by address alone, so it does not go looking for a rule
+        // to match — and the shelf's mode is what decides, unlike the two media below.
+        // Those are told apart by the rule an address matches; a feed address matches
+        // nothing, and a novel address pasted onto this shelf would silently become a
+        // subscription to a page that is not one.
+        if env.mediaMode == .feed { return await subscribe(address) }
         guard let url = URL(string: address), let rule = env.sites.rule(matching: url) else {
             return .failed(String(localized: "library.add.error.noRule"))
         }
@@ -221,6 +230,22 @@ struct AddBookSheet: View {
             return WebFetcher.needsTheUser(error)
                 ? .needsTheUser(error)
                 : .failed(error.localizedDescription)
+        }
+    }
+
+    /// One pasted address, subscribed to.
+    ///
+    /// No challenge path, unlike the rule-driven one: a feed is fetched over
+    /// `URLSession`, which nothing can hand to the user to solve. A host that turns the
+    /// request away is a failure on this line and the rest of the batch carries on —
+    /// which is what a reader pasting twenty addresses out of another reader wants,
+    /// since one of them being dead should not cost them the other nineteen.
+    private func subscribe(_ address: String) async -> LineOutcome {
+        do {
+            let book = try await env.subscribeToFeed(address)
+            return .added(book.shownName)
+        } catch {
+            return .failed(error.localizedDescription)
         }
     }
 }

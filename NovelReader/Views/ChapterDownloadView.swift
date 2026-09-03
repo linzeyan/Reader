@@ -86,7 +86,7 @@ struct ChapterDownloadView: View {
                 // every chapter that lands.
                 let lastReadIndex = book.lastReadIndex(in: chapters)
                 ForEach(filtered) { chapter in
-                    ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex)
+                    ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex, kind: book.kind)
                         .tag(chapter.id)
                         // Here rather than inside `ChapterRow`, which the book screen
                         // also draws: this names a row on *this* screen, for a walk

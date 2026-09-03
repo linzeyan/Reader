@@ -94,9 +94,17 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     /// means a daily reader keeps hitting an end that is not the end.
     static let catalogMaxAge: TimeInterval = 24 * 60 * 60
 
+    /// Half an hour for a subscription, which is a different shape of content and a
+    /// different cost. A feed can publish several times an hour, and asking a reader who
+    /// opened the app to see what is new to instead see this morning's list would be
+    /// answering the wrong question — while the request itself is conditional (see
+    /// `FeedFetchState`), so the usual answer is a few hundred bytes saying "nothing".
+    static let feedMaxAge: TimeInterval = 30 * 60
+
     var isCatalogStale: Bool {
         guard let catalogUpdatedAt else { return true }
-        return Date().timeIntervalSince(catalogUpdatedAt) > Self.catalogMaxAge
+        let age = kind == .feed ? Self.feedMaxAge : Self.catalogMaxAge
+        return Date().timeIntervalSince(catalogUpdatedAt) > age
     }
 
     /// What the library actually shows.
@@ -147,7 +155,24 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     /// offer to refetch from it have to ask `isLocal` first.
     static let localSiteId = "local"
 
+    /// The reserved source for subscriptions, whose `siteBookId` is the feed's own
+    /// address.
+    ///
+    /// Reserved the same way and for the same reason: a feed describes itself, so there
+    /// is no rule file behind it and never will be. What it is *not* is a second kind of
+    /// local book — a subscription is fetched, refreshed and synced through iCloud like
+    /// any bookmark, and only `isLocal` marks the books that exist nowhere but here.
+    static let feedSiteId = "feed"
+
     var isLocal: Bool { siteId == Self.localSiteId }
+
+    /// Whether a `SiteStore` could have anything to say about this book.
+    ///
+    /// The question every screen that shows a source name, offers to re-fetch from one,
+    /// or warns that one has been uninstalled is really asking. It used to be `!isLocal`,
+    /// which was the same question while there were only two answers; a subscription is
+    /// the third, and it has no rule either.
+    var hasRule: Bool { !isLocal && kind != .feed }
 }
 
 /// One chapter of a book. Chapter *text* is never stored here — only the index
@@ -170,6 +195,15 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     /// the first fetch deliberately marks nothing. Also `nil` for every chapter
     /// indexed before this column existed, which is the same honest answer.
     var addedAt: Date?
+    /// When the publisher says this article appeared, for the one medium that has such a
+    /// thing: a feed.
+    ///
+    /// Null for every novel and comic chapter, and that is not a gap to be filled — a
+    /// chapter of a novel has no publication date of its own, only a place in the book.
+    /// Which is exactly the difference this column exists for: a novel's reading order is
+    /// its catalog's, while a feed has no catalog and its order *is* this date. See
+    /// `LibraryRepo.mergeCatalog`.
+    var publishedAt: Date?
     /// Non-nil exactly when a local text file exists (requirement 4.2).
     var downloadedAt: Date?
 
@@ -198,8 +232,28 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     ///   as `Book.lastReadIndex(in:)` resolves it. Nil means they have no place in this
     ///   catalog — never opened, or the site dropped the chapter they were in — and
     ///   then every recently added chapter is ahead of them.
-    func isNew(lastReadIndex: Int?, now: Date = .now) -> Bool {
-        guard let addedAt, now.timeIntervalSince(addedAt) < Self.newWindow else { return false }
+    /// - Parameter expiring: whether "new" wears off. True for a novel and a comic, for
+    ///   everything the paragraphs above say. False for a subscription, where unread *is*
+    ///   the question the medium is read for: an article from last month that the reader
+    ///   has not reached is exactly what the marker is meant to point at, and one that
+    ///   expired after a day would say nothing at all to someone who looks twice a week.
+    ///   Spelled at every call site rather than defaulted, because the shelf's count
+    ///   restates this rule in SQL and the two silently disagreeing is the failure this
+    ///   parameter exists to prevent.
+    ///
+    ///   It drops the arrival stamp with the clock, not just the deadline: for a
+    ///   subscription "unread" is purely a matter of the reading position, so a feed
+    ///   added today offers everything the first fetch brought back. That is the point of
+    ///   subscribing, and it is the one place this differs from a novel, where a first
+    ///   catalog of three hundred chapters marked new would be noise.
+    func isNew(lastReadIndex: Int?, expiring: Bool, now: Date = .now) -> Bool {
+        if expiring {
+            // Recent *and* stamped: a chapter indexed before the column existed has no
+            // honest arrival date, and reading one as "now" would mark a whole library.
+            guard let addedAt, now.timeIntervalSince(addedAt) < Self.newWindow else {
+                return false
+            }
+        }
         guard let lastReadIndex else { return true }
         return index > lastReadIndex
     }

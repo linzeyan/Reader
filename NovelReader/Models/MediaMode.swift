@@ -17,17 +17,29 @@ extension MediaMode: Identifiable {
         switch self {
         case .novel: return "media.novel"
         case .comic: return "media.comic"
+        case .feed: return "media.feed"
         }
     }
+
+    /// Whether this medium is read through installed rule files.
+    ///
+    /// False for exactly one mode, and every screen that offers to add something has to
+    /// ask: a novel or a comic address is useless without a rule that reads that site,
+    /// while a feed address is complete on its own. Screens that gate their "add" button
+    /// on having a source would otherwise gate the feed shelf on rules it never uses.
+    var needsRules: Bool { self != .feed }
 
     /// What a screen says when this medium has no sources installed, and where to get
     /// one. On the shared type because two screens ask — the shelf and the search — and
     /// one of them answering "尚未加入來源" while the other says "尚未加入漫畫來源"
     /// would read as two different problems with two different fixes.
+    /// Never asked of `.feed`, which has no sources to be missing — `needsRules` is the
+    /// guard, and the empty feed shelf says "subscribe to something" instead.
     var noSourcesTitleKey: LocalizedStringKey {
         switch self {
         case .novel: return "library.empty.title"
         case .comic: return "library.empty.comic.title"
+        case .feed: return "library.empty.feed.title"
         }
     }
 
@@ -35,6 +47,7 @@ extension MediaMode: Identifiable {
         switch self {
         case .novel: return "library.empty.needSource"
         case .comic: return "library.empty.comic.needSource"
+        case .feed: return "library.empty.feed.hint"
         }
     }
 
@@ -47,10 +60,19 @@ extension MediaMode: Identifiable {
     /// toolbar size as two open books, near enough identical that the switch read as one
     /// smudged glyph. A closed book against a stack of pictures is the difference the
     /// two media actually have.
+    /// A third glyph has to clear two bars, and the second one eliminates most of the
+    /// candidates: it must be distinguishable from *both* of the others at toolbar size,
+    /// and `selectedIcon` below requires it to have a `.fill` variant. The broadcast
+    /// symbols — `dot.radiowaves.up.forward`, `antenna.radiowaves.left.and.right` — are
+    /// the obvious pictures of a feed and none of them are filled, so the on side of the
+    /// switch would have drawn nothing at all. `newspaper` is filled, is what every other
+    /// reader uses for this, and carries column texture and a folded corner that a plain
+    /// closed book has none of.
     var icon: String {
         switch self {
         case .novel: return "book.closed"
         case .comic: return "photo.stack"
+        case .feed: return "newspaper"
         }
     }
 

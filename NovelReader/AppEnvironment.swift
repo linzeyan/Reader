@@ -29,6 +29,10 @@ final class AppEnvironment {
     let covers: CoverService
     let sites: SiteStore
     let bookService: BookService
+    /// Subscriptions. Its own service rather than a branch inside `BookService` because
+    /// the two have nothing in common below the surface: one drives a web view through a
+    /// rule, the other reads a document off `URLSession` that describes itself.
+    let feeds: FeedService
     let search: SearchService
     let downloader: DownloadManager
     /// Shared by every unattended fetch — downloads and the reader's read-ahead.
@@ -37,6 +41,7 @@ final class AppEnvironment {
     let monitor: NetworkMonitor
     let downloadSettings: DownloadSettings
     let librarySettings: LibrarySettings
+    let retentionSettings: FeedRetentionSettings
     let localImporter: LocalBookImporter
     let comicImporter: ComicArchiveImporter
     let backgroundDownloads: BackgroundDownloads
@@ -139,6 +144,9 @@ final class AppEnvironment {
         )
         let bookService = BookService(fetcher: fetcher, repo: repo)
         self.bookService = bookService
+        self.feeds = FeedService(
+            repo: repo, downloads: self.downloads, fetcher: fetcher
+        )
         self.search = SearchService(fetcher: fetcher)
         let pacer = RequestPacer()
         self.pacer = pacer
@@ -160,6 +168,7 @@ final class AppEnvironment {
         self.downloadSettings = downloadSettings
         let librarySettings = LibrarySettings()
         self.librarySettings = librarySettings
+        self.retentionSettings = FeedRetentionSettings()
         self.mediaMode = librarySettings.defaultMediaMode
         let backgroundDownloads = BackgroundDownloads(
             downloader: downloader,
@@ -345,6 +354,164 @@ final class AppEnvironment {
         }
         reloadLibrary()
         return book
+    }
+
+    /// Subscribes to a feed and puts it on the shelf.
+    ///
+    /// Alongside `addBook` rather than inside it: what the two share is the last two
+    /// lines, and everything above them differs — a book is found by matching a pasted
+    /// address against installed rules, while a feed *is* the address. The reload and the
+    /// push to iCloud are here for the reason they are there, which is that both are
+    /// facts about the library rather than about the fetch that produced them.
+    @discardableResult
+    func subscribeToFeed(_ address: String) async throws -> Book {
+        let book = try await feeds.subscribe(to: address)
+        cloud.push(book)
+        reloadLibrary()
+        return book
+    }
+
+    /// Reads a subscription again.
+    ///
+    /// Failures are the caller's to report, unlike a catalog refresh's: the two callers
+    /// are a screen the reader is looking at and a sweep of the whole shelf, and a sweep
+    /// that raised a banner per unreachable feed would bury the app in them the first
+    /// time a train went into a tunnel.
+    ///
+    /// The library reload is the caller's too, for the same reason in reverse — the sweep
+    /// does it once at the end rather than re-running the shelf's four queries per feed.
+    @discardableResult
+    func refreshFeed(_ book: Book) async throws -> [Chapter] {
+        try await feeds.refresh(book)
+    }
+
+    /// Takes in a subscription list exported from another feed reader.
+    ///
+    /// Each address is subscribed to for real — fetched, named from its own document,
+    /// its first articles stored — because that is what makes the shelf immediately
+    /// readable rather than forty rows waiting for something. It is also why this is
+    /// slow enough to report progress: forty feeds is forty requests.
+    ///
+    /// A feed that will not answer is still added, from the name the file gave it. The
+    /// alternative is losing subscriptions to a bad minute on a train, silently, from a
+    /// file the reader may have deleted by then — and a row with no articles yet is a row
+    /// the next refresh fills in.
+    ///
+    /// - Returns: how many subscriptions the shelf gained, which is what the reader is
+    ///   told. Feeds already on the shelf are re-read rather than duplicated — `Book.id`
+    ///   is the address — so importing the same file twice is not a way to make a mess.
+    @discardableResult
+    func importSubscriptions(
+        from url: URL, progress: @escaping (Double) -> Void = { _ in }
+    ) async throws -> Int {
+        // Files handed over by the document picker live outside the sandbox.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let data = try Data(contentsOf: url)
+        let subscriptions = OPML.subscriptions(in: data)
+        guard !subscriptions.isEmpty else { throw OPMLError.noSubscriptions }
+
+        let before = Set(books.filter { $0.kind == .feed }.map(\.id))
+        defer { reloadLibrary() }
+        for (index, subscription) in subscriptions.enumerated() {
+            try Task.checkCancellation()
+            progress(Double(index) / Double(subscriptions.count))
+            do {
+                try await feeds.subscribe(to: subscription.address)
+            } catch {
+                guard let address = FeedService.url(from: subscription.address) else { continue }
+                try? repo.bookmark(
+                    siteId: Book.feedSiteId, siteBookId: address.absoluteString, kind: .feed,
+                    title: subscription.title ?? address.host() ?? address.absoluteString
+                )
+            }
+        }
+        progress(1)
+        let after = Set((try? repo.allBooks())?.filter { $0.kind == .feed }.map(\.id) ?? [])
+        return after.subtracting(before).count
+    }
+
+    /// The shelf's subscriptions as an OPML file's worth of text.
+    ///
+    /// The stored title, not the feed's own: a reader who renamed a subscription meant it,
+    /// and the renaming is the only thing in this list that is theirs rather than the
+    /// publisher's.
+    ///
+    /// By name rather than in shelf order, which is by when each was added. This file is
+    /// read by people as often as by programs — it is what someone opens to check what
+    /// they are about to hand over — and "most recently subscribed first" is an order only
+    /// this app knows the meaning of.
+    func subscriptionsDocument() -> String {
+        OPML.document(
+            title: String(localized: "library.opml.title"),
+            subscriptions: books
+                .filter { $0.kind == .feed }
+                .map { OPML.Subscription(title: $0.shownName, address: $0.siteBookId) }
+                .sorted {
+                    ($0.title ?? $0.address).localizedStandardCompare($1.title ?? $1.address)
+                        == .orderedAscending
+                }
+        )
+    }
+
+    enum OPMLError: LocalizedError {
+        /// A file that parsed but named no feeds — the commonest being an OPML of
+        /// folders, and the second commonest being some other XML entirely.
+        case noSubscriptions
+
+        var errorDescription: String? {
+            switch self {
+            case .noSubscriptions: return String(localized: "library.opml.error.empty")
+            }
+        }
+    }
+
+    /// Reads every subscription that has not been read lately.
+    ///
+    /// One at a time. Sequential because the expensive half of a refresh is the shared web
+    /// view turning articles into paragraphs, which serialises anyway — asking for forty at
+    /// once would only mean forty stalled requests instead of one running one.
+    ///
+    /// Silent throughout, on both paths. Coming to the front, nobody asked; pulled by hand,
+    /// a shelf of forty subscriptions on a train would answer one gesture with a stack of
+    /// banners naming hosts. Either way the shelf itself reports the outcome — the rows
+    /// that gained articles say so.
+    ///
+    /// - Parameter force: whether to include subscriptions read recently enough that
+    ///   `isCatalogStale` says no. False when the app comes to the front, where the whole
+    ///   point is not to re-fetch forty feeds because someone switched apps twice; true for
+    ///   a pull on the shelf, which is a reader saying "now" — and a pull that answered
+    ///   "you already have it" by doing nothing would just be pulled again.
+    func refreshFeeds(force: Bool = false) async {
+        let due = books.filter { $0.kind == .feed && (force || $0.isCatalogStale) }
+        guard !due.isEmpty else { return }
+        defer { reloadLibrary() }
+        for book in due {
+            if Task.isCancelled { return }
+            _ = try? await refreshFeed(book)
+        }
+    }
+
+    /// Deletes the articles each subscription is no longer keeping.
+    ///
+    /// After the refresh and never before it: what the publisher still lists is the line
+    /// nothing is deleted past, and the refresh is what re-draws that line. Run on the
+    /// same trigger — the app being opened — and on no other, for the reason the refresh
+    /// is: there is no timer and no background schedule anywhere in this feature.
+    ///
+    /// Silent, and deliberately not reported. Nothing here is a failure the reader could
+    /// act on, and a banner saying "deleted 30 articles" every launch would be the app
+    /// congratulating itself for tidying up.
+    func purgeExpiredArticles() {
+        let policy = retentionSettings.policy
+        guard policy.keepCount > 0 else { return }
+        var purged = 0
+        for book in books where book.kind == .feed {
+            purged += (try? feeds.purge(book, policy: policy)) ?? 0
+        }
+        // Only when something went. The shelf's counts are read from the database, and a
+        // reload that changes nothing still re-runs four queries over the whole library.
+        if purged > 0 { reloadLibrary() }
     }
 
     /// Imports a `.txt` or `.epub` the user picked as a book.
@@ -570,6 +737,14 @@ final class AppEnvironment {
     /// may well have changed while the app was away, which is precisely when the
     /// Wi-Fi-only check earns its keep.
     func becomeActive() {
+        // Coming back to the app is opening it, as far as a subscription is concerned —
+        // an app left in the background for a day and returned to is the commonest way
+        // this one is "opened" at all. Gated on staleness like the launch sweep, so
+        // switching away to copy an address and straight back costs nothing.
+        Task {
+            await refreshFeeds()
+            purgeExpiredArticles()
+        }
         guard resumeWhenActive else { return }
         resumeWhenActive = false
         requestResume()

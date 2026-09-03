@@ -396,6 +396,48 @@ final class AppDatabase {
             }
         }
 
+        // What a feed adds: when the publisher says an article appeared, and what one
+        // device needs to ask a server politely whether anything has changed.
+        //
+        // `publishedAt` goes on `chapter` rather than into a table of its own because a
+        // feed's article *is* a chapter — that is the whole of the design, the same way a
+        // comic's page is one — and a table beside it would be a second row per article to
+        // keep in step with the first. It is null for every novel and comic chapter in
+        // existence and will stay that way: a chapter of a novel has no publication date,
+        // and backfilling one would put a number in a column that means nothing.
+        //
+        // Unlike every column added before it, this one is also *read* for ordering. A
+        // feed's reading order is chronological — see `LibraryRepo.mergeCatalog` — where a
+        // novel's is the catalog's own, so this is the only thing a feed has to sort by.
+        //
+        // `feedFetchState` is deliberately not columns on `book`: `book` rows travel
+        // through iCloud (see `CloudSync`), and an ETag is a fact about one device's last
+        // request. Synced, the iPad would tell a server "I already have this" about bytes
+        // it has never seen, get a 304, and show an empty feed with no way to explain
+        // itself. It cascades with the book, like every other table that points at one.
+        migrator.registerMigration("v10.feeds") { db in
+            try db.alter(table: Chapter.databaseTableName) { t in
+                t.add(column: "publishedAt", .datetime)
+            }
+
+            try db.create(table: FeedFetchState.databaseTableName) { t in
+                t.primaryKey("bookId", .text)
+                    .references(Book.databaseTableName, onDelete: .cascade)
+                t.column("etag", .text)
+                t.column("lastModified", .text)
+                t.column("checkedAt", .datetime)
+            }
+        }
+
+        // What the publisher's last document still listed, which retention needs and
+        // nothing else does: an article deleted while the feed is still handing it out
+        // comes straight back on the next refresh, unread, for ever.
+        migrator.registerMigration("v11.feedWindow") { db in
+            try db.alter(table: FeedFetchState.databaseTableName) { t in
+                t.add(column: "windowOldestAt", .datetime)
+            }
+        }
+
         return migrator
     }
 }

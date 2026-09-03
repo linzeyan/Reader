@@ -151,7 +151,10 @@ enum DemoSeed {
         for index in 0..<demo.downloaded {
             let chapter = index + 1
             switch demo.kind {
-            case .novel:
+            // A subscription's articles are text and are stored the same way, so the two
+            // share every branch in this file. The staged shelf holds no feed today —
+            // these are here so that adding one is a fixture and not a code change.
+            case .novel, .feed:
                 try? env.downloads.save(
                     paragraphs: chapterText(demo, chapter: chapter),
                     book: book, siteChapterId: "\(chapter)"
@@ -182,7 +185,7 @@ enum DemoSeed {
             // their own renderer does, so the number on the shelf and the one in the
             // reader's capsule are the same number.
             switch demo.kind {
-            case .novel:
+            case .novel, .feed:
                 let text = chapterText(demo, chapter: chapter + 1)
                 let anchor = TextAnchor(paragraph: text.count / 2, characterOffset: 0)
                 try? env.repo.updateProgress(
@@ -211,7 +214,8 @@ enum DemoSeed {
         // No episode names: comic catalogs on the surveyed sites are numbered and
         // nothing else, and inventing titles would be staging a catalog no site has.
         case .comic: return "第 \(chapter) 話"
-        case .novel: return "第\(chapter)章　\(chapterTitles[(chapter - 1) % chapterTitles.count])"
+        case .novel, .feed:
+            return "第\(chapter)章　\(chapterTitles[(chapter - 1) % chapterTitles.count])"
         }
     }
 

@@ -153,7 +153,7 @@ struct ComicReaderView: View {
                         Task { await model?.jump(toChapterAt: chapter.index) }
                     } label: {
                         HStack {
-                            ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex)
+                            ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex, kind: book.kind)
                             if chapter.index == model?.currentChapterIndex {
                                 Image(systemName: "chevron.right")
                                     .font(.caption).foregroundStyle(.tint)

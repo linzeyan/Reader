@@ -115,7 +115,18 @@ struct RootView: View {
         // Deliberately here rather than in `AppEnvironment.init`: this is the first
         // moment the app is on screen, and the iCloud merge it starts used to run
         // between the launch and the first frame.
-        .task { env.cloud.startSyncing() }
+        .task {
+            env.cloud.startSyncing()
+            // Subscriptions are checked when the app is opened and at no other time:
+            // no timer, no background schedule. A feed reader that polls is a feed
+            // reader spending someone's battery on articles nobody is looking at, and
+            // "what is new since I last looked" is a question only asked by looking.
+            // `isCatalogStale` keeps a second launch a minute later from asking again.
+            await env.refreshFeeds()
+            // After the refresh, because what the publisher still lists is the line
+            // retention will not delete past, and the refresh is what re-draws it.
+            env.purgeExpiredArticles()
+        }
         // Only the two ends of the transition. `.inactive` also arrives for a
         // pulled-down notification centre, and stopping a download for that
         // would be stopping it while the user is still holding the phone.

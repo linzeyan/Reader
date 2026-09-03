@@ -19,6 +19,7 @@ struct ReaderView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @State private var model: ReaderModel?
     @State private var showControls = false
     @State private var showCatalog = false
@@ -446,6 +447,14 @@ struct ReaderView: View {
                 Button("common.back") { dismiss() }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("reader.failure.back")
+                // The one failure with a real answer on it. An article the publisher
+                // summarised to nothing will never load however many times it is
+                // retried, and the page it points at is where the piece actually is.
+                if let original = model.currentArticleURL {
+                    Button("reader.openOriginal") { openURL(original) }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("reader.failure.openOriginal")
+                }
                 Button("reader.retry") { Task { await model.retry() } }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("reader.retry")
@@ -485,7 +494,8 @@ struct ReaderView: View {
                             // session keep their marker until the reader leaves.
                             ChapterRow(
                                 chapter: chapter,
-                                lastReadIndex: lastReadIndex
+                                lastReadIndex: lastReadIndex,
+                                kind: book.kind
                             )
                             if chapter.index == model?.currentChapterIndex {
                                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tint)
@@ -576,6 +586,7 @@ private struct ReaderControlBar: View {
     let onBack: () -> Void
     @Binding var showCatalog: Bool
     @Binding var showSettings: Bool
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         HStack(spacing: 0) {
@@ -602,6 +613,13 @@ private struct ReaderControlBar: View {
             // Named for the walks that have to make a chapter jump. The label is
             // localized, so it is not a handle a test can hold.
             .accessibilityIdentifier("reader.nextChapter")
+            // Only where there is an original to open — see `currentArticleURL`. A
+            // seventh control on every novel would be a browser button on text that is
+            // already fully here.
+            if let original = model.currentArticleURL {
+                control("safari", label: "reader.openOriginal") { openURL(original) }
+                    .accessibilityIdentifier("reader.openOriginal")
+            }
             control("textformat.size", label: "reader.settings") { showSettings = true }
         }
         .padding(.vertical, 10)
@@ -752,6 +770,27 @@ final class ReaderModel {
         return ReadingPosition(
             siteChapterId: chapters[currentChapterIndex].siteChapterId, anchor: currentAnchor
         )
+    }
+
+    /// The page the article on screen came from, for a subscription.
+    ///
+    /// A feed carries whatever text the publisher chose to put in the document, and a
+    /// great many publish a first paragraph and a link — so for this one medium the
+    /// original is not a curiosity, it is the rest of what the reader came for. It is
+    /// also the only answer available for an article with no text at all, which is why
+    /// the failure screen offers it too.
+    ///
+    /// Only for a subscription. A novel's chapter page is the very thing this reader has
+    /// already drawn, in a browser that does not remember where they were.
+    ///
+    /// Nil when the feed published no link of its own, which `FeedService` stores as an
+    /// empty address rather than inventing one.
+    var currentArticleURL: URL? {
+        guard book.kind == .feed, chapters.indices.contains(currentChapterIndex),
+              let url = URL(string: chapters[currentChapterIndex].url),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
+        else { return nil }
+        return url
     }
 
     var isCurrentPositionBookmarked: Bool {
@@ -1139,6 +1178,11 @@ final class ReaderModel {
             self.readAhead = nil
             return readAhead.paragraphs
         }
+        // An article's text arrives with the refresh that found it, so reaching here
+        // means there never was any: a feed that published a headline and a link and no
+        // body, or one whose markup would not read. Saying so is the honest answer, and
+        // it is a different one from the reader having deleted something.
+        if book.kind == .feed { throw FeedService.FeedError.emptyArticle }
         guard let rule = env.sites.rule(id: book.siteId) else {
             // An imported book has no site to fall back to. Reaching here means
             // its text is gone from disk — deleted from the storage screen — and

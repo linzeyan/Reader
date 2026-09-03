@@ -79,7 +79,11 @@ final class SiteStore {
     /// from a file, which was never on the web, and one whose rule the user has
     /// removed. Both get nil rather than a guessed address.
     func sourceURL(of book: Book) -> URL? {
-        guard !book.isLocal else { return nil }
+        // A subscription needs no template and has no rule: its `siteBookId` already *is*
+        // the address, which is also the one worth copying — handing someone a feed's
+        // address is how a subscription is passed on.
+        if book.kind == .feed { return URL(string: book.siteBookId) }
+        guard book.hasRule else { return nil }
         return rule(id: book.siteId)?.bookURL(bookId: book.siteBookId)
     }
 
@@ -92,6 +96,11 @@ final class SiteStore {
     /// user's own files "local".
     func name(ofSite siteId: String) -> String {
         if siteId == Book.localSiteId { return String(localized: "site.local") }
+        // Named here for the same reason: it has no rule file and never will. Every
+        // subscription shares this one id — what tells them apart is the address in
+        // `siteBookId` — so the shelf's grouping puts them together under one heading,
+        // which is what a reader with both novels and feeds would draw by hand.
+        if siteId == Book.feedSiteId { return String(localized: "site.feed") }
         return rule(id: siteId)?.name ?? siteId
     }
 
@@ -132,6 +141,12 @@ final class SiteStore {
             throw ImportError.malformed("a novel source needs a \"chapter\" block")
         case .comic where rule.images == nil:
             throw ImportError.malformed("a comic source needs an \"images\" block")
+        case .feed:
+            // A feed describes itself, so there is nothing for a rule to say about one
+            // and no code path that would read this file. Installed, it would be a
+            // source listed in settings that no book can ever be added through — and one
+            // whose id a real subscription could then collide with.
+            throw ImportError.malformed("a feed is subscribed to by address, not by rule")
         default:
             break
         }

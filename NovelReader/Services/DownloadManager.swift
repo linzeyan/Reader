@@ -379,6 +379,23 @@ final class DownloadManager {
             )
             try downloads.save(pages: bytes, book: book, siteChapterId: chapter.siteChapterId)
             return bytes.lazy.filter { $0 == nil }.count
+        case .feed:
+            // A subscription has nothing to download: an article is written to the device
+            // by the refresh that discovered it, so every one of them is already here.
+            // No screen offers this, which is why it throws rather than quietly
+            // succeeding — a queue that reported progress against a book it never wrote
+            // a byte for would be a download the reader cannot tell from a real one.
+            throw QueueError.nothingToDownload
+        }
+    }
+
+    enum QueueError: LocalizedError {
+        case nothingToDownload
+
+        var errorDescription: String? {
+            switch self {
+            case .nothingToDownload: return String(localized: "downloads.error.feed")
+            }
         }
     }
 

@@ -323,6 +323,12 @@ final class LiveSiteTests: XCTestCase {
                 report.failures.append("derived as a comic: \(count) pages, first \(first)")
             case (.comic, .text(let excerpt)):
                 report.failures.append("derived as a novel: \(excerpt.prefix(60))")
+            // Unreachable twice over: `SiteStore.importRule` refuses a rule that claims
+            // to read feeds, so no installed rule can be one, and derivation has no path
+            // to producing one either. Recorded as a failure rather than ignored, since
+            // arriving here would mean one of those two things has stopped being true.
+            case (.feed, _):
+                report.failures.append("a feed source reached rule derivation")
             }
             // A template missing its placeholder builds the same URL for every
             // chapter — which still previews fine, because the preview reads a

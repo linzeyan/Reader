@@ -16,6 +16,18 @@ struct SiteRule: Codable, Identifiable, Hashable {
     enum Kind: String, Codable, CaseIterable {
         case novel
         case comic
+        /// A subscription. The odd one out, and deliberately still here: no rule file can
+        /// ever declare it — `SiteStore.importRule` refuses one that tries — because a
+        /// feed is a self-describing document and there is nothing site-specific left for
+        /// a rule to say about it.
+        ///
+        /// It belongs in this enum anyway because this enum is what the *books* are
+        /// filed under: `Book.kind` decides which shelf a book sits on and which reader
+        /// opens it, and a fourth spelling of that same question would be a second
+        /// answer to keep in step with this one. What the type names is what a source
+        /// publishes; that one kind of source needs no rule to be read is a fact about
+        /// feeds, not a reason for a book to be described twice.
+        case feed
     }
 
     let id: String
