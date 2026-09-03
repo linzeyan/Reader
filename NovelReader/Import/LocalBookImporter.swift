@@ -304,10 +304,11 @@ struct LocalBookImporter {
     }
 }
 
-private extension String {
+extension String {
     /// nil when there is nothing left after trimming. Metadata in these files is
     /// routinely present but blank, and a blank title is worse than none: the
-    /// fallback can only run if the absence is visible.
+    /// fallback can only run if the absence is visible. Shared with the feed parser,
+    /// whose fields are blank for exactly the same reason.
     var nonBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed

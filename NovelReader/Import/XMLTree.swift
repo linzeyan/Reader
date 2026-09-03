@@ -69,6 +69,58 @@ final class XMLTree {
         }
     }
 
+    /// This element's children written back out as HTML.
+    ///
+    /// For the one producer that needs it: an Atom `<content type="xhtml">` holds real
+    /// elements rather than escaped text, so `text` would hand the reader a whole
+    /// article as one paragraph-less run of prose. Everything downstream of a feed
+    /// reads HTML, so the subtree is written back into it.
+    ///
+    /// Attributes come out in name order because the dictionary holding them has no
+    /// order of its own, and markup that differs between two runs is markup no test
+    /// can pin.
+    var innerHTML: String {
+        contents.map { content in
+            switch content {
+            case .text(let string): return Self.escaping(string)
+            case .element(let child): return child.outerHTML
+            }
+        }
+        .joined()
+    }
+
+    private var outerHTML: String {
+        let written = attributes.sorted { $0.key < $1.key }
+            .map { " \($0.key)=\"\(Self.escaping($0.value, quotes: true))\"" }
+            .joined()
+        // A void element written as `<br></br>` is *two* line breaks to an HTML parser,
+        // and `<p/>` is a paragraph that never closes. The two shapes are not
+        // interchangeable, so the element decides which one it gets.
+        if Self.voidElements.contains(name.lowercased()) {
+            return "<\(name)\(written) />"
+        }
+        return "<\(name)\(written)>\(innerHTML)</\(name)>"
+    }
+
+    private static let voidElements: Set<String> = [
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+        "param", "source", "track", "wbr",
+    ]
+
+    /// Ampersand first: escaping it after the others would turn the `&` this very
+    /// function just wrote into `&amp;lt;`.
+    /// Not private, for the one writer outside this file: `OPML` builds a document by
+    /// hand and needs the same five replacements. Two escapers is how one of them ends up
+    /// forgetting `&`.
+    static func escaping(_ raw: String, quotes: Bool = false) -> String {
+        var escaped = raw
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        if quotes { escaped = escaped.replacingOccurrences(of: "\"", with: "&quot;") }
+        return escaped
+    }
+
     // MARK: - Parsing
 
     /// Returns nil rather than throwing, and every caller has to decide what a
@@ -127,6 +179,20 @@ final class XMLTree {
 
         func parser(_ parser: XMLParser, foundCharacters string: String) {
             stack.last?.append(text: string)
+        }
+
+        /// CDATA arrives through its own callback and through no other: the contents of
+        /// `<description><![CDATA[<p>…</p>]]></description>` never reach
+        /// `foundCharacters`, so without this the element reads as empty. That is how
+        /// nearly every RSS feed carries its article bodies, and how many EPUB nav
+        /// documents carry their styles.
+        ///
+        /// Bytes that are not UTF-8 are dropped rather than guessed at: a CDATA block
+        /// that is not text is embedded binary, and nothing that reads this tree has a
+        /// use for one.
+        func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+            guard let text = String(data: CDATABlock, encoding: .utf8) else { return }
+            stack.last?.append(text: text)
         }
     }
 }
