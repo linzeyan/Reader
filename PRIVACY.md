@@ -1,6 +1,6 @@
 # 書房 隱私權政策 / Shufang Privacy Policy
 
-最後更新：2026 年 8 月 6 日　|　Last updated: 6 August 2026
+最後更新：2026 年 9 月 4 日　|　Last updated: 4 September 2026
 
 ---
 
@@ -17,6 +17,7 @@ SDK。開發者看不到你讀什麼、讀到哪裡，也沒有任何伺服器�
 | ----------------------------- | ---------------------------------------------------------------- | ------------------------------ |
 | 書籤、自訂書名、閱讀進度      | 裝置本機資料庫；若你開啟 iCloud 同步，另存於你自己的 iCloud 帳號 | 只有你                         |
 | 已下載的章節內文              | 裝置本機檔案                                                     | 只有你。**不會**上傳 iCloud    |
+| 你的訂閱清單與已抓下的文章    | 裝置本機資料庫與檔案                                             | 只有你。**不會**上傳 iCloud    |
 | 你新增的來源設定（規則 JSON） | 裝置本機檔案                                                     | 只有你，除非你自己選擇分享出去 |
 | 網站 Cookie 與快取            | 系統的 WebKit 資料區，與 App 一同刪除                            | 只有你                         |
 | 閱讀偏好（字級、主題等）      | 裝置本機                                                         | 只有你                         |
@@ -27,10 +28,12 @@ SDK。開發者看不到你讀什麼、讀到哪裡，也沒有任何伺服器�
 
 書房只會連向兩種地方：
 
-1. **你自己輸入的網址。** 你貼上哪個網站的連結，App 就用內建的網頁引擎
-   （WKWebView）去讀那個網站，行為與你用 Safari 打開它相同。該網站會看到一般
-   瀏覽器會送出的資訊（IP 位址、User-Agent、Cookie 等）。這些網站有各自的隱私權
-   政策，不在本政策涵蓋範圍內。
+1. **你自己輸入的網址。** 你貼上哪個網站的連結、訂閱哪個網址，App 就去讀那個
+   位址——小說與漫畫頁面用內建的網頁引擎（WKWebView），行為與你用 Safari 打開它
+   相同；訂閱源文件、封面圖與來源規則則是一般的網路請求。兩者該網站都會看到一般
+   瀏覽器會送出的資訊（IP 位址、User-Agent、Cookie 等）。訂閱會在你每次開啟 App
+   時各送出一次檢查更新的請求，沒有背景排程。這些網站有各自的隱私權政策，不在本
+   政策涵蓋範圍內。
 2. **Apple 的 iCloud**（僅在你開啟同步時）。同步經由 Apple 的
    `NSUbiquitousKeyValueStore`，資料存在你自己的 iCloud 帳號中，開發者無法存取。
    同步內容僅限書籤、自訂書名與閱讀進度；章節內文與下載清單不同步。
@@ -74,6 +77,7 @@ where you stopped, and has no server that could.
 | ------------------------------------------ | --------------------------------------------------------------- | ---------------------------------------- |
 | Bookmarks, custom titles, reading progress | Local database; also your own iCloud account if you enable sync | You only                                 |
 | Downloaded chapter text                    | Local files                                                     | You only. **Never** uploaded to iCloud   |
+| Your subscriptions and the articles fetched | Local database and files                                       | You only. **Never** uploaded to iCloud   |
 | Sources you add (rule JSON)                | Local files                                                     | You only, unless you choose to share one |
 | Site cookies and cache                     | The system WebKit data store, removed with the app              | You only                                 |
 | Reading preferences (text size, theme, …)  | On device                                                       | You only                                 |
@@ -84,10 +88,13 @@ None of it is ever sent to the developer. Shufang has no backend.
 
 Only two kinds of destination:
 
-1. **URLs you enter yourself.** The app loads them with the system web engine
-   (WKWebView), exactly as Safari would. Those sites see what any browser sends
-   them — IP address, user agent, cookies. They have their own privacy policies,
-   which this policy does not cover.
+1. **URLs you enter yourself** — a site you paste, or a feed you subscribe to.
+   Novel and comic pages are loaded with the system web engine (WKWebView),
+   exactly as Safari would; feed documents, cover images and source rules are
+   ordinary network requests. Either way the host sees what any browser sends —
+   IP address, user agent, cookies. Subscriptions are checked once each when you
+   open the app, and on no background schedule. Those sites have their own privacy
+   policies, which this policy does not cover.
 2. **Apple's iCloud**, and only if you turn sync on. Sync uses Apple's
    `NSUbiquitousKeyValueStore`; the data sits in your own iCloud account and the
    developer cannot reach it. Only bookmarks, custom titles and reading progress
