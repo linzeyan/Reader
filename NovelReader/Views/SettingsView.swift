@@ -80,6 +80,12 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("settings.icloud", isOn: $cloud.isEnabled)
+                    // Beside the sync toggle, because they answer the same question from
+                    // opposite ends: sync is what keeps two devices the same, a backup is
+                    // what survives having neither of them. A reader looking for one has
+                    // looked for the other first.
+                    NavigationLink("settings.backup") { BackupView() }
+                        .accessibilityIdentifier("settings.backup")
                 } header: {
                     Text("settings.section.sync")
                 } footer: {

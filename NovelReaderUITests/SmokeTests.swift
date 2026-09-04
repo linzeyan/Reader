@@ -130,6 +130,20 @@ final class SmokeTests: XCTestCase {
         )
     }
 
+    /// The one screen through which a reader's marks and saved positions can leave this
+    /// device at all: iCloud sync deliberately carries neither. Both directions have to be
+    /// on it — an export nobody can restore is not a backup — and it has to be reachable
+    /// from a settings list that has grown a section since it was put there.
+    func testBackupScreenOffersBothDirections() {
+        settingsTab.tap()
+        let backup = app.buttons["settings.backup"]
+        app.reveal(backup)
+        XCTAssertTrue(backup.waitForExistence(timeout: 5))
+        backup.tap()
+        XCTAssertTrue(app.buttons["backup.export"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["backup.restore"].exists)
+    }
+
     func testAppearanceSettingsExposeTypeAndThemeControls() {
         settingsTab.tap()
         let appearance = app.buttons["settings.appearance"]

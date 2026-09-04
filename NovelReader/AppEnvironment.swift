@@ -465,6 +465,44 @@ final class AppEnvironment {
         )
     }
 
+    // MARK: - Backup
+
+    /// The reader's own library as one file: the shelf, where they got to, what they
+    /// marked, the sources they installed and how they set the app up. See `LibraryBackup`
+    /// for what is deliberately not in it, and why.
+    func backupData() throws -> Data {
+        try LibraryBackup.encoder().encode(
+            LibraryBackup.capture(repo: repo, sites: sites, settings: backupTargets)
+        )
+    }
+
+    /// Merges a backup file into this library and says what changed.
+    ///
+    /// The push afterwards is not a formality: a restore creates rows that every other
+    /// device would otherwise learn about only when this one next turns a page in each of
+    /// them, and the reader restoring a backup is usually setting a device up.
+    @discardableResult
+    func restoreBackup(from url: URL) throws -> LibraryBackup.Outcome {
+        // Files handed over by the document picker live outside the sandbox.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let backup = try LibraryBackup.read(try Data(contentsOf: url))
+        let outcome = try backup.restore(into: repo, sites: sites, settings: backupTargets)
+        reloadLibrary()
+        cloud.pushAll()
+        return outcome
+    }
+
+    /// `ReaderSettings` comes from its own singleton rather than from this object: it is
+    /// the one settings class the app reaches for directly, from the two screens that read
+    /// while a book is open.
+    private var backupTargets: LibraryBackup.Settings.Targets {
+        LibraryBackup.Settings.Targets(
+            reader: .shared, library: librarySettings,
+            downloads: downloadSettings, feeds: retentionSettings
+        )
+    }
+
     /// Where reading a subscription list has got to.
     ///
     /// One step per feed rather than per article, unlike `FeedService.Progress`. A list of

@@ -4,6 +4,246 @@
     "%@" : {
 
     },
+    "backup.error.unreadable" : {
+      "comment" : "Error: the chosen file is not a backup.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This file is not a backup this app can read."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件不是这个 App 读得懂的备份。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個檔案不是這個 App 讀得懂的備份。"
+          }
+        }
+      }
+    },
+    "backup.error.version" : {
+      "comment" : "Error: the backup came from a newer build.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This backup was written by a newer version of the app."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这份备份是较新版本的 App 写出来的。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這份備份是較新版本的 App 寫出來的。"
+          }
+        }
+      }
+    },
+    "backup.export" : {
+      "comment" : "Button: writes the library out to a file.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export a backup"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出备份"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯出備份"
+          }
+        }
+      }
+    },
+    "backup.export.footer" : {
+      "comment" : "Explains what a backup holds and what it leaves out.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your shelf and subscriptions, where you left off in each one, your bookmarks and highlights, the sources you installed, and how you set the app up. Downloaded chapters, comic pages and article text are not included — those can be fetched again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "包含书架与订阅、每一本读到哪里、书签与标注、你安装的来源，以及 App 的设置。不含已下载的章节、漫画页与文章内容——那些可以重新抓回来。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "包含書架與訂閱、每一本讀到哪裡、書籤與標註、你安裝的來源，以及 App 的設定。不含已下載的章節、漫畫頁與文章內容——那些可以重新抓回來。"
+          }
+        }
+      }
+    },
+    "backup.restore" : {
+      "comment" : "Button: reads a backup file back into the library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore from a backup"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从备份还原"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從備份還原"
+          }
+        }
+      }
+    },
+    "backup.restore.footer" : {
+      "comment" : "Explains that a restore merges rather than replaces.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restoring merges: nothing already on this device is deleted, and anything here that is newer than the backup is kept."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还原是合并：不会删掉这台设备上已有的东西；比备份还新的记录会保留下来。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還原是合併：不會刪掉這台裝置上已有的東西；比備份還新的紀錄會保留下來。"
+          }
+        }
+      }
+    },
+    "backup.restored %lld %lld %lld" : {
+      "comment" : "Result of a restore: books, marks and sources.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld books, %2$lld marks and %3$lld sources restored."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还原了 %1$lld 本书、%2$lld 个标记、%3$lld 个来源。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還原了 %1$lld 本書、%2$lld 個標記、%3$lld 個來源。"
+          }
+        }
+      }
+    },
+    "backup.restored.skipped %lld" : {
+      "comment" : "Second line of a restore result: imported books whose file is not on this device.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld imported books are not on this device, so their marks were not restored. Import those files again and restore this backup once more to get them back."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有 %lld 本导入的书不在这台设备上，它们的标记没有还原。重新导入那些文件后再还原一次这份备份，就会接回去。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有 %lld 本匯入的書不在這台裝置上，它們的標記沒有還原。重新匯入那些檔案後再還原一次這份備份，就會接回去。"
+          }
+        }
+      }
+    },
+    "backup.restored.title" : {
+      "comment" : "Title of the alert shown after a backup has been restored.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restored"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还原完成"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還原完成"
+          }
+        }
+      }
+    },
+    "backup.title" : {
+      "comment" : "Title of the backup screen.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备份"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "備份"
+          }
+        }
+      }
+    },
     "book.articles %lld" : {
       "comment" : "Header of a subscription's article list, with the count.",
       "extractionState" : "manual",
@@ -7199,6 +7439,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上次執行"
+          }
+        }
+      }
+    },
+    "settings.backup" : {
+      "comment" : "Settings row leading to the backup screen.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备份"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "備份"
           }
         }
       }
