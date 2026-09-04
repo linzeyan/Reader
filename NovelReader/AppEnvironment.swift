@@ -364,8 +364,10 @@ final class AppEnvironment {
     /// push to iCloud are here for the reason they are there, which is that both are
     /// facts about the library rather than about the fetch that produced them.
     @discardableResult
-    func subscribeToFeed(_ address: String) async throws -> Book {
-        let book = try await feeds.subscribe(to: address)
+    func subscribeToFeed(
+        _ address: String, progress: @escaping FeedService.ProgressHandler = { _ in }
+    ) async throws -> Book {
+        let book = try await feeds.subscribe(to: address, progress: progress)
         cloud.push(book)
         reloadLibrary()
         return book
@@ -402,7 +404,7 @@ final class AppEnvironment {
     ///   is the address — so importing the same file twice is not a way to make a mess.
     @discardableResult
     func importSubscriptions(
-        from url: URL, progress: @escaping (Double) -> Void = { _ in }
+        from url: URL, progress: @escaping (SubscriptionImportStep) -> Void = { _ in }
     ) async throws -> Int {
         // Files handed over by the document picker live outside the sandbox.
         let scoped = url.startAccessingSecurityScopedResource()
@@ -415,7 +417,14 @@ final class AppEnvironment {
         defer { reloadLibrary() }
         for (index, subscription) in subscriptions.enumerated() {
             try Task.checkCancellation()
-            progress(Double(index) / Double(subscriptions.count))
+            // Named, not just counted. Forty feeds is minutes of work, and the difference
+            // between a bar that has been at 30% for a while and "reading Example Blog,
+            // 12 of 40" is whether the reader can tell it is stuck from it being slow —
+            // and which subscription to blame when it is.
+            progress(SubscriptionImportStep(
+                index: index, count: subscriptions.count,
+                subscription: subscription.title ?? subscription.address
+            ))
             do {
                 try await feeds.subscribe(to: subscription.address)
             } catch {
@@ -426,7 +435,9 @@ final class AppEnvironment {
                 )
             }
         }
-        progress(1)
+        progress(SubscriptionImportStep(
+            index: subscriptions.count, count: subscriptions.count, subscription: nil
+        ))
         let after = Set((try? repo.allBooks())?.filter { $0.kind == .feed }.map(\.id) ?? [])
         return after.subtracting(before).count
     }
@@ -452,6 +463,23 @@ final class AppEnvironment {
                         == .orderedAscending
                 }
         )
+    }
+
+    /// Where reading a subscription list has got to.
+    ///
+    /// One step per feed rather than per article, unlike `FeedService.Progress`. A list of
+    /// forty is forty subscriptions being fetched, named and filled in, and the reader
+    /// watching it wants to know which one is being read — inside any one of them, a
+    /// second count of its articles is detail at the wrong scale.
+    struct SubscriptionImportStep: Equatable {
+        /// Which subscription of how many, counting from zero. `index == count` is the
+        /// whole list, done.
+        let index: Int
+        let count: Int
+        /// What the file called the one being read now; nil once there is none.
+        let subscription: String?
+
+        var fraction: Double { count > 0 ? Double(index) / Double(count) : 1 }
     }
 
     enum OPMLError: LocalizedError {

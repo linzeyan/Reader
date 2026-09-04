@@ -90,7 +90,9 @@ struct RecentReadingView: View {
     /// the marks list says, for the same reason: a row that names nothing is a row the
     /// reader cannot place.
     private func chapterName(_ entry: RecentRead) -> Text {
-        guard let title = entry.chapterTitle else { return Text("marks.chapter.missing") }
+        guard let title = entry.chapterTitle else {
+            return Text(entry.book.kind == .feed ? "marks.article.missing" : "marks.chapter.missing")
+        }
         return Text(title)
     }
 
@@ -118,12 +120,16 @@ struct RecentReadingView: View {
     /// question a list of half-read books raises. The share comes with it only where one
     /// was recorded; see `Book.lastReadFraction`.
     private func progress(_ entry: RecentRead, chapterIndex: Int) -> Text {
+        let feed = entry.book.kind == .feed
         guard let fraction = entry.book.lastReadFraction else {
-            return Text("recent.progress \(chapterIndex + 1) \(entry.chapterCount)")
+            return feed
+                ? Text("recent.progress.article \(chapterIndex + 1) \(entry.chapterCount)")
+                : Text("recent.progress \(chapterIndex + 1) \(entry.chapterCount)")
         }
-        return Text(
-            "recent.progress.share \(chapterIndex + 1) \(entry.chapterCount) \(TextAnchor.shareText(fraction))"
-        )
+        let share = TextAnchor.shareText(fraction)
+        return feed
+            ? Text("recent.progress.article.share \(chapterIndex + 1) \(entry.chapterCount) \(share)")
+            : Text("recent.progress.share \(chapterIndex + 1) \(entry.chapterCount) \(share)")
     }
 
     /// Where a row leads, or nil for a book whose chapter the site has dropped.

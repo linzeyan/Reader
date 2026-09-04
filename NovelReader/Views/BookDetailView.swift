@@ -95,7 +95,14 @@ struct BookDetailView: View {
             }
             catalogSection(catalog)
         }
-        .searchable(text: $query, placement: .navigationBarDrawer, prompt: Text("book.catalog.search"))
+        // A subscription is worded as what it holds, here and everywhere else this app
+        // names one: articles, not chapters, and a feed rather than a catalog. The
+        // machinery underneath is a book's — see `FeedService` — but the reader of a blog
+        // is not reading a novel and should not be told they are.
+        .searchable(
+            text: $query, placement: .navigationBarDrawer,
+            prompt: Text(current.kind == .feed ? "book.articles.search" : "book.catalog.search")
+        )
         .navigationTitle(current.shownName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -107,7 +114,11 @@ struct BookDetailView: View {
                     Button {
                         Task { await refreshCatalog() }
                     } label: {
-                        Label("book.catalog.refresh", systemImage: "arrow.clockwise")
+                        Label(
+                            current.kind == .feed
+                                ? "book.articles.refresh" : "book.catalog.refresh",
+                            systemImage: "arrow.clockwise"
+                        )
                     }
                     // A subscription refreshes through its own service, so a missing rule
                     // says nothing about it — gated on one, this button would be greyed
@@ -190,9 +201,19 @@ struct BookDetailView: View {
                 Text(env.sites.name(ofSite: current.siteId))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                Text("book.downloaded \(downloadedCount) \(chapters.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // "Downloaded" is a word for something the reader asked for. A
+                // subscription's articles arrive with the refresh that found them and are
+                // deleted by retention, so what this line says about a feed is how much of
+                // it is still on the device.
+                Group {
+                    if current.kind == .feed {
+                        Text("book.articles.stored \(downloadedCount) \(chapters.count)")
+                    } else {
+                        Text("book.downloaded \(downloadedCount) \(chapters.count)")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)
@@ -257,7 +278,11 @@ struct BookDetailView: View {
         Section {
             if let lastRead = catalog.lastRead { lastReadRow(lastRead) }
             if chapters.isEmpty {
-                Text(isRefreshing ? "book.catalog.loading" : "book.catalog.empty")
+                let loading: LocalizedStringKey = current.kind == .feed
+                    ? "book.articles.loading" : "book.catalog.loading"
+                let empty: LocalizedStringKey = current.kind == .feed
+                    ? "book.articles.empty" : "book.catalog.empty"
+                Text(isRefreshing ? loading : empty)
                     .foregroundStyle(.secondary)
             } else {
                 // Read into a local before the loop: `lastReadIndex` is computed, and
@@ -279,7 +304,11 @@ struct BookDetailView: View {
                 // The count is of the book, not of what the search left: it is how long
                 // the novel is, and a header that changed with every keystroke would be
                 // reporting the query back rather than the book.
-                Text("book.catalog \(chapters.count)")
+                if current.kind == .feed {
+                    Text("book.articles \(chapters.count)")
+                } else {
+                    Text("book.catalog \(chapters.count)")
+                }
                 Spacer()
                 // Absent while there is no catalog: there is nothing to put in an
                 // order yet.

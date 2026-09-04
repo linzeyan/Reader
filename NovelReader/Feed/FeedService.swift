@@ -34,6 +34,25 @@ final class FeedService {
         }
     }
 
+    /// How far the first read of a subscription has got.
+    ///
+    /// Counted in articles rather than reported as a share, because that is the unit the
+    /// work is actually done in and the one a reader can judge: "3 of 27" says both how
+    /// long is left and that something is happening, while a bar creeping across says
+    /// only the second. It also stops the moment the reader can see: what is counted is
+    /// articles *stored*, so a feed of twenty-seven that reaches twenty-seven has nothing
+    /// left to do.
+    struct Progress: Equatable {
+        /// Articles whose body has been read and written to the device.
+        let stored: Int
+        /// How many this document gave a body to store. Zero for a feed that publishes
+        /// headlines and links only — which is finished the moment it starts, and is why
+        /// nothing here divides by it.
+        let total: Int
+    }
+
+    typealias ProgressHandler = (Progress) -> Void
+
     private let repo: LibraryRepo
     private let downloads: DownloadStore
     private let fetcher: WebFetcher
@@ -65,8 +84,16 @@ final class FeedService {
     /// What is pasted is usually the site, not its feed, so a document that turns out to
     /// be a web page is asked what feed it declares before the attempt is given up on —
     /// see `FeedDiscovery`.
+    ///
+    /// - Parameter progress: called as each article's body lands. Worth wiring at all
+    ///   because this is the one slow thing a subscription ever does: a feed's whole
+    ///   window is read here, article by article through the web view and picture by
+    ///   picture off the network, and without it a busy feed is a spinner that looks
+    ///   stuck for a minute.
     @discardableResult
-    func subscribe(to address: String) async throws -> Book {
+    func subscribe(
+        to address: String, progress: @escaping ProgressHandler = { _ in }
+    ) async throws -> Book {
         guard let url = Self.url(from: address) else { throw FeedError.badAddress }
         var response = try await read(url, validators: nil)
         // "Nothing has changed" against a request that carried no validators. No correct
@@ -101,7 +128,7 @@ final class FeedService {
             coverURL: parsed.iconURL
         )
         try repo.saveFeedFetchState(response.state(for: book.id))
-        try await store(parsed, in: book)
+        try await store(parsed, in: book, progress: progress)
         return book
     }
 
@@ -252,7 +279,9 @@ final class FeedService {
     /// its pictures, which is several round trips apiece and is queued behind whatever the
     /// reader is doing, so a refresh that put all fifty of a feed's articles through it
     /// every time would be a refresh nobody could read during.
-    private func store(_ parsed: ParsedFeed, in book: Book) async throws {
+    private func store(
+        _ parsed: ParsedFeed, in book: Book, progress: @escaping ProgressHandler = { _ in }
+    ) async throws {
         try repo.mergeCatalog(
             bookId: book.id,
             entries: parsed.items.map {
@@ -289,11 +318,17 @@ final class FeedService {
         // because this type is main-actor isolated and giving the view back is therefore
         // not a hop it would have to await.
         defer { fetcher.releaseImportView() }
-        for item in pending {
+        progress(Progress(stored: 0, total: pending.count))
+        for (index, item) in pending.enumerated() {
             // Before the extraction, not after: each article is a round trip through the
             // web view, and one of those is the whole distance between "it stopped" and
             // "it stops eventually".
             try Task.checkCancellation()
+            // On every way out of this iteration, including the two that store nothing.
+            // An article the publisher gave no body is one this loop is done with, and a
+            // count that stalled on it would report a subscription as stuck when it is
+            // simply reading things that take no time.
+            defer { progress(Progress(stored: index + 1, total: pending.count)) }
             guard let html = item.contentHTML?.nonBlank else { continue }
             // The article's own address as the base for everything relative inside it.
             // The import view reads this markup with a base of `about:blank`, so without

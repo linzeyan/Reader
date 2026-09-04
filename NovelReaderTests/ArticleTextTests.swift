@@ -212,6 +212,44 @@ final class ArticleTextTests: XCTestCase {
         )
     }
 
+    // MARK: - Outline
+
+    /// The reader's own table of contents for one piece. Every entry has to name the block
+    /// it came from, because that number is the anchor the jump lands on — an outline that
+    /// counted only its own entries would send the reader to the wrong place, and would do
+    /// it silently.
+    func testTheOutlineNamesTheBlockEachHeadingIs() {
+        let chapter = Chapter(
+            id: Chapter.makeId(bookId: "b", siteChapterId: "a1"),
+            bookId: "b", siteChapterId: "a1", index: 0, title: "An article", url: ""
+        )
+        let loaded = ReaderModel.LoadedChapter(chapter: chapter, blocks: [
+            .paragraph("An opening line."),
+            ArticleBlock(kind: .heading, runs: [InlineRun(text: "Why it matters")], level: 2),
+            .paragraph("Some prose."),
+            ArticleBlock(kind: .heading, runs: [InlineRun(text: "The trade-off")], level: 3),
+            ArticleBlock(kind: .heading, runs: [InlineRun(text: "   ")], level: 3),
+        ])
+
+        XCTAssertEqual(loaded.outline.map(\.paragraph), [1, 3])
+        XCTAssertEqual(loaded.outline.map(\.title), ["Why it matters", "The trade-off"])
+        XCTAssertEqual(loaded.outline.map(\.level), [2, 3])
+    }
+
+    /// A novel chapter is a flat run of prose. Its outline is empty, and that emptiness is
+    /// what keeps the second tab off the catalog sheet everywhere but an article.
+    func testProseHasNoOutline() {
+        let chapter = Chapter(
+            id: Chapter.makeId(bookId: "b", siteChapterId: "c1"),
+            bookId: "b", siteChapterId: "c1", index: 0, title: "Chapter One", url: ""
+        )
+        let loaded = ReaderModel.LoadedChapter(
+            chapter: chapter, paragraphs: ["One.", "Two.", "Three."]
+        )
+
+        XCTAssertTrue(loaded.outline.isEmpty)
+    }
+
     // MARK: - Decoding
 
     /// The extractor omits every flag that is false, which is most of them. A decoder that

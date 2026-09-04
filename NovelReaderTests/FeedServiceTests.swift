@@ -79,6 +79,45 @@ final class FeedServiceTests: XCTestCase {
         XCTAssertEqual(paragraphs, ["First paragraph.", "Second one."])
     }
 
+    /// Subscribing is the one slow thing this feature does — a whole window of articles,
+    /// each through the web view and then its pictures off the network — and it is done
+    /// while somebody is watching a sheet. Reported per article so that sheet can say how
+    /// far it has got rather than spin.
+    func testSubscribingReportsWhereItHasGot() async throws {
+        StubProtocol.answer = .ok(feed(
+            item("1", body: "<p>One.</p>") + item("2", body: "<p>Two.</p>")
+                + item("3", body: "<p>Three.</p>")
+        ))
+        var reported: [FeedService.Progress] = []
+
+        _ = try await service.subscribe(to: address) { reported.append($0) }
+
+        XCTAssertEqual(
+            reported,
+            [
+                FeedService.Progress(stored: 0, total: 3),
+                FeedService.Progress(stored: 1, total: 3),
+                FeedService.Progress(stored: 2, total: 3),
+                FeedService.Progress(stored: 3, total: 3),
+            ],
+            "the count has to start before the first article and end on the last"
+        )
+    }
+
+    /// An article the publisher gave no body is one there is nothing to read, and the
+    /// count must not stall on it: a subscription that stops at "2 of 5" and then finishes
+    /// reads as stuck when it was simply skipping things that take no time.
+    func testArticlesWithNoBodyStillAdvanceTheCount() async throws {
+        StubProtocol.answer = .ok(feed(
+            item("1", body: "") + item("2", body: "<p>Two.</p>")
+        ))
+        var reported: [FeedService.Progress] = []
+
+        _ = try await service.subscribe(to: address) { reported.append($0) }
+
+        XCTAssertEqual(reported.last, FeedService.Progress(stored: 2, total: 2))
+    }
+
     /// `Book.id` is built out of the address, so the one that is *landed on* has to be
     /// stored: a feed reached over `http` that redirects to `https` would otherwise be two
     /// shelves' worth of the same articles.

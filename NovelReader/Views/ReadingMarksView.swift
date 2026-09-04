@@ -154,7 +154,7 @@ struct ReadingMarksView: View {
         if let title = chapterTitles[siteChapterId] {
             return Text(title)
         }
-        return Text("marks.chapter.missing")
+        return Text(book.kind == .feed ? "marks.article.missing" : "marks.chapter.missing")
     }
 
     /// Where a row leads, or nil for a mark whose chapter the site has dropped.

@@ -19,6 +19,9 @@ struct LibraryView: View {
     @State private var exportingSubscriptions = false
     /// 0…1 while an import runs, nil otherwise — so it doubles as "busy".
     @State private var importProgress: Double?
+    /// What the import is working on right now, for the one import whose steps have
+    /// names: a subscription list, where each step is a whole feed being fetched.
+    @State private var importNote: String?
     @State private var renaming: Book?
     @State private var draftName = ""
     /// The imported book a swipe is about to destroy. Only imported books get
@@ -229,7 +232,10 @@ struct LibraryView: View {
             }
             .pickerStyle(.inline)
             Toggle("library.groupBySource", isOn: $settings.groupBySource)
-            Toggle("library.filter.newChapters", isOn: $settings.onlyWithNewChapters)
+            Toggle(
+                env.mediaMode == .feed ? "library.filter.unread" : "library.filter.newChapters",
+                isOn: $settings.onlyWithNewChapters
+            )
         } label: {
             // The filled icon is the only thing on screen that says the filter is
             // on, and the filter outlives the launch it was set in.
@@ -250,7 +256,17 @@ struct LibraryView: View {
     private var importBanner: some View {
         if let importProgress {
             HStack(spacing: 14) {
-                ProgressView(value: importProgress) { Text("library.import.working") }
+                VStack(alignment: .leading, spacing: 2) {
+                    ProgressView(value: importProgress) { Text("library.import.working") }
+                    if let importNote {
+                        Text(importNote)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .accessibilityIdentifier("library.import.note")
+                    }
+                }
                 // A cancel button rather than a modal or nothing at all: importing
                 // a large EPUB is a minute of the app doing one thing, and the user
                 // who picked the wrong file should not have to wait it out.
@@ -284,15 +300,27 @@ struct LibraryView: View {
 
     private func runImport(_ url: URL) async {
         importProgress = 0
-        defer { importProgress = nil }
+        defer {
+            importProgress = nil
+            importNote = nil
+        }
         do {
             switch env.mediaMode {
             case .novel: try await env.importLocalBook(from: url) { importProgress = $0 }
             case .comic: try await env.importComicArchive(from: url) { importProgress = $0 }
             // The one import that is not a book: a list of addresses, each of which is
             // then subscribed to for real. Determinate for the same reason a novel's is —
-            // forty feeds is forty requests, and a spinner would look stuck.
-            case .feed: try await env.importSubscriptions(from: url) { importProgress = $0 }
+            // forty feeds is forty requests, and a spinner would look stuck — and named,
+            // because every one of those requests is a subscription the reader chose.
+            case .feed:
+                try await env.importSubscriptions(from: url) { step in
+                    importProgress = step.fraction
+                    importNote = step.subscription.map {
+                        String(
+                            localized: "library.import.subscription \($0) \(step.index + 1) \(step.count)"
+                        )
+                    }
+                }
             }
         } catch is CancellationError {
             // Not reported. The user asked for this and the banner going away is
@@ -463,7 +491,10 @@ struct LibraryView: View {
     /// out that their shelf is filtered rather than lost.
     private var filteredEmptyState: some View {
         ContentUnavailableView {
-            Label("library.filter.empty", systemImage: "bell.badge.slash")
+            Label(
+                env.mediaMode == .feed ? "library.filter.unread.empty" : "library.filter.empty",
+                systemImage: "bell.badge.slash"
+            )
         } actions: {
             Button("library.filter.clear") {
                 env.librarySettings.onlyWithNewChapters = false
@@ -506,7 +537,14 @@ struct BookRow: View {
                             .foregroundStyle(.tertiary)
                     }
                     if newChapterCount > 0 {
-                        Text("library.newChapters \(newChapterCount)")
+                        // "New" wears off after a day for a novel and never does for a
+                        // subscription — see `Chapter.isNew` — so the badge that counts
+                        // them is not saying the same thing on the two shelves.
+                        Text(
+                            book.kind == .feed
+                                ? "library.unread \(newChapterCount)"
+                                : "library.newChapters \(newChapterCount)"
+                        )
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.red)
                     }
@@ -523,11 +561,20 @@ struct BookRow: View {
     /// column existed, or restored from another device and not read here since, knows
     /// its chapter and nothing finer, and "第 12 章 · 0%" would be a claim about how far
     /// in they are that nothing measured.
+    ///
+    /// A subscription counts the same way and is worded differently, here and everywhere
+    /// else this app names a position: what a feed holds is articles, and "第 12 章" for
+    /// the twelfth post on someone's blog is the app describing a novel it is not reading.
     private func progress(_ lastReadIndex: Int) -> Text {
         guard let fraction = book.lastReadFraction else {
-            return Text("library.progress \(lastReadIndex + 1)")
+            return book.kind == .feed
+                ? Text("library.progress.article \(lastReadIndex + 1)")
+                : Text("library.progress \(lastReadIndex + 1)")
         }
-        return Text("library.progress.share \(lastReadIndex + 1) \(TextAnchor.shareText(fraction))")
+        let share = TextAnchor.shareText(fraction)
+        return book.kind == .feed
+            ? Text("library.progress.article.share \(lastReadIndex + 1) \(share)")
+            : Text("library.progress.share \(lastReadIndex + 1) \(share)")
     }
 }
 

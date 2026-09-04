@@ -116,6 +116,13 @@ struct PaginatedChapterView: View {
     let chapterKey: String
     let settings: ReaderSettings
     let landing: PageLanding
+    /// A place inside this chapter to turn to, asked for from outside — the article
+    /// outline. Separate from `landing`, which is only read when the pages are rebuilt:
+    /// this is a jump *within* a layout that is already on screen, and it happens while
+    /// the reader is looking at it.
+    let jumpTo: TextAnchor?
+    /// Called once the jump has been made, so the same one is not made twice.
+    let onJumped: () -> Void
     /// This chapter's stored highlights. Painted here, and created here to sentence
     /// precision — see `ChapterPaginator.offset(at:onPage:)` for why the scrolling
     /// renderer can only mark a paragraph whole.
@@ -203,6 +210,15 @@ struct PaginatedChapterView: View {
                 page(in: geo.size)
                     .onChange(of: key(for: geo.size), initial: true) { _, _ in
                         rebuild(size: geo.size)
+                    }
+                    // The outline's jump. There is always a paginator by the time one
+                    // arrives — the sheet it comes from is opened over a page that is
+                    // already drawn — and `turn` is what makes it, so the jump slides the
+                    // way every other page change in here does.
+                    .onChange(of: jumpTo) { _, anchor in
+                        guard let anchor, let paginator else { return }
+                        turn(paginator.pageIndex(for: anchor) - pageIndex)
+                        onJumped()
                     }
             }
             pageLabel

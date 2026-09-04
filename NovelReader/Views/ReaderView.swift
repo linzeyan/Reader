@@ -37,6 +37,19 @@ struct ReaderView: View {
     /// renderer holds the same two questions itself, because the selection they are
     /// about is a range in text only it has laid out.
     @State private var markChoice: ScrollMarkChoice?
+    /// Which half of the catalog sheet is showing. Decided when the sheet opens rather
+    /// than remembered, because the right answer depends on the piece being read: an
+    /// article with headings opens on its own outline, everything else on the list.
+    @State private var catalogTab = CatalogTab.chapters
+    /// A place inside the article on screen that the outline has asked for, held until
+    /// whichever renderer is up has taken it. One state for both, because "put the reader
+    /// here" is one intent — the two renderers differ only in how they honour it.
+    @State private var outlineJump: TextAnchor?
+
+    enum CatalogTab: Hashable {
+        case outline
+        case chapters
+    }
 
     var body: some View {
         #if DEBUG
@@ -79,7 +92,13 @@ struct ReaderView: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: showControls)
-        .sheet(isPresented: $showCatalog) { catalogSheet }
+        .sheet(isPresented: $showCatalog) {
+            catalogSheet
+                // Which tab is right depends on what is being read, and that can change
+                // between two openings of the same sheet — so it is decided here, on
+                // presentation, rather than remembered from last time.
+                .task { catalogTab = outlineEntries.isEmpty ? .chapters : .outline }
+        }
         .sheet(isPresented: $showSettings) {
             ReaderSettingsSheet(settings: settings)
                 // Half height, and not resizable to full: every control in here
@@ -199,7 +218,10 @@ struct ReaderView: View {
                 settings: settings,
                 highlights: model.highlightsByChapter,
                 marked: markChoice.flatMap(\.beingMarked),
-                target: model.scrollTarget,
+                // The outline's jump goes first: it names a place inside the chapter on
+                // screen, so it is always the more recent of the two asks — a model
+                // target that is still set is the landing this reader already made.
+                target: outlineTarget(model) ?? model.scrollTarget,
                 footer: model.isLoading ? .loading : (model.hasMore ? .none : .endOfBook),
                 onPlaceChange: { model.notePlace($0) },
                 // Guarded here rather than inside the model: these are asked on every
@@ -228,11 +250,24 @@ struct ReaderView: View {
                     }) else { return }
                     mark(paragraph: paragraph, in: chapter)
                 },
-                onTargetReached: { model.clearScrollTarget() }
+                onTargetReached: {
+                    outlineJump = nil
+                    model.clearScrollTarget()
+                }
             )
             .overlay(alignment: .bottom) { markBar(model) }
             .overlay(alignment: .bottom) { loadFailure(model) }
             .animation(.snappy(duration: 0.18), value: markChoice)
+        }
+    }
+
+    /// The outline's jump, in the shape the scrolling renderer already takes one.
+    ///
+    /// Always inside the chapter on screen: the outline lists the headings of the piece
+    /// being read and nothing else, so there is no chapter to load first.
+    private func outlineTarget(_ model: ReaderModel) -> ReaderModel.ScrollTarget? {
+        outlineJump.map {
+            ReaderModel.ScrollTarget(chapterIndex: model.currentChapterIndex, anchor: $0)
         }
     }
 
@@ -318,6 +353,8 @@ struct ReaderView: View {
                 settings: settings,
                 landing: openAtLastPage == current.chapter.id
                     ? .lastPage : .anchor(model.currentAnchor),
+                jumpTo: outlineJump,
+                onJumped: { outlineJump = nil },
                 highlights: model.highlights(inChapter: current.chapter.siteChapterId),
                 onAnchorChange: { anchor, fraction in
                     openAtLastPage = nil
@@ -486,54 +523,111 @@ struct ReaderView: View {
             : all
     }
 
+    /// The headings of the piece on screen, which is what the sheet's first tab lists.
+    private var outlineEntries: [ReaderModel.LoadedChapter.OutlineEntry] {
+        model?.currentLoadedChapter?.outline ?? []
+    }
+
+    /// The sheet the control bar's list button opens.
+    ///
+    /// Two things under one button, and the reason is that "where am I" has two answers
+    /// for an article and one for a chapter. A novel chapter is a flat run of prose whose
+    /// only structure is the book's catalog; a linked post is a piece with headings of its
+    /// own, and jumping inside it is what a reader of one actually wants — while the list
+    /// of the feed's other articles is still one tap away rather than behind a dismissal.
     private var catalogSheet: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                // Hoisted out of the row builder, like the other two screens that draw
-                // `ChapterRow` — touching it per row makes drawing a thirteen-hundred-
-                // chapter list quadratic (see `BookDetailView`).
-                let lastReadIndex = book.lastReadIndex(in: model?.chapters ?? [])
-                List(catalogChapters) { chapter in
-                    Button {
-                        showCatalog = false
-                        Task { await model?.jump(toChapterAt: chapter.index) }
-                    } label: {
-                        HStack {
-                            // Against the position the book was opened with, deliberately —
-                            // see `Chapter.isNew`, which explains why chapters read in this
-                            // session keep their marker until the reader leaves.
-                            ChapterRow(
-                                chapter: chapter,
-                                lastReadIndex: lastReadIndex,
-                                kind: book.kind
-                            )
-                            if chapter.index == model?.currentChapterIndex {
-                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tint)
-                            }
-                        }
+            VStack(spacing: 0) {
+                if !outlineEntries.isEmpty {
+                    Picker("", selection: $catalogTab) {
+                        Text("reader.outline").tag(CatalogTab.outline)
+                        Text(book.kind == .feed ? "reader.articles" : "reader.catalog")
+                            .tag(CatalogTab.chapters)
                     }
-                    .tint(.primary)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .accessibilityIdentifier("reader.catalog.tabs")
                 }
-                // Opens where the reader is, not at chapter one. A catalog of thirteen
-                // hundred chapters that always starts at the top is a scroll the reader
-                // has to make every single time to find out where they already are.
-                // Centred rather than at the top, so the chapters either side of it —
-                // the ones worth going back to — come with it.
-                //
-                // In `task` because it runs after the first render: `scrollTo` needs rows
-                // to aim at, and there are none while the list is still being built.
-                .task {
-                    guard let model, model.chapters.indices.contains(model.currentChapterIndex)
-                    else { return }
-                    proxy.scrollTo(model.chapters[model.currentChapterIndex].id, anchor: .center)
+                if catalogTab == .outline, !outlineEntries.isEmpty {
+                    outlineList
+                } else {
+                    chapterList
                 }
             }
-            .navigationTitle("reader.catalog")
+            .navigationTitle(book.kind == .feed ? "reader.articles" : "reader.catalog")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("common.done") { showCatalog = false }
                 }
+            }
+        }
+    }
+
+    /// The piece's headings, indented by the level the publisher gave them.
+    ///
+    /// Relative to the shallowest heading present, not to `h1`: a great many posts start
+    /// their sections at `h2` or `h3`, and indenting against an absolute level would push
+    /// the whole outline of those articles across the sheet for no reason a reader can see.
+    private var outlineList: some View {
+        let shallowest = outlineEntries.map(\.level).min() ?? 1
+        return List(outlineEntries) { entry in
+            Button {
+                showCatalog = false
+                outlineJump = TextAnchor(paragraph: entry.paragraph, characterOffset: 0)
+            } label: {
+                Text(entry.title)
+                    .font(entry.level <= shallowest ? .body : .callout)
+                    .foregroundStyle(entry.level <= shallowest ? .primary : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, CGFloat(entry.level - shallowest) * 16)
+            }
+            .tint(.primary)
+            .accessibilityIdentifier("reader.outline.entry")
+        }
+    }
+
+    private var chapterList: some View {
+        ScrollViewReader { proxy in
+            // Hoisted out of the row builder, like the other two screens that draw
+            // `ChapterRow` — touching it per row makes drawing a thirteen-hundred-
+            // chapter list quadratic (see `BookDetailView`).
+            let lastReadIndex = book.lastReadIndex(in: model?.chapters ?? [])
+            List(catalogChapters) { chapter in
+                Button {
+                    showCatalog = false
+                    Task { await model?.jump(toChapterAt: chapter.index) }
+                } label: {
+                    HStack {
+                        // Against the position the book was opened with, deliberately —
+                        // see `Chapter.isNew`, which explains why chapters read in this
+                        // session keep their marker until the reader leaves.
+                        ChapterRow(
+                            chapter: chapter,
+                            lastReadIndex: lastReadIndex,
+                            kind: book.kind
+                        )
+                        if chapter.index == model?.currentChapterIndex {
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tint)
+                        }
+                    }
+                }
+                .tint(.primary)
+            }
+            // Opens where the reader is, not at chapter one. A catalog of thirteen
+            // hundred chapters that always starts at the top is a scroll the reader
+            // has to make every single time to find out where they already are.
+            // Centred rather than at the top, so the chapters either side of it —
+            // the ones worth going back to — come with it.
+            //
+            // In `task` because it runs after the first render: `scrollTo` needs rows
+            // to aim at, and there are none while the list is still being built.
+            .task {
+                guard let model, model.chapters.indices.contains(model.currentChapterIndex)
+                else { return }
+                proxy.scrollTo(model.chapters[model.currentChapterIndex].id, anchor: .center)
             }
         }
     }
@@ -601,7 +695,10 @@ private struct ReaderControlBar: View {
     var body: some View {
         HStack(spacing: 0) {
             control("chevron.left", label: "common.back") { onBack() }
-            control("list.bullet", label: "reader.catalog") { showCatalog = true }
+            control(
+                "list.bullet",
+                label: model.isSubscription ? "reader.articles" : "reader.catalog"
+            ) { showCatalog = true }
             // Filled when the page on screen is already saved: a bookmark the reader
             // cannot see is one they will add twice.
             control(
@@ -612,11 +709,17 @@ private struct ReaderControlBar: View {
                 model.toggleBookmark()
             }
             .accessibilityIdentifier("reader.bookmark")
-            control("arrow.up.to.line", label: "reader.previousChapter") {
+            control(
+                "arrow.up.to.line",
+                label: model.isSubscription ? "reader.previousArticle" : "reader.previousChapter"
+            ) {
                 Task { await model.jump(toChapterAt: model.currentChapterIndex - 1) }
             }
             .disabled(model.currentChapterIndex <= 0)
-            control("arrow.down.to.line", label: "reader.nextChapter") {
+            control(
+                "arrow.down.to.line",
+                label: model.isSubscription ? "reader.nextArticle" : "reader.nextChapter"
+            ) {
                 Task { await model.jump(toChapterAt: model.currentChapterIndex + 1) }
             }
             .disabled(model.currentChapterIndex >= model.chapters.count - 1)
@@ -732,6 +835,31 @@ final class ReaderModel {
         init(chapter: Chapter, paragraphs: [String]) {
             self.init(chapter: chapter, blocks: paragraphs.map(ArticleBlock.paragraph))
         }
+
+        /// One heading in the piece, as somewhere to jump to.
+        struct OutlineEntry: Identifiable {
+            /// The block it names, which is also the anchor paragraph to land on — see
+            /// `ArticleBlock` for why those are the same number.
+            let paragraph: Int
+            /// 1…6 as the publisher wrote it, drawn as indentation.
+            let level: Int
+            let title: String
+            var id: Int { paragraph }
+        }
+
+        /// The piece's own headings.
+        ///
+        /// Empty for a novel chapter, which has one title and no structure inside it —
+        /// and that emptiness is what the reader's catalog sheet keys off, so nothing but
+        /// an article ever grows a second tab.
+        var outline: [OutlineEntry] {
+            blocks.enumerated().compactMap { index, block in
+                guard block.kind == .heading else { return nil }
+                let title = block.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { return nil }
+                return OutlineEntry(paragraph: index, level: block.level ?? 2, title: title)
+            }
+        }
     }
 
     private(set) var chapters: [Chapter] = []
@@ -833,6 +961,12 @@ final class ReaderModel {
         else { return nil }
         return url
     }
+
+    /// Whether what is being read is a subscription.
+    ///
+    /// Here rather than read off `book` by every view that needs it, because `book` is
+    /// this model's own and the callers are asking one question: what to call a piece.
+    var isSubscription: Bool { book.kind == .feed }
 
     var isCurrentPositionBookmarked: Bool {
         guard let currentPosition else { return false }

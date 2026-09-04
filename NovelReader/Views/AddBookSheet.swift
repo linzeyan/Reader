@@ -184,9 +184,9 @@ struct AddBookSheet: View {
         }
         for index in lines.indices {
             if Task.isCancelled { return }
-            lines[index].status = .working
+            lines[index].status = .working(nil)
             if paced { await env.pacer.pace() }
-            switch await add(lines[index].address) {
+            switch await add(lines[index].address, reporting: index) {
             case .added(let title):
                 lines[index].status = .added(title)
             case .failed(let reason):
@@ -209,13 +209,16 @@ struct AddBookSheet: View {
         case needsTheUser(any Error)
     }
 
-    private func add(_ address: String) async -> LineOutcome {
+    /// - Parameter line: which row to report progress against. Passed in rather than
+    ///   returned at the end because a subscription's progress is worth seeing *while* it
+    ///   happens, and this call is the only thing that knows how far it has got.
+    private func add(_ address: String, reporting line: Int) async -> LineOutcome {
         // A subscription is added by address alone, so it does not go looking for a rule
         // to match — and the shelf's mode is what decides, unlike the two media below.
         // Those are told apart by the rule an address matches; a feed address matches
         // nothing, and a novel address pasted onto this shelf would silently become a
         // subscription to a page that is not one.
-        if env.mediaMode == .feed { return await subscribe(address) }
+        if env.mediaMode == .feed { return await subscribe(address, reporting: line) }
         guard let url = URL(string: address), let rule = env.sites.rule(matching: url) else {
             return .failed(String(localized: "library.add.error.noRule"))
         }
@@ -240,9 +243,16 @@ struct AddBookSheet: View {
     /// request away is a failure on this line and the rest of the batch carries on —
     /// which is what a reader pasting twenty addresses out of another reader wants,
     /// since one of them being dead should not cost them the other nineteen.
-    private func subscribe(_ address: String) async -> LineOutcome {
+    private func subscribe(_ address: String, reporting line: Int) async -> LineOutcome {
         do {
-            let book = try await env.subscribeToFeed(address)
+            let book = try await env.subscribeToFeed(address) { progress in
+                // A feed that published no bodies to read has nothing to count, and
+                // "0 of 0" is a worse thing to show than the spinner alone.
+                guard progress.total > 0, lines.indices.contains(line) else { return }
+                lines[line].status = .working(
+                    String(localized: "library.add.articles \(progress.stored) \(progress.total)")
+                )
+            }
             return .added(book.shownName)
         } catch {
             return .failed(error.localizedDescription)
@@ -254,7 +264,10 @@ struct AddBookSheet: View {
 struct AddBookLine: Identifiable {
     enum Status {
         case waiting
-        case working
+        /// Under way, and how far — the article count of a subscription being read for
+        /// the first time. Nil while there is nothing to count yet, which is every novel
+        /// and comic and the moment before a feed document has been parsed.
+        case working(String?)
         /// The book's title, as the site published it — the confirmation that the
         /// address led where the reader thought it did.
         case added(String)
@@ -276,7 +289,8 @@ struct AddBookLine: Identifiable {
             switch self {
             case .added(let title): return title
             case .failed(let reason): return reason
-            case .waiting, .working: return nil
+            case .working(let progress): return progress
+            case .waiting: return nil
             }
         }
     }

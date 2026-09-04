@@ -4,6 +4,150 @@
     "%@" : {
 
     },
+    "book.articles %lld" : {
+      "comment" : "Header of a subscription's article list, with the count.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Articles (%lld)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文章（%lld 篇）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文章（%lld 篇）"
+          }
+        }
+      }
+    },
+    "book.articles.empty" : {
+      "comment" : "Shown when a subscription has no articles stored yet.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No articles yet. Try refreshing."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有获取到文章，试试刷新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還沒有取得文章，試試重新整理。"
+          }
+        }
+      }
+    },
+    "book.articles.loading" : {
+      "comment" : "Shown while a subscription is being read again.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reading the feed…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在读取订阅源…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在讀取訂閱源…"
+          }
+        }
+      }
+    },
+    "book.articles.refresh" : {
+      "comment" : "Toolbar button on a subscription.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh feed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刷新订阅源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新整理訂閱源"
+          }
+        }
+      }
+    },
+    "book.articles.search" : {
+      "comment" : "Search field on a subscription.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find an article"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索文章"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜尋文章"
+          }
+        }
+      }
+    },
+    "book.articles.stored %lld %lld" : {
+      "comment" : "How many of a subscription's articles are on the device.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld of %2$lld articles on this device"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备上有 %1$lld / %2$lld 篇"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "裝置上有 %1$lld / %2$lld 篇"
+          }
+        }
+      }
+    },
     "book.catalog %@" : {
 
     },
@@ -110,7 +254,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "First chapter first"
+            "value" : "Oldest first"
           }
         },
         "zh-Hans" : {
@@ -134,7 +278,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Newest chapter first"
+            "value" : "Newest first"
           }
         },
         "zh-Hans" : {
@@ -2786,6 +2930,30 @@
         }
       }
     },
+    "library.add.articles %lld %lld" : {
+      "comment" : "How far the first read of one subscription has got, under its address.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld of %lld articles"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已取 %lld / %lld 篇"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已取 %lld / %lld 篇"
+          }
+        }
+      }
+    },
     "library.add.confirm" : {
       "comment" : "Confirm button.",
       "extractionState" : "manual",
@@ -3399,6 +3567,54 @@
         }
       }
     },
+    "library.filter.unread" : {
+      "comment" : "Shelf filter, on the subscriptions shelf.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only feeds with unread articles"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只显示有未读的订阅源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只顯示有未讀的訂閱源"
+          }
+        }
+      }
+    },
+    "library.filter.unread.empty" : {
+      "comment" : "Shown when the unread filter leaves the subscriptions shelf empty.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No feed has unread articles"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有订阅源有未读文章"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有訂閱源有未讀文章"
+          }
+        }
+      }
+    },
     "library.groupBySource" : {
       "comment" : "Toggle: keep the shelf split into one section per source, or show one flat list.",
       "extractionState" : "manual",
@@ -3611,6 +3827,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "前言"
+          }
+        }
+      }
+    },
+    "library.import.subscription %@ %lld %lld" : {
+      "comment" : "Which subscription of a list is being fetched right now.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (%2$lld of %3$lld)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@（第 %2$lld / %3$lld 个）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@（第 %2$lld / %3$lld 個）"
           }
         }
       }
@@ -3833,6 +4073,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "讀到第 %lld 章"
+          }
+        }
+      }
+    },
+    "library.progress.article %lld" : {
+      "comment" : "Where the reader is in a subscription, on the shelf.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Article %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读到第 %lld 篇"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀到第 %lld 篇"
+          }
+        }
+      }
+    },
+    "library.progress.article.share %lld %@" : {
+      "comment" : "Where the reader is in a subscription, with the share read.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Article %lld · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读到第 %lld 篇 · %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀到第 %lld 篇 · %@"
           }
         }
       }
@@ -4087,6 +4375,30 @@
       }
       }
     },
+    "library.unread %lld" : {
+      "comment" : "Unread badge on a subscription's shelf row.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld unread"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 篇未读"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 篇未讀"
+          }
+        }
+      }
+    },
     "local.delete.confirm" : {
       "comment" : "Confirmation before destroying the only copy of an imported book.",
       "extractionState" : "manual",
@@ -4107,6 +4419,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯入的書刪掉就沒有了，App 無法重新下載本機檔案。"
+          }
+        }
+      }
+    },
+    "marks.article.missing" : {
+      "comment" : "A mark whose article the feed no longer lists.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Article no longer in the feed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文章已不在订阅源中"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文章已不在訂閱源中"
           }
         }
       }
@@ -4231,6 +4567,30 @@
         }
       }
     },
+    "reader.articles" : {
+      "comment" : "The list of a subscription's articles, as the reader's catalog sheet calls it.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Articles"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文章"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文章"
+          }
+        }
+      }
+    },
     "reader.bookmark.add" : {
       "comment" : "Reader control: saves the position on screen.",
       "extractionState" : "manual",
@@ -4310,19 +4670,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You have reached the last chapter"
+            "value" : "That's the end"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已经是最后一章"
+            "value" : "已经到最后了"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已經是最後一章"
+            "value" : "已經到最後了"
           }
         }
       }
@@ -4399,6 +4759,30 @@
         }
       }
     },
+    "reader.nextArticle" : {
+      "comment" : "Reader control bar, on a subscription.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next article"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一篇"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一篇"
+          }
+        }
+      }
+    },
     "reader.nextChapter" : {
       "comment" : "Reader control accessibility label.",
       "extractionState" : "manual",
@@ -4447,6 +4831,54 @@
         }
       }
     },
+    "reader.outline" : {
+      "comment" : "The headings inside the article being read, in the reader's catalog sheet.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Outline"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大纲"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大綱"
+          }
+        }
+      }
+    },
+    "reader.previousArticle" : {
+      "comment" : "Reader control bar, on a subscription.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous article"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一篇"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一篇"
+          }
+        }
+      }
+    },
     "reader.previousChapter" : {
       "comment" : "Reader control accessibility label.",
       "extractionState" : "manual",
@@ -4478,19 +4910,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ through this chapter"
+            "value" : "%@ read"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本章已读 %@"
+            "value" : "已读 %@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本章已讀 %@"
+            "value" : "已讀 %@"
           }
         }
       }
@@ -5197,6 +5629,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "第 %lld / %lld 章"
+          }
+        }
+      }
+    },
+    "recent.progress.article %lld %lld" : {
+      "comment" : "Where the reader is in a subscription, in recent reading.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Article %lld of %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld / %lld 篇"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld / %lld 篇"
+          }
+        }
+      }
+    },
+    "recent.progress.article.share %lld %lld %@" : {
+      "comment" : "Where the reader is in a subscription, with the share read.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Article %lld of %lld · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld / %lld 篇 · %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld / %lld 篇 · %@"
           }
         }
       }
