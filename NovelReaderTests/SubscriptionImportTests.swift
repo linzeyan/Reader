@@ -127,6 +127,24 @@ final class SubscriptionImportTests: XCTestCase {
         XCTAssertEqual(feeds.count, 2)
     }
 
+    /// What the shelf tells the reader afterwards is two numbers side by side — how many
+    /// the file listed, how many of them were new — and only one of them is returned. The
+    /// other is read off the progress, so the progress has to have named the whole file by
+    /// the time the import ends: a count that stopped short would have the reader told a
+    /// total they never watched the bar reach.
+    func testTheProgressNamesTheWholeFileSoTheResultCanBeCountedFromIt() async throws {
+        StubProtocol.answersByURL = [
+            "https://a.example/feed": feed("First Blog"),
+            "https://b.example/feed": feed("Second Blog"),
+        ]
+
+        var listed = 0
+        let added = try await env.importSubscriptions(from: try write(list)) { listed = $0.count }
+
+        XCTAssertEqual(listed, 2, "the file's own length, not how far the import got")
+        XCTAssertEqual(added, 2)
+    }
+
     /// A file with nothing in it has to say so. Silence would be indistinguishable from
     /// an import that worked, and the reader would go looking for feeds that never came.
     func testAFileWithNoFeedsInItIsReported() async throws {

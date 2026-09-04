@@ -4026,6 +4026,54 @@
         }
       }
     },
+    "library.opml.imported %lld %lld" : {
+      "comment" : "Result of importing a subscription list: how many the file listed, and how many of them were new.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld subscriptions in the file, %2$lld new on the shelf."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件里有 %1$lld 个订阅，其中 %2$lld 个是新加入的。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案裡有 %1$lld 個訂閱，其中 %2$lld 個是新加入的。"
+          }
+        }
+      }
+    },
+    "library.opml.imported.title" : {
+      "comment" : "Title of the alert shown when a subscription list has finished importing.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import finished"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入完成"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯入完成"
+          }
+        }
+      }
+    },
     "library.opml.title" : {
       "comment" : "Title written into the head of an exported OPML file.",
       "extractionState" : "manual",

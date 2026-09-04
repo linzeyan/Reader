@@ -22,6 +22,14 @@ struct LibraryView: View {
     /// What the import is working on right now, for the one import whose steps have
     /// names: a subscription list, where each step is a whole feed being fetched.
     @State private var importNote: String?
+    /// What a finished subscription import came to, held until the reader dismisses it.
+    ///
+    /// The only import that reports a result, because it is the only one whose result is
+    /// not on the screen behind it: a novel arrives as one row the reader can see, while
+    /// forty subscriptions land among the ones already there — and a list re-imported
+    /// from a backup can legitimately add nothing at all, which is indistinguishable from
+    /// having failed unless it is said.
+    @State private var importOutcome: String?
     @State private var renaming: Book?
     @State private var draftName = ""
     /// The imported book a swipe is about to destroy. Only imported books get
@@ -146,9 +154,20 @@ struct LibraryView: View {
                 isPresented: $exportingSubscriptions,
                 document: SubscriptionsDocument(env.subscriptionsDocument()),
                 contentType: .xml,
-                defaultFilename: "subscriptions.opml"
+                defaultFilename: subscriptionsFilename
             ) { result in
                 if case .failure(let error) = result { env.report(error) }
+            }
+            .alert(
+                "library.opml.imported.title",
+                isPresented: Binding(
+                    get: { importOutcome != nil },
+                    set: { if !$0 { importOutcome = nil } }
+                )
+            ) {
+                Button("common.done") { importOutcome = nil }
+            } message: {
+                Text(importOutcome ?? "")
             }
             .alert("library.rename", isPresented: renamingBinding) {
                 TextField("library.rename.placeholder", text: $draftName)
@@ -192,6 +211,16 @@ struct LibraryView: View {
         }
         .accessibilityIdentifier("library.opml")
         .disabled(importProgress != nil)
+    }
+
+    /// Dated, because what this file is for is keeping. Someone who exports twice ends up
+    /// with two of them, and the file system's own answer to a repeated name — a "2" on
+    /// the end — says which was saved second but not what either one holds. The date is
+    /// written largest part first so that a folder of them sorts into the order they were
+    /// made in.
+    private var subscriptionsFilename: String {
+        let day = Date.now.formatted(.iso8601.year().month().day().dateSeparator(.dash))
+        return "subscriptions-\(day).opml"
     }
 
     private var renamingBinding: Binding<Bool> {
@@ -313,7 +342,12 @@ struct LibraryView: View {
             // forty feeds is forty requests, and a spinner would look stuck — and named,
             // because every one of those requests is a subscription the reader chose.
             case .feed:
-                try await env.importSubscriptions(from: url) { step in
+                // How many the file listed, taken from the progress it reports rather than
+                // read out of the file a second time: the count the reader watched climb is
+                // the one the result has to agree with.
+                var listed = 0
+                let added = try await env.importSubscriptions(from: url) { step in
+                    listed = step.count
                     importProgress = step.fraction
                     importNote = step.subscription.map {
                         String(
@@ -321,6 +355,7 @@ struct LibraryView: View {
                         )
                     }
                 }
+                importOutcome = String(localized: "library.opml.imported \(listed) \(added)")
             }
         } catch is CancellationError {
             // Not reported. The user asked for this and the banner going away is
