@@ -160,6 +160,17 @@ final class SmokeTests: XCTestCase {
                 .firstMatch.exists,
             "The background swatches should be present"
         )
+        // The way to a page of the reader's own making. It is a row rather than a swatch,
+        // so nothing above proves it is there.
+        let custom = app.buttons["reader.settings.customTheme"]
+        app.reveal(custom)
+        XCTAssertTrue(custom.waitForExistence(timeout: 5))
+        custom.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(identifier: "reader.theme.background")
+                .firstMatch.waitForExistence(timeout: 5),
+            "The custom palette editor should offer a choice of background"
+        )
     }
 
     func testAddBookSheetOffersEverySource() {

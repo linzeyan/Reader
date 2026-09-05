@@ -123,6 +123,10 @@ struct PaginatedChapterView: View {
     let jumpTo: TextAnchor?
     /// Called once the jump has been made, so the same one is not made twice.
     let onJumped: () -> Void
+    /// The colours, already resolved. Handed down rather than read off `settings`,
+    /// because the system's own light-or-dark answer is a trait of the view tree and this
+    /// view's owner is the one holding it.
+    let palette: ReaderPalette
     /// This chapter's stored highlights. Painted here, and created here to sentence
     /// precision — see `ChapterPaginator.offset(at:onPage:)` for why the scrolling
     /// renderer can only mark a paragraph whole.
@@ -238,8 +242,8 @@ struct PaginatedChapterView: View {
                     pageIndex: pageIndex,
                     highlights: highlights.flatMap { paginator.text.ranges(of: $0) },
                     selection: selection,
-                    highlightColor: UIColor(settings.theme.highlight),
-                    selectionColor: UIColor(settings.theme.selection),
+                    highlightColor: UIColor(palette.highlight),
+                    selectionColor: UIColor(palette.selection),
                     onSelectionDrag: { drag in select(drag, in: paginator) }
                 )
                 .id(pageTransition)
@@ -517,7 +521,7 @@ struct PaginatedChapterView: View {
         return Text(verbatim: figure)
             .font(.caption2)
             .monospacedDigit()
-            .foregroundStyle(settings.theme.foreground.opacity(0.45))
+            .foregroundStyle(palette.ink.opacity(0.45))
             .accessibilityIdentifier("reader.pageNumber")
             .accessibilityLabel(Text("reader.progress \(figure)"))
     }
@@ -607,7 +611,7 @@ struct PaginatedChapterView: View {
         clearSelection()
         let fresh = renderedKey != chapterKey
         let carried = fresh ? nil : paginator?.anchor(at: pageIndex)
-        let typography = ReaderTypography(settings: settings)
+        let typography = ReaderTypography(settings: settings, color: palette.foreground.uiColor)
         let next = ChapterPaginator(
             text: ChapterText(
                 title: title, subtitle: subtitle, blocks: blocks, typography: typography,

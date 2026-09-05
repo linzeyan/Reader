@@ -130,14 +130,17 @@ final class ReaderTextScrollView: UIScrollView {
         setContentOffset(CGPoint(x: 0, y: min(max(y, 0), maximum)), animated: animated)
     }
 
-    func apply(theme: ReaderSettings.Theme) {
-        footer.apply(theme: theme)
-        // Opaque, and painted the reader's own background: a full-screen transparent
-        // layer redrawn on every scrolled frame is a full-screen blend on every scrolled
-        // frame, for a surface with nothing behind it but the same colour.
-        let background = UIColor(theme.background)
+    func apply(palette: ReaderPalette) {
+        footer.apply(palette: palette)
+        // Opaque wherever it can be: a full-screen transparent layer redrawn on every
+        // scrolled frame is a full-screen blend on every scrolled frame, and for a flat
+        // page there is nothing behind it but the same colour. A gradient or a picture is
+        // drawn once, by the SwiftUI view under this one, so there the canvas has to let
+        // it through and pay the blend — which is the price of the reader's own surface.
+        let background = palette.background.flatColor?.uiColor ?? .clear
         guard canvas.backgroundColor != background else { return }
         canvas.backgroundColor = background
+        canvas.isOpaque = background != .clear
         canvas.setNeedsDisplay()
     }
 
@@ -319,8 +322,8 @@ final class ReaderTextFooter: UIView {
         spinner.center = CGPoint(x: bounds.midX, y: 40)
     }
 
-    func apply(theme: ReaderSettings.Theme) {
-        label.textColor = UIColor(theme.foreground).withAlphaComponent(0.6)
+    func apply(palette: ReaderPalette) {
+        label.textColor = palette.foreground.uiColor.withAlphaComponent(0.6)
     }
 
     func show(_ state: State) {

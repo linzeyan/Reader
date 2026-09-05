@@ -6,92 +6,24 @@ import UIKit
 /// phone and an iPad rarely want the same one.
 @Observable
 final class ReaderSettings {
-    /// Backgrounds are paper colours, not brand colours: each one is a surface a
-    /// person could stand to look at for an hour. Kept to nine — past that the
-    /// picker becomes a decision instead of a preference.
+    /// Where the reader's colours come from.
     ///
-    /// Raw values are storage keys, so the original four keep theirs.
+    /// Two shipped pairs rather than the nine this replaces. Nine swatches was a decision
+    /// instead of a preference, and once a reader can build any surface they like, a
+    /// shipped palette's whole job is to be a sane default and a place to start from —
+    /// see `ReaderPalette.light` and `.dark`. Raw values are storage keys; the older ones
+    /// no longer parse, so a device that was on 亞麻 comes back on the system's own.
     enum Theme: String, CaseIterable, Identifiable {
-        case system, paper, sepia, linen, mint, sky, slate, night, black
+        case system, light, dark, custom
 
         var id: String { rawValue }
 
         var nameKey: LocalizedStringKey {
             switch self {
             case .system: return "reader.theme.system"
-            case .paper: return "reader.theme.paper"
-            case .sepia: return "reader.theme.sepia"
-            case .linen: return "reader.theme.linen"
-            case .mint: return "reader.theme.mint"
-            case .sky: return "reader.theme.sky"
-            case .slate: return "reader.theme.slate"
-            case .night: return "reader.theme.night"
-            case .black: return "reader.theme.black"
-            }
-        }
-
-        var background: Color {
-            switch self {
-            case .system: return Color(.systemBackground)
-            case .paper: return Color(white: 1.0)
-            case .sepia: return Color(red: 0.98, green: 0.94, blue: 0.86)
-            case .linen: return Color(red: 0.95, green: 0.93, blue: 0.89)
-            case .mint: return Color(red: 0.88, green: 0.94, blue: 0.89)
-            case .sky: return Color(red: 0.89, green: 0.93, blue: 0.96)
-            case .slate: return Color(red: 0.16, green: 0.17, blue: 0.19)
-            case .night: return Color(white: 0.07)
-            case .black: return Color(white: 0.0)
-            }
-        }
-
-        var foreground: Color {
-            switch self {
-            case .system: return Color(.label)
-            case .paper: return Color(white: 0.12)
-            case .sepia: return Color(red: 0.24, green: 0.19, blue: 0.13)
-            case .linen: return Color(red: 0.21, green: 0.19, blue: 0.16)
-            case .mint: return Color(red: 0.13, green: 0.22, blue: 0.16)
-            case .sky: return Color(red: 0.13, green: 0.18, blue: 0.24)
-            case .slate: return Color(white: 0.80)
-            case .night: return Color(white: 0.78)
-            // Pure white on pure black smears on OLED; 0.72 is the comfortable
-            // ceiling for body text at this size.
-            case .black: return Color(white: 0.72)
-            }
-        }
-
-        /// The one highlight tint, in the one place both renderers read it from.
-        ///
-        /// One style, not a palette: colours would have to be chosen in the reader,
-        /// stored per highlight and rendered in two engines, and a reader who marks a
-        /// passage wants it marked, not categorised. A warm yellow because that is what
-        /// a marked page looks like everywhere else, over the theme's own background so
-        /// nine surfaces need no nine tints — but a dark surface swallows a translucent
-        /// wash, so it gets less transparency rather than a different hue.
-        var highlight: Color {
-            Color(red: 1.0, green: 0.84, blue: 0.28).opacity(isDark ? 0.34 : 0.44)
-        }
-
-        /// While the finger is still down this is a selection, not a mark, so it reads
-        /// as neutral: the passage turns yellow at the moment the reader commits, which
-        /// is the feedback that says the highlight was actually made.
-        var selection: Color {
-            foreground.opacity(0.24)
-        }
-
-        var isDark: Bool {
-            switch self {
-            case .slate, .night, .black: return true
-            default: return false
-            }
-        }
-
-        /// A dark background must force dark chrome even when the system is in
-        /// light mode, otherwise the status bar and bars sit at the wrong contrast.
-        var colorScheme: ColorScheme? {
-            switch self {
-            case .system: return nil
-            default: return isDark ? .dark : .light
+            case .light: return "reader.theme.light"
+            case .dark: return "reader.theme.dark"
+            case .custom: return "reader.theme.custom"
             }
         }
     }
@@ -122,9 +54,25 @@ final class ReaderSettings {
     var lineSpacing: Double { didSet { defaults.set(lineSpacing, forKey: Keys.lineSpacing) } }
     var paragraphSpacing: Double { didSet { defaults.set(paragraphSpacing, forKey: Keys.paragraphSpacing) } }
     var theme: Theme { didSet { defaults.set(theme.rawValue, forKey: Keys.theme) } }
+    /// The surface the reader built, held whether or not it is the one in force.
+    ///
+    /// A reader who tries the two shipped palettes and comes back has to find their own
+    /// gradient exactly where they left it — otherwise looking at an alternative costs
+    /// them the thing they made.
+    var customPalette: ReaderPalette {
+        didSet {
+            guard let data = try? JSONEncoder().encode(customPalette) else { return }
+            defaults.set(data, forKey: Keys.customPalette)
+        }
+    }
     /// A font name usable with `UIFont(name:size:)`, or nil for the system face.
+    ///
+    /// Written as the empty string when nil, because an absent key and a chosen system
+    /// face are different answers: the first is a device that has never picked and gets
+    /// `defaultFontName`, the second is one that picked, and removing the key would turn
+    /// "system font" back into Songti on the next launch.
     var fontName: String? {
-        didSet { defaults.set(fontName, forKey: Keys.fontName) }
+        didSet { defaults.set(fontName ?? "", forKey: Keys.fontName) }
     }
     /// Keeps the screen awake while reading — the single most requested reader
     /// setting, and the one users notice most when it is missing.
@@ -151,6 +99,7 @@ final class ReaderSettings {
         static let lineSpacing = "reader.lineSpacing"
         static let paragraphSpacing = "reader.paragraphSpacing"
         static let theme = "reader.theme"
+        static let customPalette = "reader.customPalette"
         static let fontName = "reader.fontName"
         static let keepScreenOn = "reader.keepScreenOn"
         static let tapToTurnPage = "reader.tapToTurnPage"
@@ -165,10 +114,24 @@ final class ReaderSettings {
         lineSpacing = defaults.object(forKey: Keys.lineSpacing) as? Double ?? 9
         paragraphSpacing = defaults.object(forKey: Keys.paragraphSpacing) as? Double ?? 14
         theme = (defaults.string(forKey: Keys.theme).flatMap(Theme.init(rawValue:))) ?? .system
-        // A font that was uninstalled with its app would render as the system
-        // face anyway, so an unknown name is simply dropped on load.
-        let storedFont = defaults.string(forKey: Keys.fontName)
-        fontName = storedFont.flatMap { UIFont(name: $0, size: 16) == nil ? nil : $0 }
+        // A palette written by a newer build, or by hand, is not worth failing over: the
+        // shipped light one is a page anybody can read.
+        customPalette = defaults.data(forKey: Keys.customPalette)
+            .flatMap { try? JSONDecoder().decode(ReaderPalette.self, from: $0) } ?? .light
+        switch defaults.string(forKey: Keys.fontName) {
+        case nil:
+            let resolved = Self.defaultFontName
+            fontName = resolved
+            // Written down at once. Resolving it means asking every family on the device
+            // for Han glyphs (see `FontCatalog`), and that is a question with one answer
+            // per device — not one worth re-asking on every cold start.
+            defaults.set(resolved ?? "", forKey: Keys.fontName)
+        case let stored?:
+            // A font that was uninstalled with its app would render as the system face
+            // anyway, so an unknown name is simply dropped on load — as is the empty
+            // string, which is how a chosen system face is written down.
+            fontName = stored.isEmpty || UIFont(name: stored, size: 16) == nil ? nil : stored
+        }
         keepScreenOn = defaults.object(forKey: Keys.keepScreenOn) as? Bool ?? true
         // `bool(forKey:)` rather than the `object(forKey:) as? Bool` the settings above
         // use: it answers false for a key nobody has set, which is this flag's default
@@ -185,7 +148,42 @@ final class ReaderSettings {
         return .custom(fontName, fixedSize: fontSize)
     }
 
+    /// The colours in force.
+    ///
+    /// The system's answer is passed in rather than read here: `ReaderSettings` lives
+    /// outside the view tree and has no traits to resolve against, and a stored copy of
+    /// the system's appearance is a copy that is one frame stale every time the reader
+    /// walks under a lamp.
+    func palette(systemIsDark: Bool) -> ReaderPalette {
+        switch theme {
+        case .system: return systemIsDark ? .dark : .light
+        case .light: return .light
+        case .dark: return .dark
+        case .custom: return customPalette
+        }
+    }
+
+    /// A dark page must force dark chrome even when the system is in light mode,
+    /// otherwise the bars floating over the text sit at the wrong contrast. Nil for
+    /// `.system`, which is the one case with nothing to override.
+    var forcedColorScheme: ColorScheme? {
+        switch theme {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        case .custom: return customPalette.isDark ? .dark : .light
+        }
+    }
+
     static let fontSizeRange: ClosedRange<Double> = 13...32
+
+    /// The device's own Song face, which is what a Chinese book is set in — a screen of
+    /// prose in the system's sans reads as an interface, not a page.
+    ///
+    /// Taken from `FontCatalog` rather than named outright, so that the face a reader
+    /// starts on is exactly the entry the font picker shows selected. A device without it
+    /// falls back to the system face, which is what an unknown name would draw as anyway.
+    static let defaultFontName: String? = FontCatalog.songti
 }
 
 /// The fonts on this device that can actually render Chinese.
@@ -215,11 +213,30 @@ enum FontCatalog {
             }
     }()
 
+    /// The device's Song face, as this catalog names it.
+    ///
+    /// Traditional first, because that is the language the app is authored in; then
+    /// Simplified, the same face cut for the other script. Matched by family name against
+    /// the catalog rather than by font name against the system, so that the default
+    /// reading face and the picker's Songti row are the same string — a default nothing
+    /// in the list matches shows as a picker with no selection.
+    static var songti: String? {
+        ["Songti TC", "Songti SC"]
+            .lazy
+            .compactMap { family in chinese.first { $0.displayName == family } }
+            .first?
+            .fontName
+    }
+
     /// The regular face of a family. `UIFont(name:)` accepts a family name for
-    /// most families but not all, so fall back to the first concrete face.
+    /// most families but not all, so fall back to a concrete face.
     private static func usableName(in family: String) -> String? {
         if UIFont(name: family, size: 16) != nil { return family }
-        return UIFont.fontNames(forFamilyName: family).first
+        let names = UIFont.fontNames(forFamilyName: family)
+        // Explicitly the regular cut. `fontNames(forFamilyName:)` is in no documented
+        // order, so taking the first can hand back a light or bold face and set a whole
+        // book in it.
+        return names.first { $0.hasSuffix("-Regular") } ?? names.first
     }
 
     private static func supportsChinese(_ fontName: String) -> Bool {

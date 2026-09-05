@@ -244,6 +244,12 @@ extension LibraryBackup {
         var lineSpacing: Double?
         var paragraphSpacing: Double?
         var theme: String?
+        /// The surface the reader built, carried whole rather than as a raw value: it is
+        /// the one setting here that is *content*, not a choice between shipped options.
+        /// Its picture is not carried — a photograph does not belong in a settings file —
+        /// so a restore onto another device keeps the choice and draws a plain page until
+        /// that device is given a picture of its own.
+        var customPalette: ReaderPalette?
         var fontName: String?
         var keepScreenOn: Bool?
         var tapToTurnPage: Bool?
@@ -264,6 +270,7 @@ extension LibraryBackup {
             lineSpacing = targets.reader.lineSpacing
             paragraphSpacing = targets.reader.paragraphSpacing
             theme = targets.reader.theme.rawValue
+            customPalette = targets.reader.customPalette
             fontName = targets.reader.fontName
             keepScreenOn = targets.reader.keepScreenOn
             tapToTurnPage = targets.reader.tapToTurnPage
@@ -289,6 +296,7 @@ extension LibraryBackup {
             if let value = theme.flatMap(ReaderSettings.Theme.init(rawValue:)) {
                 targets.reader.theme = value
             }
+            if let customPalette { targets.reader.customPalette = customPalette }
             // Assigned even when absent, unlike everything around it: nil is this one's
             // real value — the system face — and skipping it would make a backup taken
             // with no chosen font unable to put a device back the way it was.

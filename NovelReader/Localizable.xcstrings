@@ -5599,194 +5599,338 @@
         }
       }
     },
-    "reader.theme.black" : {
-      "comment" : "Dark theme, pure black for OLED.",
+    "reader.theme.addStop" : {
+      "comment" : "Adds another colour to the background gradient.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Black"
+            "value" : "Add Colour"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "纯黑"
+            "value" : "加入颜色"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "純黑"
+            "value" : "加入顏色"
           }
         }
       }
     },
-    "reader.theme.linen" : {
-      "comment" : "Light theme, warm grey.",
+    "reader.theme.background" : {
+      "comment" : "Section for what the reading page is painted with.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Linen"
+            "value" : "Background"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "亚麻"
+            "value" : "背景"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "亞麻"
+            "value" : "背景"
           }
         }
       }
     },
-    "reader.theme.mint" : {
-      "comment" : "Light theme, pale green.",
+    "reader.theme.background.colors" : {
+      "comment" : "Background made of one or more colours.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mint"
+            "value" : "Colour"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "淡绿"
+            "value" : "颜色"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "淡綠"
+            "value" : "顏色"
           }
         }
       }
     },
-    "reader.theme.night" : {
-      "comment" : "Dark theme.",
+    "reader.theme.background.image" : {
+      "comment" : "Background made of a picture the reader supplied.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Night"
+            "value" : "Picture"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "夜间"
+            "value" : "图片"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "夜間"
+            "value" : "圖片"
           }
         }
       }
     },
-    "reader.theme.paper" : {
-      "comment" : "White background theme.",
+    "reader.theme.custom" : {
+      "comment" : "The reader's own palette, in the theme swatch row.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Paper"
+            "value" : "Custom"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "纸白"
+            "value" : "自定"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "紙白"
+            "value" : "自訂"
           }
         }
       }
     },
-    "reader.theme.sepia" : {
-      "comment" : "Warm background theme.",
+    "reader.theme.custom.edit" : {
+      "comment" : "Row that opens the custom palette editor, and its title.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sepia"
+            "value" : "Custom Colours"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "米黄"
+            "value" : "自定配色"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "米黃"
+            "value" : "自訂配色"
           }
         }
       }
     },
-    "reader.theme.sky" : {
-      "comment" : "Light theme, pale blue.",
+    "reader.theme.dark" : {
+      "comment" : "The shipped dark reading palette.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sky"
+            "value" : "Dark"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "淡蓝"
+            "value" : "深色"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "淡藍"
+            "value" : "深色"
           }
         }
       }
     },
-    "reader.theme.slate" : {
-      "comment" : "Dark theme, soft grey.",
+    "reader.theme.gradient.footer" : {
+      "comment" : "Explains what a second colour does.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Slate"
+            "value" : "Two colours or more blend from the top of the page to the bottom."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "石板"
+            "value" : "两个以上的颜色会由上而下渐层。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "石板"
+            "value" : "兩個以上的顏色會由上而下漸層。"
+          }
+        }
+      }
+    },
+    "reader.theme.imageFailed" : {
+      "comment" : "Shown when a chosen picture could not be read or stored.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That picture could not be used."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张图片无法使用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這張圖片無法使用。"
+          }
+        }
+      }
+    },
+    "reader.theme.light" : {
+      "comment" : "The shipped light reading palette.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浅色"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "淺色"
+          }
+        }
+      }
+    },
+    "reader.theme.pickFile" : {
+      "comment" : "Chooses a background picture from the Files app.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose from Files"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从文件选择"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從檔案選擇"
+          }
+        }
+      }
+    },
+    "reader.theme.pickPhoto" : {
+      "comment" : "Chooses a background picture from the photo library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose from Photos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从照片选择"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從照片選擇"
+          }
+        }
+      }
+    },
+    "reader.theme.sample" : {
+      "comment" : "Sample sentence in the custom palette preview.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The night came in at the window, and the words on the page stayed clear."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "夜色从窗外漫进来，纸上的字仍旧清楚。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "夜色從窗外漫進來，紙上的字仍舊清楚。"
+          }
+        }
+      }
+    },
+    "reader.theme.stop %lld" : {
+      "comment" : "One colour in the background gradient, numbered from the top.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Colour %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "颜色 %lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顏色 %lld"
           }
         }
       }
@@ -5811,6 +5955,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "系統"
+          }
+        }
+      }
+    },
+    "reader.theme.textColor" : {
+      "comment" : "The colour the book's text is drawn in.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text Colour"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字颜色"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字顏色"
           }
         }
       }

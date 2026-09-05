@@ -26,7 +26,7 @@ final class ReadingPositionTests: XCTestCase {
         for size in [ReaderSettings.fontSizeRange.lowerBound, 19, ReaderSettings.fontSizeRange.upperBound] {
             settings.fontSize = size
             settings.lineSpacing = size / 2
-            settings.theme = size > 20 ? .night : .paper
+            settings.theme = size > 20 ? .dark : .light
             XCTAssertEqual(
                 anchor.excerpt(in: paragraphs), paragraphs[1],
                 "the anchor must still name the same paragraph at size \(size)"

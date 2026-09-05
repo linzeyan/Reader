@@ -23,7 +23,11 @@ struct ReaderTypography: Equatable {
 
     /// The same faces, sizes and spacings the scrolling reader draws, so the two
     /// renderers are the same book in two shapes rather than two typefaces.
-    init(settings: ReaderSettings) {
+    ///
+    /// The colour arrives separately because it is the one part of the reader's
+    /// appearance that `ReaderSettings` cannot answer alone: with the theme following the
+    /// system, only the view tree knows whether the page is light or dark right now.
+    init(settings: ReaderSettings, color: UIColor) {
         let size = settings.fontSize
         body = settings.fontName.flatMap { UIFont(name: $0, size: size) } ?? .systemFont(ofSize: size)
         // Headings stay on the system face even when the body has a chosen font,
@@ -31,10 +35,7 @@ struct ReaderTypography: Equatable {
         title = .systemFont(ofSize: size + 4, weight: .semibold)
         lineSpacing = settings.lineSpacing
         paragraphSpacing = settings.paragraphSpacing
-        // Bridged rather than restated: a second copy of the nine palettes is how
-        // the paginated reader ends up a shade off the scrolling one. Dynamic
-        // colours survive the bridge and resolve against the drawing view's traits.
-        color = UIColor(settings.theme.foreground)
+        self.color = color
     }
 
     // MARK: - Faces an article needs
@@ -74,9 +75,9 @@ struct ReaderTypography: Equatable {
         return UIFont(descriptor: descriptor, size: font.pointSize)
     }
 
-    /// Derived from the reader's own text colour rather than a fixed grey, because the
-    /// nine themes range from near-black on cream to near-white on black, and a grey that
-    /// is secondary on one is invisible on another.
+    /// Derived from the reader's own text colour rather than a fixed grey, because that
+    /// colour is now anything they like — near-black on cream, near-white on their own
+    /// photograph — and a grey that is secondary on one page is invisible on another.
     var secondaryColor: UIColor { color.withAlphaComponent(0.62) }
 
     /// Links are the one thing here that is not the reader's colour: they have to be
@@ -85,7 +86,7 @@ struct ReaderTypography: Equatable {
     var linkColor: UIColor { .tintColor }
 
     /// A wash rather than a colour, for the same reason `secondaryColor` is derived: it
-    /// has to sit a shade off the page in every theme, light or dark.
+    /// has to sit a shade off the page whatever the page is.
     var codeBackground: UIColor { color.withAlphaComponent(0.06) }
 }
 

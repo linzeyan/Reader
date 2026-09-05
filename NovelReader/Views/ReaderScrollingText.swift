@@ -75,6 +75,10 @@ struct ReaderScrollingText: UIViewRepresentable {
     /// The loaded window, in reading order.
     let chapters: [ReaderModel.LoadedChapter]
     let settings: ReaderSettings
+    /// The colours, already resolved. Handed down rather than read off `settings`,
+    /// because the system's own light-or-dark answer is a trait of the view tree and
+    /// this view's owner is the one holding it.
+    let palette: ReaderPalette
     /// This book's highlights, by site chapter id — looked up per chapter as it is drawn.
     let highlights: [String: [TextHighlight]]
     /// The paragraph being asked about right now, drawn in the selection colour.
@@ -145,7 +149,10 @@ final class ReaderScrollCoordinator {
         let fontSize: Double
         let lineSpacing: Double
         let paragraphSpacing: Double
-        let theme: String
+        /// The text colour, which is baked into every laid-out glyph. Only the ink: the
+        /// page behind it is painted by a view under this one, so changing a gradient for
+        /// a photograph must not throw away chapters that are already laid out.
+        let ink: String
     }
 
     /// The gap between one chapter's last line and the next chapter's heading. The
@@ -170,10 +177,10 @@ final class ReaderScrollCoordinator {
             fontSize: config.settings.fontSize,
             lineSpacing: config.settings.lineSpacing,
             paragraphSpacing: config.settings.paragraphSpacing,
-            theme: config.settings.theme.id
+            ink: config.palette.textKey
         )
         guard key.width > 0 else { return }
-        view?.apply(theme: config.settings.theme)
+        view?.apply(palette: config.palette)
 
         if builtFor != key {
             // Everything on screen describes a measure nobody is reading at. Keep the
@@ -224,7 +231,9 @@ final class ReaderScrollCoordinator {
             let title = chapter.chapter.title
             let subtitle = chapter.subtitle
             let blocks = chapter.blocks
-            let typography = ReaderTypography(settings: config.settings)
+            let typography = ReaderTypography(
+                settings: config.settings, color: config.palette.foreground.uiColor
+            )
             // A screenful, which is as tall as a picture may usefully be here: taller and
             // the reader scrolls past it without ever seeing it whole. Falls back to the
             // measure when the view has not been sized yet, which is a portrait-ish
@@ -632,7 +641,7 @@ final class ReaderScrollCoordinator {
         where reaches(mark.startParagraph, through: mark.endParagraph) {
             for range in chapter.column.text.ranges(of: mark) {
                 for rect in chapter.column.rects(for: range) where rect.intersects(visible) {
-                    result.append((rect, UIColor(config.settings.theme.highlight)))
+                    result.append((rect, UIColor(config.palette.highlight)))
                 }
             }
         }
@@ -641,7 +650,7 @@ final class ReaderScrollCoordinator {
            reaches(marked.paragraph, through: marked.paragraph) {
             let range = chapter.column.text.paragraphRanges[marked.paragraph]
             for rect in chapter.column.rects(for: range) where rect.intersects(visible) {
-                result.append((rect, UIColor(config.settings.theme.selection)))
+                result.append((rect, UIColor(config.palette.selection)))
             }
         }
         return result

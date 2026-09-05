@@ -72,7 +72,11 @@ struct ReadingAppearanceSections: View {
             }
 
             Section("reader.settings.theme") {
-                ThemePicker(selection: $settings.theme)
+                ThemePicker(settings: settings)
+                NavigationLink("reader.theme.custom.edit") {
+                    ReaderThemeEditor(settings: settings)
+                }
+                .accessibilityIdentifier("reader.settings.customTheme")
             }
 
             // Only where it can do anything. Paginated reading turns pages by tapping
@@ -99,27 +103,32 @@ struct ReadingAppearanceSections: View {
     }
 }
 
-/// Backgrounds as swatches rather than a segmented control.
+/// Themes as swatches rather than a segmented control.
 ///
-/// Nine options do not fit in a segmented control, and a colour is not something
-/// a word describes well anyway — "亞麻" and "紙白" mean nothing until you see
-/// them side by side. Each swatch is drawn in its own background and foreground,
-/// so the row is a preview of the choice rather than a list of names.
+/// A colour is not something a word describes well — "淺色" and "自訂" mean nothing until
+/// you see them — so each swatch is drawn in the surface it selects, and the custom one
+/// shows whatever the reader last built. The row is a preview of the choice rather than
+/// a list of names.
 struct ThemePicker: View {
-    @Binding var selection: ReaderSettings.Theme
+    @Bindable var settings: ReaderSettings
+    /// What the theme that follows the system would resolve to. Inside the reader this
+    /// reads back whatever `preferredColorScheme` is forcing, so the 跟隨系統 swatch
+    /// previews the theme in force rather than the device's — which is what it becomes
+    /// the moment it is tapped and the forcing goes away.
+    @Environment(\.colorScheme) private var systemColorScheme
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
                 ForEach(ReaderSettings.Theme.allCases) { theme in
                     Button {
-                        selection = theme
+                        settings.theme = theme
                     } label: {
                         swatch(theme)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text(theme.nameKey))
-                    .accessibilityAddTraits(theme == selection ? [.isSelected] : [])
+                    .accessibilityAddTraits(theme == settings.theme ? [.isSelected] : [])
                 }
             }
             .padding(.vertical, 6)
@@ -128,25 +137,36 @@ struct ThemePicker: View {
     }
 
     private func swatch(_ theme: ReaderSettings.Theme) -> some View {
-        VStack(spacing: 6) {
+        let palette = preview(of: theme)
+        let selected = theme == settings.theme
+        return VStack(spacing: 6) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(theme.background)
+                ReaderBackgroundView(background: palette.background)
                 Text(verbatim: "文")
                     .font(.system(size: 20))
-                    .foregroundStyle(theme.foreground)
+                    .foregroundStyle(palette.ink)
             }
             .frame(width: 52, height: 52)
+            .clipShape(.rect(cornerRadius: 10))
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        theme == selection ? Color.accentColor : Color(.separator),
-                        lineWidth: theme == selection ? 3 : 1
+                        selected ? Color.accentColor : Color(.separator),
+                        lineWidth: selected ? 3 : 1
                     )
             }
             Text(theme.nameKey)
                 .font(.caption2)
-                .foregroundStyle(theme == selection ? Color.accentColor : .secondary)
+                .foregroundStyle(selected ? Color.accentColor : .secondary)
+        }
+    }
+
+    private func preview(of theme: ReaderSettings.Theme) -> ReaderPalette {
+        switch theme {
+        case .system: return systemColorScheme == .dark ? .dark : .light
+        case .light: return .light
+        case .dark: return .dark
+        case .custom: return settings.customPalette
         }
     }
 }

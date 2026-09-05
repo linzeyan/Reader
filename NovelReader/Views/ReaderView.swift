@@ -25,6 +25,10 @@ struct ReaderView: View {
     @State private var showCatalog = false
     @State private var showSettings = false
     @State private var settings = ReaderSettings.shared
+    /// Only read so that the theme that follows the system can answer which way it is
+    /// following. `ReaderSettings` lives outside the view tree and has no traits of its
+    /// own; this is where they are.
+    @Environment(\.colorScheme) private var systemColorScheme
     /// The chapter a backwards page turn walked into, which has to open on its last
     /// page. Held as a chapter id rather than a flag so that a later jump to the same
     /// chapter from the catalog still opens at its start.
@@ -51,6 +55,13 @@ struct ReaderView: View {
         case chapters
     }
 
+    /// The colours in force, resolved here and handed to both renderers. Resolved once,
+    /// in the one view that has both the setting and the system's own appearance, so the
+    /// page, the text and the highlights cannot disagree about which theme is on.
+    private var palette: ReaderPalette {
+        settings.palette(systemIsDark: systemColorScheme == .dark)
+    }
+
     var body: some View {
         #if DEBUG
         // Counted, not printed: this runs at frame rate whenever something in here
@@ -59,7 +70,7 @@ struct ReaderView: View {
         let _ = ReaderProbe.body()
         #endif
         ZStack {
-            settings.theme.background.ignoresSafeArea()
+            ReaderBackgroundView(background: palette.background).ignoresSafeArea()
             if let model {
                 content(model)
             } else {
@@ -77,7 +88,7 @@ struct ReaderView: View {
         // phone with no sensor housing the status bar's height *is* safe area, so
         // toggling it shifts the text by exactly that much.
         .statusBarHidden(true)
-        .preferredColorScheme(settings.theme.colorScheme)
+        .preferredColorScheme(settings.forcedColorScheme)
         .overlay(alignment: .top) {
             if showControls, let model {
                 ReaderTitleCapsule(model: model, fallbackTitle: book.shownName)
@@ -216,6 +227,7 @@ struct ReaderView: View {
             ReaderScrollingText(
                 chapters: model.loaded,
                 settings: settings,
+                palette: palette,
                 highlights: model.highlightsByChapter,
                 marked: markChoice.flatMap(\.beingMarked),
                 // The outline's jump goes first: it names a place inside the chapter on
@@ -355,6 +367,7 @@ struct ReaderView: View {
                     ? .lastPage : .anchor(model.currentAnchor),
                 jumpTo: outlineJump,
                 onJumped: { outlineJump = nil },
+                palette: palette,
                 highlights: model.highlights(inChapter: current.chapter.siteChapterId),
                 onAnchorChange: { anchor, fraction in
                     openAtLastPage = nil

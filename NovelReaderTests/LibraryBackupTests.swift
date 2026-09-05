@@ -208,7 +208,11 @@ final class LibraryBackupTests: XCTestCase {
     func testSettingsComeBack() throws {
         let source = try makeLibrary("source")
         source.targets.reader.fontSize = 24
-        source.targets.reader.theme = .sepia
+        source.targets.reader.theme = .custom
+        source.targets.reader.customPalette = ReaderPalette(
+            background: .colors([ReaderColor(hex: 0x102030), ReaderColor(hex: 0x405060)]),
+            foreground: ReaderColor(hex: 0xEEEEEE)
+        )
         source.targets.library.groupBySource = false
         source.targets.downloads.network = .wifiAndCellular
         source.targets.feeds.keep = .fifty
@@ -217,7 +221,15 @@ final class LibraryBackupTests: XCTestCase {
         try restore(capture(source), into: restored)
 
         XCTAssertEqual(restored.targets.reader.fontSize, 24)
-        XCTAssertEqual(restored.targets.reader.theme, .sepia)
+        XCTAssertEqual(restored.targets.reader.theme, .custom)
+        // The palette is the one setting here that is content rather than a choice
+        // between shipped options, so a restore that kept only the word "custom" would
+        // give the reader a theme they never mixed.
+        XCTAssertEqual(
+            restored.targets.reader.customPalette.background,
+            .colors([ReaderColor(hex: 0x102030), ReaderColor(hex: 0x405060)])
+        )
+        XCTAssertEqual(restored.targets.reader.customPalette.foreground, ReaderColor(hex: 0xEEEEEE))
         XCTAssertFalse(restored.targets.library.groupBySource)
         XCTAssertEqual(restored.targets.downloads.network, .wifiAndCellular)
         XCTAssertEqual(restored.targets.feeds.keep, .fifty)

@@ -62,7 +62,8 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
 
     private func text(_ chapters: [ReaderModel.LoadedChapter]) -> ReaderScrollingText {
         ReaderScrollingText(
-            chapters: chapters, settings: settings, highlights: [:], marked: nil,
+            chapters: chapters, settings: settings, palette: .light,
+            highlights: [:], marked: nil,
             target: nil, footer: .none,
             onPlaceChange: { _ in }, onNeedsNext: {}, onNeedsPrevious: {},
             onTouch: { _ in }, onTap: { _ in false }, onMark: { _, _ in },
