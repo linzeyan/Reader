@@ -153,6 +153,9 @@ final class ReaderScrollCoordinator {
         /// page behind it is painted by a view under this one, so changing a gradient for
         /// a photograph must not throw away chapters that are already laid out.
         let ink: String
+        /// Unlike the page behind it, changing script rewrites the characters themselves,
+        /// so every column has to be composed and laid out again.
+        let script: ChineseScript
     }
 
     /// The gap between one chapter's last line and the next chapter's heading. The
@@ -177,7 +180,8 @@ final class ReaderScrollCoordinator {
             fontSize: config.settings.fontSize,
             lineSpacing: config.settings.lineSpacing,
             paragraphSpacing: config.settings.paragraphSpacing,
-            ink: config.palette.textKey
+            ink: config.palette.textKey,
+            script: config.settings.chineseScript
         )
         guard key.width > 0 else { return }
         view?.apply(palette: config.palette)
@@ -231,6 +235,7 @@ final class ReaderScrollCoordinator {
             let title = chapter.chapter.title
             let subtitle = chapter.subtitle
             let blocks = chapter.blocks
+            let script = key.script
             let typography = ReaderTypography(
                 settings: config.settings, color: config.palette.foreground.uiColor
             )
@@ -252,7 +257,8 @@ final class ReaderScrollCoordinator {
                         typography: typography, layout: layout,
                         // Ragged, unlike a page: this column has no visible right edge
                         // to justify against.
-                        alignment: .natural
+                        alignment: .natural,
+                        script: script
                     ),
                     width: key.width
                 )

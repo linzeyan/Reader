@@ -71,6 +71,38 @@ struct ReadingAppearanceSections: View {
                 Slider(value: $settings.paragraphSpacing, in: 0...32, step: 2)
             }
 
+            Section {
+                Picker("reader.settings.chinese", selection: $settings.chineseScript.depth) {
+                    ForEach(ChineseScript.Depth.allCases) { depth in
+                        Text(depth.nameKey).tag(depth)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("reader.settings.chinese.depth")
+
+                // Only where it means something. A direction to convert *to* is not a
+                // choice a reader who is not converting has, and showing it greyed out
+                // would just be a second thing to read past.
+                if settings.chineseScript.depth != .off {
+                    Picker(
+                        "reader.settings.chinese.target",
+                        selection: $settings.chineseScript.target
+                    ) {
+                        ForEach(ChineseScript.Target.allCases) { target in
+                            Text(target.nameKey).tag(target)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("reader.settings.chinese.target")
+                }
+            } header: {
+                Text("reader.settings.chinese")
+            } footer: {
+                // The difference between the two tiers is one example long, and the
+                // example is the only form of it anybody can act on.
+                Text("reader.settings.chinese.footer")
+            }
+
             Section("reader.settings.theme") {
                 ThemePicker(settings: settings)
                 NavigationLink("reader.theme.custom.edit") {

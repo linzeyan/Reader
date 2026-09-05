@@ -133,11 +133,12 @@ struct ChapterText {
         title: String,
         paragraphs: [String],
         typography: ReaderTypography,
-        alignment: NSTextAlignment = .justified
+        alignment: NSTextAlignment = .justified,
+        script: ChineseScript = .off
     ) {
         self.init(
             title: title, blocks: paragraphs.map(ArticleBlock.paragraph),
-            typography: typography, alignment: alignment
+            typography: typography, alignment: alignment, script: script
         )
     }
 
@@ -152,14 +153,22 @@ struct ChapterText {
     /// - Parameter layout: what the images have to fit inside, and where they are stored.
     ///   Nil lays the article out with its pictures left out, which is what a renderer that
     ///   has no measure yet has to do.
+    /// - Parameter script: which Chinese script to render in. Applied here, at the last
+    ///   moment before the text becomes glyphs, rather than where the chapter was fetched:
+    ///   the stored text stays the publisher's, so changing the setting redraws the book
+    ///   instead of re-downloading it, and a chapter cached in one script is not stuck in it.
     init(
         title: String,
         subtitle: String? = nil,
         blocks: [ArticleBlock],
         typography: ReaderTypography,
         layout: ArticleLayout? = nil,
-        alignment: NSTextAlignment = .justified
+        alignment: NSTextAlignment = .justified,
+        script: ChineseScript = .off
     ) {
+        let title = ChineseText.rendered(title, in: script)
+        let subtitle = subtitle.map { ChineseText.rendered($0, in: script) }
+        let blocks = blocks.map { $0.rendered(in: script) }
         let composed = NSMutableAttributedString()
         var ranges: [NSRange] = []
 

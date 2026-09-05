@@ -206,6 +206,10 @@ struct PaginatedChapterView: View {
         let fontSize: Double
         let lineSpacing: Double
         let paragraphSpacing: Double
+        /// Changing script rewrites the characters themselves, so the chapter has to be
+        /// composed and measured again: the glyphs are different widths and the page
+        /// breaks land somewhere else.
+        let script: ChineseScript
     }
 
     var body: some View {
@@ -596,7 +600,8 @@ struct PaginatedChapterView: View {
             fontName: settings.fontName,
             fontSize: settings.fontSize,
             lineSpacing: settings.lineSpacing,
-            paragraphSpacing: settings.paragraphSpacing
+            paragraphSpacing: settings.paragraphSpacing,
+            script: settings.chineseScript
         )
     }
 
@@ -630,7 +635,8 @@ struct PaginatedChapterView: View {
                         ),
                         directory: $0
                     )
-                }
+                },
+                script: settings.chineseScript
             ),
             pageSize: size
         )

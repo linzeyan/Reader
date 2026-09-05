@@ -74,6 +74,16 @@ final class ReaderSettings {
     var fontName: String? {
         didSet { defaults.set(fontName ?? "", forKey: Keys.fontName) }
     }
+    /// Which Chinese script the reader sees, whatever the site served — see
+    /// `ChineseScript`. Stored as two keys rather than one encoded value so that a UI
+    /// walk can set either half from a launch argument.
+    var chineseScript: ChineseScript {
+        didSet {
+            defaults.set(chineseScript.depth.rawValue, forKey: Keys.chineseDepth)
+            defaults.set(chineseScript.target.rawValue, forKey: Keys.chineseTarget)
+            ChineseText.prewarm(chineseScript)
+        }
+    }
     /// Keeps the screen awake while reading — the single most requested reader
     /// setting, and the one users notice most when it is missing.
     var keepScreenOn: Bool {
@@ -101,6 +111,8 @@ final class ReaderSettings {
         static let theme = "reader.theme"
         static let customPalette = "reader.customPalette"
         static let fontName = "reader.fontName"
+        static let chineseDepth = "reader.chinese.depth"
+        static let chineseTarget = "reader.chinese.target"
         static let keepScreenOn = "reader.keepScreenOn"
         static let tapToTurnPage = "reader.tapToTurnPage"
     }
@@ -132,6 +144,15 @@ final class ReaderSettings {
             // string, which is how a chosen system face is written down.
             fontName = stored.isEmpty || UIFont(name: stored, size: 16) == nil ? nil : stored
         }
+        // Per-character by default: it costs nothing to start, never moves a stored
+        // offset, and is right far more often than it is wrong. Words are the tier a
+        // reader opts into once they have seen 「頭發」 one time too many.
+        chineseScript = ChineseScript(
+            depth: defaults.string(forKey: Keys.chineseDepth)
+                .flatMap(ChineseScript.Depth.init(rawValue:)) ?? .characters,
+            target: defaults.string(forKey: Keys.chineseTarget)
+                .flatMap(ChineseScript.Target.init(rawValue:)) ?? ChineseScript.deviceDefault
+        )
         keepScreenOn = defaults.object(forKey: Keys.keepScreenOn) as? Bool ?? true
         // `bool(forKey:)` rather than the `object(forKey:) as? Bool` the settings above
         // use: it answers false for a key nobody has set, which is this flag's default
@@ -139,6 +160,9 @@ final class ReaderSettings {
         // which is the only way a UI walk can turn the zones on without persisting the
         // choice into the simulator for every test that runs after it.
         tapToTurnPage = defaults.bool(forKey: Keys.tapToTurnPage)
+        // `didSet` does not run for the value an initializer assigns, and the dictionaries
+        // are wanted before the first chapter is composed rather than during it.
+        ChineseText.prewarm(chineseScript)
     }
 
     var font: Font {

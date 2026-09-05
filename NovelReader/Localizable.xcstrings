@@ -5263,6 +5263,198 @@
         }
       }
     },
+    "reader.settings.chinese" : {
+      "comment" : "Chinese script conversion, section header and depth picker.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chinese Script"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "简繁转换"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "簡繁轉換"
+          }
+        }
+      }
+    },
+    "reader.settings.chinese.characters" : {
+      "comment" : "Per-character conversion tier.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Characters"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "逐字"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "逐字"
+          }
+        }
+      }
+    },
+    "reader.settings.chinese.footer" : {
+      "comment" : "Explains what the two conversion tiers trade.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Per-character conversion needs no dictionary and never moves your highlights. Word conversion loads one, which is how it knows 「斗罗大陆」 is a title rather than a fight, and turns 「鼠标」 into 「滑鼠」."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "逐字转换不需要词典，也不会移动你划过的线；词汇转换会多读一份词典，才知道「斗罗大陆」不是「鬥羅大陸」，也才会把「鼠标」写成「滑鼠」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "逐字轉換不需要字典，也不會移動你畫過的線；字彙轉換會多讀一份字典，才知道「斗罗大陆」不是「鬥羅大陸」，也才會把「鼠标」寫成「滑鼠」。"
+          }
+        }
+      }
+    },
+    "reader.settings.chinese.off" : {
+      "comment" : "Leave the text in whatever script the site served.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不转换"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不轉換"
+          }
+        }
+      }
+    },
+    "reader.settings.chinese.phrases" : {
+      "comment" : "Word-level conversion tier.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Words"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "词汇"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "字彙"
+          }
+        }
+      }
+    },
+    "reader.settings.chinese.simplified" : {
+      "comment" : "Convert to Simplified Chinese.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simplified"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "简体"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "簡體"
+          }
+        }
+      }
+    },
+    "reader.settings.chinese.target" : {
+      "comment" : "Which script to convert to.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show As"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示为"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示為"
+          }
+        }
+      }
+    },
+    "reader.settings.chinese.traditional" : {
+      "comment" : "Convert to Traditional Chinese.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Traditional"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "繁体"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正體"
+          }
+        }
+      }
+    },
     "reader.settings.font" : {
       "comment" : "Font family picker.",
       "extractionState" : "manual",

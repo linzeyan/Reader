@@ -10,6 +10,20 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: "7.0.0"
+  # Word-level 簡繁 conversion. ICU (`CFStringTransform`) is built in, free, and better
+  # than expected — it gets 「头发」→「頭髮」 right — but it still resolves each merged
+  # character on its own, so 「斗罗大陆」 comes out 「鬥羅大陸」, and it renders vocabulary
+  # rather than translating it: 「鼠标」 stays 「鼠標」. OpenCC carries the dictionaries
+  # that answer both, which is not a table worth hand-maintaining.
+  #
+  # Pinned to the beta rather than to 1.0.1, the newest release, because 1.0.1 predates
+  # SPM resources: it looks its dictionaries up in `Bundle.main` and ships none, so using
+  # it means committing 4.6 MB of `.ocd` blobs to this repo and wiring them into the app
+  # bundle by hand. The beta declares `resources: [.copy("Dictionary")]` and loads from
+  # `Bundle.module`, so SPM carries them. An exact pin, so "beta" cannot move under us.
+  SwiftyOpenCC:
+    url: https://github.com/ddddxxx/SwiftyOpenCC
+    exactVersion: "2.0.0-beta"
 
 targets:
   NovelReader:
@@ -23,6 +37,8 @@ targets:
     dependencies:
       - package: GRDB
         product: GRDB
+      - package: SwiftyOpenCC
+        product: OpenCC
     # The shipping binary must contain no site rules at all (App Review 5.2 —
     # the app must not point at any particular content source). But the UI is
     # unusable in a simulator without sources, so Debug builds get the recon
