@@ -703,7 +703,9 @@ enum ExtractorScript {
           var scope = c.resultContainer ? document.querySelector(c.resultContainer) : document;
           if (!scope) return { rows: [] };
           var links = Array.prototype.slice.call(scope.querySelectorAll(c.resultLinkSelector));
-          var seen = {}, rows = [];
+          // `named[i]` records whether row `i` got its title from the link itself
+          // rather than off a picture inside it — see the replacement below.
+          var seen = {}, rows = [], named = [];
           links.forEach(function (a) {
             if (!a.href) return;
             // Row-scoped lookups walk up to the nearest container so that a
@@ -726,6 +728,7 @@ enum ExtractorScript {
             // because result rows habitually link the same book twice — once from
             // the cover, once from the heading.
             if (!title) title = clean(a.getAttribute('title'));
+            var fromLink = !!title;
             if (!title) {
                 var img = a.querySelector('img');
                 if (img) title = clean(img.getAttribute('alt') || img.getAttribute('title'));
@@ -735,8 +738,19 @@ enum ExtractorScript {
             // let a textless cover link consume the slot and the heading link
             // right after it — the one that actually names the book — be dropped
             // as a duplicate, losing the whole result.
-            if (seen[a.href]) return;
-            seen[a.href] = true;
+            var at = seen[a.href];
+            if (at !== undefined) {
+              // A later link may still correct an earlier one, upwards only. The
+              // check above accepts an image's `alt` as a title, and 69shuba's
+              // covers carry alt="1" — so first-wins handed back six books all
+              // called "1" while the heading link that says 「劍來」 was thrown
+              // away as a duplicate. A name the link carries beats one scraped
+              // off its picture.
+              if (fromLink && !named[at]) { rows[at].title = title; named[at] = true; }
+              return;
+            }
+            seen[a.href] = rows.length;
+            named.push(fromLink);
             rows.push({
               title: title,
               url: a.href,

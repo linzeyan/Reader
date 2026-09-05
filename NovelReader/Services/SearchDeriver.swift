@@ -284,31 +284,46 @@ final class SearchDeriver {
             return null;
           }
           function clean(s) { return (s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim(); }
-          // The same order the search extractor reads a row's name in. Kept in
-          // step deliberately: a title this cannot find is a result the app will
-          // not show either, so counting it here would overstate the rule.
+          // The same order the search extractor reads a row's name in, including
+          // its preference for a name the link carries over one scraped off a
+          // picture inside it. Kept in step deliberately: a title this cannot
+          // find is a result the app will not show either, so counting it here
+          // would overstate the rule — and a title it reads differently is a
+          // preview that lies about what the derived rule will produce.
           function nameOf(a) {
             var name = clean(a.textContent) || clean(a.getAttribute('title'));
-            if (!name) {
-              var img = a.querySelector('img');
-              if (img) name = clean(img.getAttribute('alt') || img.getAttribute('title'));
-            }
-            return name;
+            if (name) return { name: name, fromLink: true };
+            var img = a.querySelector('img');
+            return {
+              name: img ? clean(img.getAttribute('alt') || img.getAttribute('title')) : '',
+              fromLink: false
+            };
           }
           var empty = { href: location.href, container: null, count: 0, inContainer: 0,
                         hasCover: false, titles: [] };
-          var seen = {}, links = [], titles = [];
+          var seen = {}, links = [], titles = [], named = [];
           Array.prototype.slice.call(document.querySelectorAll('a[href]')).forEach(function (a) {
             var href = a.href;
             if (!href || href.indexOf(location.origin) !== 0) return;
             if (!bookRe.test(href) || chapterRe.test(href)) return;
             var id = bookRe.exec(href)[1];
-            if (!id || seen[id]) return;
-            var name = nameOf(a);
-            if (!name) return;
-            seen[id] = true;
+            if (!id) return;
+            var found = nameOf(a);
+            if (!found.name) return;
+            var at = seen[id];
+            if (at !== undefined) {
+              // Upwards only, and the reason is the whole point of `sampleTitles`:
+              // the user confirms a derived rule against the names it produced.
+              // 69shuba links each book from its cover and again from its heading,
+              // and the cover's `alt` is "1" — so first-wins offered six books
+              // called "1" for confirmation, which confirms nothing.
+              if (found.fromLink && !named[at]) { titles[at] = found.name; named[at] = true; }
+              return;
+            }
+            seen[id] = links.length;
             links.push(a);
-            if (titles.length < 5) titles.push(name);
+            titles.push(found.name);
+            named.push(found.fromLink);
           });
           if (!links.length) return empty;
           var node = links[0], container = null, inContainer = 0;
@@ -332,7 +347,9 @@ final class SearchDeriver {
             count: links.length,
             inContainer: inContainer,
             hasCover: !!(row && row.querySelector('img')),
-            titles: titles
+            // Capped at the end rather than while collecting, so a name corrected
+            // by a later link is the one that reaches the preview.
+            titles: titles.slice(0, 5)
           };
         })()
         """
