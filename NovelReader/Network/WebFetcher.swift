@@ -16,6 +16,17 @@ import WebKit
 /// @MainActor because WKWebView is main-thread-only. Loads are serialised — one
 /// web view can only display one page at a time, and hammering a challenged host
 /// is exactly what we must not do.
+/// Where the user agent actually lives.
+///
+/// Outside `WebFetcher` because that type is `@MainActor` and this string is read wherever
+/// a request is built — including the picture fetches that deliberately run off it. A
+/// main-actor static would turn every one of those into an `await` for a constant.
+private enum FetchIdentity {
+    static var userAgent =
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 "
+        + "(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+}
+
 @MainActor
 final class WebFetcher: NSObject {
     enum FetchError: LocalizedError {
@@ -119,16 +130,75 @@ final class WebFetcher: NSObject {
         super.init()
         webView.navigationDelegate = self
         // Identify as mobile Safari so sites serve their phone layout, which is
-        // lighter and has the selectors our rules are written against.
+        // lighter and has the selectors our rules are written against. Completed from
+        // this engine's own default before the first fetch — see `adoptUserAgentIfNeeded`.
         webView.customUserAgent = Self.mobileSafariUserAgent
     }
 
+    /// The identity every request this app makes goes out under: page loads here, and the
+    /// `URLSession` fetches that shadow them (see `ImageFetcher`).
+    ///
+    /// A variable rather than a constant because the version in it has to be *this*
+    /// engine's. WebKit's TLS and HTTP/2 handshakes are version-specific, and a client
+    /// that shakes hands as one Safari while calling itself another two years older is
+    /// exactly the inconsistency a WAF scores against — the fixed string this replaces
+    /// claimed `17_0` on an engine whose own default said `18_7`, which is a free
+    /// contribution to a bot score on every request. Set once per session, before any
+    /// page is loaded; the value below is what stands in until then and on a device whose
+    /// default is a shape `safariUserAgent(matching:)` does not recognise.
+    ///
     /// `nonisolated` because the identity this app fetches under is not the web view's
     /// business: every request that shadows a page load sends it too, and the one that
     /// downloads an article's pictures runs off the main actor.
-    nonisolated static let mobileSafariUserAgent =
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
-        + "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    nonisolated static var mobileSafariUserAgent: String { FetchIdentity.userAgent }
+
+    /// Mobile Safari's user agent for the engine that produced `webKitDefault`.
+    ///
+    /// A `WKWebView` announces itself as an embedded view: its default names the OS
+    /// version it actually is, and omits the `Version/…` and `Safari/…` tokens that say
+    /// "browser". Some of these sites serve a thinner page to it, which is why they were
+    /// ever added. This puts them back where mobile Safari puts them — `Version/` before
+    /// `Mobile/`, `Safari/` last — around the version WebKit itself reported.
+    ///
+    /// Still the iPhone shape on an iPad, deliberately: the rules are written against the
+    /// phone layout, and the handshake an iPad makes is the same engine's either way, so
+    /// the claim stays consistent with what a WAF can measure.
+    ///
+    /// - Returns: nil when the default is not a shape this knows how to complete, in
+    ///   which case WebKit's own is used unchanged — an unrecognised default is at least
+    ///   an internally consistent one, which is the whole point of asking.
+    nonisolated static func safariUserAgent(matching webKitDefault: String) -> String? {
+        guard !webKitDefault.contains("Version/"),
+              let osRange = webKitDefault.range(of: #"OS \d+(_\d+)*"#, options: .regularExpression)
+        else { return nil }
+        let release = webKitDefault[osRange].dropFirst(3)
+        let major = release.prefix { $0.isNumber }
+        guard !major.isEmpty else { return nil }
+        let build = webKitDefault.range(of: #"Mobile/[0-9A-Za-z]+"#, options: .regularExpression)
+            .map { String(webKitDefault[$0]) } ?? "Mobile/15E148"
+        return "Mozilla/5.0 (iPhone; CPU iPhone OS \(release) like Mac OS X) "
+            + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 \(build) Safari/604.1"
+    }
+
+    /// Asks the engine what it calls itself, and completes that into Safari's own.
+    ///
+    /// Once per session, from inside `serialised`, so it is settled before the first page
+    /// this fetcher ever loads — and so a probe that needs the web view cannot race one.
+    /// A failed probe leaves the standing value: this is a refinement of an identity that
+    /// already works, not something a fetch should fail over.
+    private func adoptUserAgentIfNeeded() async {
+        guard !hasAdoptedUserAgent else { return }
+        hasAdoptedUserAgent = true
+        let probed = try? await webView.evaluateJavaScript("navigator.userAgent") as? String
+        guard let webKitDefault = probed ?? nil else { return }
+        // WebKit's own is the fallback rather than the constant, because it is at least
+        // consistent with the engine sending it.
+        let agent = Self.safariUserAgent(matching: webKitDefault) ?? webKitDefault
+        FetchIdentity.userAgent = agent
+        webView.customUserAgent = agent
+    }
+
+    private var hasAdoptedUserAgent = false
 
     // MARK: - Fetching
 
@@ -146,7 +216,7 @@ final class WebFetcher: NSObject {
     ) async throws -> T {
         try await serialised {
             try await self.navigate(timeout: timeout, in: self.webView, settlingWhenReadable: true) {
-                self.webView.load(URLRequest(url: url))
+                self.webView.load(self.request(for: url))
             }
             try await self.failIfChallenged()
             try await self.failIfTurnedAway(by: signIn, timeout: timeout)
@@ -173,7 +243,7 @@ final class WebFetcher: NSObject {
     ) async throws -> T {
         try await serialised {
             try await self.navigate(timeout: timeout, in: self.webView, settlingWhenReadable: true) {
-                self.webView.load(URLRequest(url: url))
+                self.webView.load(self.request(for: url))
             }
             try await self.failIfChallenged()
             try await self.failIfTurnedAway(by: signIn, timeout: timeout)
@@ -187,6 +257,39 @@ final class WebFetcher: NSObject {
             return value
         }
     }
+
+    /// The request a page load goes out as.
+    ///
+    /// Carries a `Referer` when the last page fetched was on the same host, because that
+    /// is what reading two chapters in a row looks like from the other end: a browser
+    /// sends the page it came from. Every load here is programmatic, and the one before it
+    /// was replaced by `about:blank` the moment its text was taken — so without this,
+    /// every chapter of a novel is a cold, referrer-less hit on a deep URL, which is a
+    /// shape a WAF has every reason to read as a crawler rather than a reader.
+    ///
+    /// Same host only, and never the page to itself. A referrer carried across sites is
+    /// not politeness — it is telling one site what the reader was doing on another.
+    /// `ImageFetcher` has sent one all along; the pages themselves did not.
+    private func request(for url: URL) -> URLRequest {
+        defer { cameFrom = url }
+        return Self.request(for: url, comingFrom: cameFrom)
+    }
+
+    /// Not private so a test can pin the same-host rule. A referrer that leaks across
+    /// sites is the one way this could do harm, and it is not reachable through the
+    /// public surface without a network.
+    nonisolated static func request(for url: URL, comingFrom previous: URL?) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let previous, previous.host() == url.host(), previous != url {
+            request.setValue(previous.absoluteString, forHTTPHeaderField: "Referer")
+        }
+        return request
+    }
+
+    /// The last page this fetcher was pointed at, for the referrer above. Deliberately
+    /// not the web view's own `url`: by the time the next fetch starts that is
+    /// `about:blank`, which is the whole problem.
+    private var cameFrom: URL?
 
     /// Parks the fetcher's web view on a blank page once a fetch has what it came
     /// for.
@@ -359,11 +462,47 @@ final class WebFetcher: NSObject {
     /// against the same store on every fetch for the rest of the session.
     private var hasBlockedMedia = false
 
+    /// Hands the reader a challenge only once it is clear the check will not clear itself.
+    ///
+    /// A non-interactive check is a page like any other: it parses, it fires `load`, and
+    /// the fetch waiter resumes on it — so the document in hand the moment a navigation
+    /// finishes is perfectly capable of being Cloudflare's own interstitial, a couple of
+    /// seconds away from running its JS and navigating on to the page we asked for.
+    /// Reporting it here, which is what this used to do, put a sheet in front of the
+    /// reader asking them to prove they are human for a check that was going to pass
+    /// without them. `documentIsReadable` already refuses to settle early on a challenge
+    /// for exactly this reason; the `didFinish` path had no such guard.
+    ///
+    /// So the page is watched instead of reported. Polled rather than waited on as a
+    /// navigation, because clearing takes more than one hop and the last of them may
+    /// already have landed by the time this looks — a wait for the *next* navigation
+    /// would then spend its whole timeout on a page that was ours all along.
     private func failIfChallenged() async throws {
-        if let challengeURL = try await detectChallenge() {
-            throw FetchError.challengePresented(challengeURL)
+        guard var challenged = try await detectChallenge() else { return }
+        let deadline = ContinuousClock.now + Self.challengeSelfClearGrace
+        while ContinuousClock.now < deadline {
+            try? await Task.sleep(for: Self.readabilityPollInterval)
+            do {
+                guard let stillChallenged = try await detectChallenge() else { return }
+                challenged = stillChallenged
+            } catch {
+                // A probe that throws is a document being swapped out from under it,
+                // which is what a check clearing itself looks like from here — so it is
+                // "ask again", not an answer.
+                continue
+            }
         }
+        throw FetchError.challengePresented(challenged)
     }
+
+    /// How long a check gets to clear itself before the reader is asked.
+    ///
+    /// Long enough for the non-interactive check, which the recon notes measured a real
+    /// engine passing in a few seconds, and short enough that the interactive one — which
+    /// never clears, whatever it is given — does not leave a reader watching a spinner.
+    /// Paid at most once per clearance window: a passed check leaves `cf_clearance`
+    /// behind, and the requests riding on it see no challenge at all.
+    private static let challengeSelfClearGrace: Duration = .seconds(8)
 
     /// Stops the fetch when the site bounced us to its "members only" page, and
     /// leaves the web view showing the sign-in form instead.
@@ -408,7 +547,7 @@ final class WebFetcher: NSObject {
             guard signIn.turnsAway(webView.url) else { return }
         }
         try? await navigate(timeout: timeout, in: webView) {
-            self.webView.load(URLRequest(url: signInURL))
+            self.webView.load(self.request(for: signInURL))
         }
         throw FetchError.signInRequired(signInURL)
     }
@@ -440,6 +579,7 @@ final class WebFetcher: NSObject {
         let previous = queueTail
         let task = Task { @MainActor in
             await previous.value
+            await self.adoptUserAgentIfNeeded()
             await self.blockMediaIfNeeded()
             return try await body()
         }
