@@ -1,9 +1,6 @@
 {
   "sourceLanguage" : "zh-Hant",
   "strings" : {
-    "%@" : {
-
-    },
     "backup.error.unreadable" : {
       "comment" : "Error: the chosen file is not a backup.",
       "extractionState" : "manual",
@@ -388,9 +385,6 @@
         }
       }
     },
-    "book.catalog %@" : {
-
-    },
     "book.catalog %lld" : {
       "comment" : "Catalog section header with the chapter count.",
       "extractionState" : "manual",
@@ -655,16 +649,6 @@
         }
       }
     },
-    "book.download.progress %@ %@" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "book.download.progress %1$@ %2$@"
-          }
-        }
-      }
-    },
     "book.download.progress %lld %lld" : {
       "comment" : "Download queue progress.",
       "extractionState" : "manual",
@@ -733,16 +717,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下載全部章節"
-          }
-        }
-      }
-    },
-    "book.downloaded %@ %@" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "book.downloaded %1$@ %2$@"
           }
         }
       }
@@ -887,16 +861,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "(第%1$lld包共%2$lld包)"
-          }
-        }
-      }
-    },
-    "book.export.partial %@ %@" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "book.export.partial %1$@ %2$@"
           }
         }
       }
@@ -1689,16 +1653,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重試這一頁"
-          }
-        }
-      }
-    },
-    "comic.pageOf %@ %@" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "comic.pageOf %1$@ %2$@"
           }
         }
       }
@@ -2687,9 +2641,6 @@
         }
       }
     },
-    "downloads.selected %@" : {
-
-    },
     "downloads.selected %lld" : {
       "comment" : "How many chapters are ticked.",
       "extractionState" : "manual",
@@ -3266,9 +3217,6 @@
         }
       }
     },
-    "library.add.failed %@" : {
-
-    },
     "library.add.failed %lld" : {
       "comment" : "Says how many pasted addresses were not added, after a batch ends.",
       "extractionState" : "manual",
@@ -3313,16 +3261,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "一行一個網址，小說與漫畫可以混貼；App 會逐一比對已安裝的來源。"
-          }
-        }
-      }
-    },
-    "library.add.progress %@ %@" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "library.add.progress %1$@ %2$@"
           }
         }
       }
@@ -4143,9 +4081,6 @@
         }
       }
     },
-    "library.newChapters %@" : {
-
-    },
     "library.newChapters %lld" : {
       "comment" : "How many chapters the site has added past the reading position.",
       "extractionState" : "manual",
@@ -4338,9 +4273,6 @@
         }
       }
     },
-    "library.progress %@" : {
-
-    },
     "library.progress %lld" : {
       "comment" : "Reading position shown under a bookmark.",
       "extractionState" : "manual",
@@ -4409,16 +4341,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "讀到第 %lld 篇 · %@"
-          }
-        }
-      }
-    },
-    "library.progress.share %@ %@" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "library.progress.share %1$@ %2$@"
           }
         }
       }
@@ -6247,16 +6169,6 @@
         }
       }
     },
-    "recent.progress %@ %@" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "recent.progress %1$@ %2$@"
-          }
-        }
-      }
-    },
     "recent.progress %lld %lld" : {
       "comment" : "Which chapter of how many, on a reading history row.",
       "extractionState" : "manual",
@@ -6325,16 +6237,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "第 %lld / %lld 篇 · %@"
-          }
-        }
-      }
-    },
-    "recent.progress.share %@ %@ %@" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "recent.progress.share %1$@ %2$@ %3$@"
           }
         }
       }

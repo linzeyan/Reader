@@ -66,6 +66,14 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: NovelReader/Info.plist
+        # Localizable.xcstrings is authored, not extracted. Left on, every build rewrote
+        # the file in the working tree: it reindents the whole catalog to its own taste,
+        # and it adds a key per interpolated `Text` under the wrong specifier — the
+        # compiler emits `%@` where `LocalizedStringKey` looks the string up under
+        # `%lld`, so what accumulated was nineteen dead siblings of keys that were
+        # already translated. Nothing reads them, and every one of them was a `git diff`
+        # after an install to the phone.
+        SWIFT_EMIT_LOC_STRINGS: NO
         # iCloud KVS carries bookmarks / progress / download index (metadata only).
         CODE_SIGN_ENTITLEMENTS: NovelReader/NovelReader.entitlements
         # Simulator: ad-hoc signing, no Apple account needed.
