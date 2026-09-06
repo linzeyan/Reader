@@ -155,11 +155,19 @@ final class SmokeTests: XCTestCase {
         appearance.tap()
         XCTAssertTrue(app.sliders.firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["reader.settings.font"].exists, "Font picker should be present")
-        XCTAssertTrue(
-            app.descendants(matching: .any).matching(identifier: "reader.settings.themes")
-                .firstMatch.exists,
-            "The background swatches should be present"
-        )
+
+        // Which script the book is rendered in, between the type controls and the
+        // palette. Everything from here down is below the fold on a phone, so each of
+        // them has to be gone and got rather than waited for — see `reveal`.
+        let script = app.descendants(matching: .any)
+            .matching(identifier: "reader.settings.chinese.depth").firstMatch
+        app.reveal(script)
+        XCTAssertTrue(script.exists, "The 簡繁 conversion control should be present")
+
+        let swatches = app.descendants(matching: .any)
+            .matching(identifier: "reader.settings.themes").firstMatch
+        app.reveal(swatches)
+        XCTAssertTrue(swatches.exists, "The background swatches should be present")
         // The way to a page of the reader's own making. It is a row rather than a swatch,
         // so nothing above proves it is there.
         let custom = app.buttons["reader.settings.customTheme"]
