@@ -141,6 +141,18 @@ final class ReaderScrollCoordinator {
     /// costs nothing.
     private var reported: ReaderPlace?
     private var deliveredTarget: ReaderModel.ScrollTarget?
+    /// Where the reader has to be put back once there are columns to put them in.
+    ///
+    /// Held here rather than carried by the layout jobs a rebuild starts, because a
+    /// second key change can arrive while the first rebuild is still in flight and
+    /// `currentPlace()` has nothing to answer with once `placed` has been emptied. iOS
+    /// makes that happen every time the app leaves the screen: it snapshots for the app
+    /// switcher in both appearances, so a reader on the system theme gets two ink
+    /// changes back to back. Carried by the jobs, the second one captured nil, nothing
+    /// aimed the scroll, and the reader came back at the head of the loaded window —
+    /// several chapters behind where they were, and written down as their position by
+    /// the report at the end of `place`.
+    private var restoring: ReaderModel.ScrollTarget?
 
     /// Everything that changes where lines break.
     private struct LayoutKey: Equatable {
@@ -185,25 +197,36 @@ final class ReaderScrollCoordinator {
         )
         guard key.width > 0 else { return }
         view?.apply(palette: config.palette)
+        // A jump replaced the window while a rebuild was in flight, so there is no longer
+        // a chapter to put the reader back into. Dropped rather than left to miss for
+        // ever, because a restore that can never land silences every place report.
+        if let restoring, !config.chapters.contains(where: {
+            $0.chapter.index == restoring.chapterIndex
+        }) {
+            self.restoring = nil
+        }
 
         if builtFor != key {
             // Everything on screen describes a measure nobody is reading at. Keep the
             // reader's place as an anchor — a point in the old layout means nothing in
             // the new one — and rebuild.
-            let keep = currentPlace()
+            //
+            // Only when the reader is not already waiting to be put back. A rebuild in
+            // flight is holding the right answer, and whatever a half-built stack reads
+            // as — nothing at all, or the head of the loaded window — is not it.
+            if restoring == nil, let keep = currentPlace() {
+                restoring = ReaderModel.ScrollTarget(
+                    chapterIndex: keep.chapterIndex, anchor: keep.anchor
+                )
+            }
             builtFor = key
             placed = []
             laying = []
             deliveredTarget = nil
-            layOutMissing(
-                for: config,
-                restoring: keep.map { ReaderModel.ScrollTarget(
-                    chapterIndex: $0.chapterIndex, anchor: $0.anchor
-                ) }
-            )
+            layOutMissing(for: config)
             return
         }
-        layOutMissing(for: config, restoring: nil)
+        layOutMissing(for: config)
         dropChaptersNoLongerLoaded(config)
         applyTargetIfNeeded(config)
         view?.refreshContentSize()
@@ -220,12 +243,10 @@ final class ReaderScrollCoordinator {
 
     // MARK: - Building columns
 
-    /// Lays out any loaded chapter that has no column yet, oldest first.
-    private func layOutMissing(
-        for config: ReaderScrollingText, restoring target: ReaderModel.ScrollTarget?
-    ) {
+    /// Lays out any loaded chapter that has no column yet, in `layoutOrder`.
+    private func layOutMissing(for config: ReaderScrollingText) {
         guard let key = builtFor else { return }
-        for chapter in config.chapters
+        for chapter in layoutOrder(config.chapters)
         where !placed.contains(where: { $0.chapterId == chapter.chapter.id })
             && !laying.contains(chapter.chapter.id) {
             laying.insert(chapter.chapter.id)
@@ -266,11 +287,31 @@ final class ReaderScrollCoordinator {
                 Task { @MainActor [weak self] in
                     self?.place(
                         column, id: identity, index: index, siteChapterId: siteId,
-                        builtUnder: key, restoring: target
+                        builtUnder: key
                     )
                 }
             }
         }
+    }
+
+    /// The chapter the reader is being put back into first, then reading order.
+    ///
+    /// Order only matters during a rebuild, and there it decides whether the reader comes
+    /// back to their own sentence. Every chapter placed ahead of theirs grows the content
+    /// from zero, and a `UIScrollView` whose content is shorter than its offset pulls the
+    /// offset back without telling anyone — so with the reader's chapter laid out last,
+    /// the scroll has already been dragged to the top of the window by the time it
+    /// arrives. Theirs first means the offset it is given is one the content can hold,
+    /// and every chapter that lands afterwards moves it by an exact `shift`.
+    private func layoutOrder(
+        _ chapters: [ReaderModel.LoadedChapter]
+    ) -> [ReaderModel.LoadedChapter] {
+        guard let restoring, let index = chapters.firstIndex(where: {
+            $0.chapter.index == restoring.chapterIndex
+        }) else { return chapters }
+        var ordered = chapters
+        ordered.insert(ordered.remove(at: index), at: 0)
+        return ordered
     }
 
     /// Puts a freshly laid-out chapter into the stack, keeping the reader where they are.
@@ -282,7 +323,7 @@ final class ReaderScrollCoordinator {
     /// re-aim.
     private func place(
         _ column: ChapterColumn, id: String, index: Int, siteChapterId: String,
-        builtUnder key: LayoutKey, restoring target: ReaderModel.ScrollTarget?
+        builtUnder key: LayoutKey
     ) {
         laying.remove(id)
         // Laid out for a measure that has since changed, or for a chapter the reader has
@@ -313,8 +354,11 @@ final class ReaderScrollCoordinator {
             // the chapter landed below them, which is the common case.
             view?.shift(by: moved.top - anchorTop)
         }
-        if let target, placed.contains(where: { $0.chapterIndex == target.chapterIndex }) {
-            scroll(to: target.anchor, inChapter: target.chapterIndex, animated: false)
+        if let restoring, placed.contains(where: { $0.chapterIndex == restoring.chapterIndex }) {
+            scroll(to: restoring.anchor, inChapter: restoring.chapterIndex, animated: false)
+            // Spent. What the reader does from here is theirs, and re-asserting it after
+            // the next chapter lands would take the book back off them.
+            self.restoring = nil
         }
         // A jump states its aim before the chapter it names can possibly be laid out,
         // so this is where most landings actually happen.
@@ -389,7 +433,14 @@ final class ReaderScrollCoordinator {
         askForMoreIfNeeded()
     }
 
+    /// Nothing while the reader is still being put back after a rebuild.
+    ///
+    /// A rebuild grows the content one chapter at a time from nothing, so until the
+    /// reader's own chapter is in the stack the scroll offset describes wherever the
+    /// shortened content left it — the head of the loaded window. That is a place, it is
+    /// not theirs, and the model writes the first one it is told down.
     private func reportPlace() {
+        guard restoring == nil else { return }
         guard let config, let place = currentPlace(), place != reported else { return }
         reported = place
         config.onPlaceChange(place)
@@ -431,6 +482,10 @@ final class ReaderScrollCoordinator {
               placed.contains(where: { $0.chapterIndex == target.chapterIndex })
         else { return }
         deliveredTarget = target
+        // The owner is asking for somewhere, which outranks putting the reader back where
+        // a rebuild found them — a jump mid-rebuild is the reader saying where they want
+        // to be now.
+        restoring = nil
         scroll(to: target.anchor, inChapter: target.chapterIndex, animated: false)
         // Off this pass: clearing the target writes to the model, and this can run
         // inside `updateUIView` — which is SwiftUI in the middle of reading it.

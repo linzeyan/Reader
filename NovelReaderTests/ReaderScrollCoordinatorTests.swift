@@ -60,12 +60,16 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         )
     }
 
-    private func text(_ chapters: [ReaderModel.LoadedChapter]) -> ReaderScrollingText {
+    private func text(
+        _ chapters: [ReaderModel.LoadedChapter],
+        palette: ReaderPalette = .light,
+        onPlaceChange: @escaping (ReaderPlace) -> Void = { _ in }
+    ) -> ReaderScrollingText {
         ReaderScrollingText(
-            chapters: chapters, settings: settings, palette: .light,
+            chapters: chapters, settings: settings, palette: palette,
             highlights: [:], marked: nil,
             target: nil, footer: .none,
-            onPlaceChange: { _ in }, onNeedsNext: {}, onNeedsPrevious: {},
+            onPlaceChange: onPlaceChange, onNeedsNext: {}, onNeedsPrevious: {},
             onTouch: { _ in }, onTap: { _ in false }, onMark: { _, _ in },
             onTargetReached: {}
         )
@@ -136,6 +140,53 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             coordinator.currentPlace(), before,
             "giving a chapter back must cost the reader nothing but the chapter"
+        )
+    }
+
+    /// Leaving the app must not cost the reader the chapters they read in this session.
+    ///
+    /// Reported from a phone, twice: switch away mid-book, come back, and the reader is
+    /// at chapter 384 with 395 the last thing they read — the head of the loaded window,
+    /// which is where the session started. Both numbers then went to the database,
+    /// because the place a rebuild reads part-way through is reported like any other.
+    ///
+    /// The trigger is iOS snapshotting the app for the switcher in *both* appearances, so
+    /// a reader on the system theme gets two ink changes back to back. The first empties
+    /// the stack to rebuild; the second finds nothing to ask where the reader is and used
+    /// to carry that nothing into the rebuild as the place to restore.
+    func testAnAppearanceFlipWhileTheColumnsAreRebuildingLeavesTheReaderWhereTheyWere() async throws {
+        let window = [chapter(1, paragraphs: 30), chapter(2, paragraphs: 30),
+                      chapter(3, paragraphs: 30)]
+        try await show(window)
+        coordinator.scroll(to: TextAnchor(paragraph: 9, characterOffset: 0), inChapter: 3,
+                           animated: false)
+        let before = try XCTUnwrap(coordinator.currentPlace())
+        XCTAssertEqual(before.chapterIndex, 3)
+
+        // Light, dark, light — the pair of trait changes a trip to the background makes,
+        // both landing before a single column has been laid out again.
+        var reported: [ReaderPlace] = []
+        coordinator.update(with: text(window, palette: .dark, onPlaceChange: { reported.append($0) }))
+        coordinator.update(with: text(window, palette: .light, onPlaceChange: { reported.append($0) }))
+        XCTAssertTrue(coordinator.placed.isEmpty, "the second flip has to land mid-rebuild")
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while coordinator.placed.count < window.count {
+            guard ContinuousClock.now < deadline else {
+                return XCTFail("the rebuild never finished")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(
+            coordinator.currentPlace(), before,
+            "coming back from the background must land on the sentence the reader left"
+        )
+        XCTAssertTrue(
+            reported.allSatisfy { $0.chapterIndex == before.chapterIndex },
+            "a half-built stack must report nothing: the model writes the first place it "
+                + "is told down, and the throttle then refuses the correction — which is "
+                + "how a bogus chapter reaches the database, got \(reported.map(\.chapterIndex))"
         )
     }
 
