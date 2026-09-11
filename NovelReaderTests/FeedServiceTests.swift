@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import NovelReader
 
@@ -280,5 +281,129 @@ final class FeedServiceTests: XCTestCase {
         let chapter = try XCTUnwrap(try repo.chapters(bookId: book.id).first)
         XCTAssertEqual(chapter.title, "Headline only")
         XCTAssertFalse(chapter.isDownloaded)
+    }
+
+    // MARK: - Fetching one article's own page
+
+    /// The claim that separates this from a refresh: the words are on the device before a
+    /// single picture has been asked for.
+    ///
+    /// A refresh runs with the phone in a pocket and can afford to finish an article
+    /// completely. This runs because somebody tapped a button and is watching the screen,
+    /// and pictures are where the time goes — measured across thirteen real feeds, ninety
+    /// per cent of a cold subscribe, thirty to forty seconds an article on the illustrated
+    /// ones against four milliseconds to extract. Storing them together is what made
+    /// fetching one article slower than opening it in a browser.
+    func testFetchingAnArticlesPageStoresTheWordsBeforeAnyPicture() async throws {
+        let (book, chapter) = try await summaryOnlyArticle()
+        StubProtocol.answersByURL = [
+            "https://example.com/1": .ok(Self.pageWithAPicture),
+            Self.pictureURL: .bytes(Self.png(width: 800, height: 600)),
+        ]
+
+        let text = try await service.fetchFullText(for: chapter, in: book)
+
+        XCTAssertTrue(
+            text.blocks.contains { $0.kind == .image },
+            "the page's picture has to reach the reader as a block, or there is nothing to fetch later"
+        )
+        XCTAssertEqual(
+            try ChapterFileStore(root: tempRoot).readParagraphs(
+                siteId: book.siteId, siteBookId: book.siteBookId,
+                siteChapterId: chapter.siteChapterId
+            ),
+            // "A picture" is the image block's alt text, which is what stands in its place
+            // until the file lands — so this is also the reader's view of the gap.
+            [
+                "The whole piece, which the feed only summarised.", "A picture",
+                "The paragraph after it.",
+            ]
+        )
+        XCTAssertEqual(
+            storedPictures(), [],
+            "nothing may have been downloaded yet — waiting for it is the whole complaint"
+        )
+    }
+
+    /// And then the pictures arrive, without the reader having asked a second time.
+    func testFetchingAnArticlesPicturesAfterwardsBringsThemToTheDevice() async throws {
+        let (book, chapter) = try await summaryOnlyArticle()
+        StubProtocol.answersByURL = [
+            "https://example.com/1": .ok(Self.pageWithAPicture),
+            Self.pictureURL: .bytes(Self.png(width: 800, height: 600)),
+        ]
+        let text = try await service.fetchFullText(for: chapter, in: book)
+
+        let arrived = try await service.fetchImages(for: text, chapter: chapter, in: book)
+
+        XCTAssertTrue(arrived, "the caller re-reads the article only when told something landed")
+        XCTAssertEqual(storedPictures().count, 1)
+    }
+
+    /// A picture the publisher's host refuses is not a failure — the block keeps its
+    /// address and the reader draws its alt text — but it must not claim to have landed
+    /// either, or the reader rebuilds its layout to show exactly what is already on screen.
+    func testAnArticleWhosePicturesRefuseToDownloadReportsNothingLanded() async throws {
+        let (book, chapter) = try await summaryOnlyArticle()
+        StubProtocol.answersByURL = [
+            "https://example.com/1": .ok(Self.pageWithAPicture),
+            Self.pictureURL: .status(403),
+        ]
+        let text = try await service.fetchFullText(for: chapter, in: book)
+
+        let arrived = try await service.fetchImages(for: text, chapter: chapter, in: book)
+
+        XCTAssertFalse(arrived)
+        XCTAssertEqual(storedPictures(), [])
+    }
+
+    // MARK: - Helpers for one article's own page
+
+    private static let pictureURL = "https://example.com/pic.png"
+
+    private static let pageWithAPicture = """
+    <!DOCTYPE html><html><head><title>Headline only</title></head><body><article>
+      <h1>Headline only</h1>
+      <p>The whole piece, which the feed only summarised.</p>
+      <img src="\(pictureURL)" width="800" height="600" alt="A picture">
+      <p>The paragraph after it.</p>
+    </article></body></html>
+    """
+
+    /// A subscription holding one article the publisher listed and gave no body for —
+    /// the only state from which the reader offers to fetch the page.
+    private func summaryOnlyArticle() async throws -> (Book, Chapter) {
+        StubProtocol.answer = .ok(feed("""
+        <item>
+          <title>Headline only</title>
+          <link>https://example.com/1</link>
+          <guid>tag:1</guid>
+        </item>
+        """))
+        let book = try await service.subscribe(to: address)
+        return (book, try XCTUnwrap(try repo.chapters(bookId: book.id).first))
+    }
+
+    /// Picture files anywhere under the store, which is how "the words are stored" is told
+    /// apart from "the whole article is stored" without asking the code under test.
+    private func storedPictures() -> [String] {
+        let walker = FileManager.default.enumerator(at: tempRoot, includingPropertiesForKeys: nil)
+        return (walker?.compactMap { $0 as? URL } ?? [])
+            .filter { ["png", "jpg", "jpeg"].contains($0.pathExtension.lowercased()) }
+            .map(\.lastPathComponent)
+            .sorted()
+    }
+
+    /// A real PNG, because `ArticleImages` sniffs the bytes and discards anything that is
+    /// not a picture — a placeholder string would be indistinguishable from a 200 that
+    /// returned a login page.
+    private static func png(width: Int, height: Int) -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let size = CGSize(width: width, height: height)
+        return UIGraphicsImageRenderer(size: size, format: format).pngData { context in
+            UIColor.gray.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
     }
 }

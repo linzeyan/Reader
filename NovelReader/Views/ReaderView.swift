@@ -1378,13 +1378,14 @@ final class ReaderModel {
         isLoading = true
         error = nil
         do {
-            try await env.feeds.fetchFullText(for: article, in: book)
+            let text = try await env.feeds.fetchFullText(for: article, in: book)
             if let at = chapters.firstIndex(where: { $0.id == article.id }) {
                 chapters[at].downloadedAt = Date()
             }
             summaryOnlyArticle = nil
             isLoading = false
             await retry()
+            await fetchArticleImages(text, for: article)
         } catch {
             isLoading = false
             self.error = error.localizedDescription
@@ -1392,6 +1393,25 @@ final class ReaderModel {
             // publisher that answered 503 once is worth asking twice.
             summaryOnlyArticle = article
         }
+    }
+
+    /// The article's pictures, fetched with its words already on screen.
+    ///
+    /// Never an error the reader is told about. There is no failure here that leaves them
+    /// worse off than the moment before — the article reads either way — and putting a
+    /// message over a piece somebody has already started reading would be the first time
+    /// this app interrupted a read to report something it had recovered from.
+    ///
+    /// Re-laid out only if they are still on the piece this was fetched for. A reader who
+    /// has moved on has the pictures on disk for when they come back, and rebuilding the
+    /// window under them to show pictures in an article behind them would be a jump with
+    /// nothing to show for it.
+    private func fetchArticleImages(_ text: FeedService.FullText, for article: Chapter) async {
+        guard (try? await env.feeds.fetchImages(for: text, chapter: article, in: book)) == true,
+              chapters.indices.contains(currentChapterIndex),
+              chapters[currentChapterIndex].id == article.id
+        else { return }
+        await jump(toChapterAt: currentChapterIndex, anchor: currentAnchor)
     }
 
     /// One chapter, ready to be drawn.

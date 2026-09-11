@@ -172,8 +172,10 @@ final class FeedService {
     /// isolated import view, exactly as an article whose body *did* arrive in the document
     /// does — and it is stored by the same writer, so images, retention and offline
     /// reading all carry on knowing nothing about where the markup came from.
+    /// Returns as soon as the words are stored. The pictures are `fetchImages`, which the
+    /// caller runs afterwards with the article already on screen.
     @discardableResult
-    func fetchFullText(for chapter: Chapter, in book: Book) async throws -> [ArticleBlock] {
+    func fetchFullText(for chapter: Chapter, in book: Book) async throws -> FullText {
         guard let url = chapter.webURL else { throw FeedError.emptyArticle }
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
@@ -203,13 +205,54 @@ final class FeedService {
         guard payload.blocks.contains(where: { !$0.plainText.isEmpty || $0.kind == .image })
         else { throw FeedError.emptyArticle }
 
-        let illustrated = try await images.stored(
-            payload.blocks, book: book, siteChapterId: chapter.siteChapterId, referer: landed
+        // Stored without its pictures, and that is the whole difference between this and a
+        // refresh. A refresh is nobody's afternoon: it runs while the phone is in a pocket,
+        // so it is worth waiting for every picture to make the article readable offline
+        // later. This runs because somebody tapped a button and is looking at the screen —
+        // and measured on a shelf of thirteen feeds, pictures are where a subscribe spends
+        // ninety per cent of its time, thirty to forty seconds an article on the illustrated
+        // ones, against four milliseconds to extract. Waiting for them here is what made a
+        // button that fetches one article slower than opening the page in a browser, which
+        // shows the words first and fills the pictures in behind them. So does this now.
+        try downloads.save(
+            blocks: payload.blocks, book: book, siteChapterId: chapter.siteChapterId
         )
+        return FullText(blocks: payload.blocks, page: landed)
+    }
+
+    /// An article's own page, read but not yet illustrated.
+    struct FullText {
+        let blocks: [ArticleBlock]
+        /// Where the page landed, which is the `Referer` its pictures will be asked for
+        /// with — not the address the entry linked to, which is often a redirect away.
+        let page: URL
+    }
+
+    /// The pictures for an article `fetchFullText` has already stored as words.
+    ///
+    /// Separated so the words can be on screen while this runs, and safe to lose: a picture
+    /// that will not arrive is not an error anywhere in this app — the block keeps its
+    /// address and the reader draws its alt text — so an interrupted run leaves an article
+    /// that reads, which is the state `ArticleImages` already documents for a picture the
+    /// publisher's CDN refuses.
+    ///
+    /// - Returns: whether anything new reached the disk, so a reader showing the article
+    ///   knows whether re-reading it is worth a re-layout.
+    @discardableResult
+    func fetchImages(
+        for text: FullText, chapter: Chapter, in book: Book
+    ) async throws -> Bool {
+        guard text.blocks.contains(where: { $0.kind == .image }) else { return false }
+        let illustrated = try await images.stored(
+            text.blocks, book: book, siteChapterId: chapter.siteChapterId, referer: text.page
+        )
+        // Nothing came back: the save and the reader's re-layout would both be for a file
+        // set identical to the one already there.
+        guard illustrated.contains(where: { $0.image?.file != nil }) else { return false }
         try downloads.save(
             blocks: illustrated, book: book, siteChapterId: chapter.siteChapterId
         )
-        return illustrated
+        return true
     }
 
     /// What a request for a *page* will take, as against `acceptedTypes`, which asks for a
