@@ -12,6 +12,15 @@ PROJECT   := NovelReader.xcodeproj
 SCHEME    := NovelReader
 CONFIGURATION := Debug
 DERIVED   := build
+# The long-running measurement gets a derived data directory of its own, because it is
+# the one target somebody starts and then walks away from — and walking away means
+# running `make test` while it is still going. Two xcodebuilds sharing one path do not
+# queue: they delete each other's staging directories part way through. Measured, that
+# cost a twenty-one minute run which reported "Executed 0 tests" and a result bundle it
+# could not write, and it crashed the unit suite that collided with it — two failures
+# that look like bugs and are not. Same rule as never sharing a target directory
+# between two worktrees, for the same reason.
+LIVE_DERIVED := build-live
 APP       := $(DERIVED)/Build/Products/$(CONFIGURATION)-iphonesimulator/$(SCHEME).app
 ARCHIVE   := $(DERIVED)/$(SCHEME).xcarchive
 EXPORT    := $(DERIVED)/export
@@ -27,6 +36,17 @@ PROBE_GAP ?= 8
 # Both arms are the same build; the app logs the arm it came up under.
 PROBE_ARGS ?=
 IPAD      ?= iPad Pro 13-inch (M5)
+
+# The paired iPhone, addressed by UDID rather than name: a rename breaks a name,
+# a UDID survives one. Read it out of `xcrun xctrace list devices` (the long
+# hex form) — `xcrun devicectl list devices` prints CoreDevice's own UUID in its
+# Identifier column, which is a different number and not what -destination wants.
+#
+# The device is not a spare simulator. It is an XR on iOS 18.7: an A12 against a
+# host that runs the simulator on an M5 Max, which is the only place a frame
+# budget this app has ever had trouble with is actually observable.
+DEVICE_ID ?= 00008020-00192DA82128002E
+DEVICE_APP := $(DERIVED)/Build/Products/$(CONFIGURATION)-iphoneos/$(SCHEME).app
 
 # Which screens to shoot, as `simulator name=output folder`, comma separated
 # (commas because device names contain spaces and parentheses).
@@ -46,7 +66,7 @@ SHOT_LANGS  ?= zh-Hant zh-Hans en
 SHOTS       ?= screenshots
 
 .DEFAULT_GOAL := help
-.PHONY: help setup generate build test test-ui test-ui-live test-soak test-probe test-live run run-iphone run-ipad open release archive ipa package clean screenshots shots-device
+.PHONY: help setup generate build test test-ui test-ui-live test-soak test-probe test-live test-live-feeds test-device run run-iphone run-ipad run-device open release archive ipa package clean screenshots shots-device
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -95,7 +115,7 @@ test-ui-live: generate ## Run the UI walk including the network-dependent read-a
 	xcodebuild test -project $(PROJECT) \
 		-scheme $(SCHEME) \
 		-configuration $(CONFIGURATION) \
-		-derivedDataPath $(DERIVED) \
+		-derivedDataPath $(LIVE_DERIVED) \
 		-destination 'platform=iOS Simulator,name=$(SIMULATOR)' \
 		-only-testing:NovelReaderUITests
 
@@ -134,10 +154,51 @@ test-live: generate ## Run the opt-in live site checks (needs a network; slow)
 	xcodebuild test -project $(PROJECT) \
 		-scheme $(SCHEME) \
 		-configuration $(CONFIGURATION) \
-		-derivedDataPath $(DERIVED) \
+		-derivedDataPath $(LIVE_DERIVED) \
 		-destination 'platform=iOS Simulator,name=$(SIMULATOR)' \
 		-only-testing:NovelReaderTests/LiveSiteTests \
 		-only-testing:NovelReaderTests/LiveComicSiteTests
+
+test-live-feeds: generate ## Time a cold subscribe to a real shelf of feeds (needs a network)
+	@# Separate from `test-live`: that one needs the site rules a Debug build copies in
+	@# from the notes repo, and this needs nothing but an internet connection. Its verdict
+	@# is the report it prints, not the exit code — see LiveFeedTests.
+	TEST_RUNNER_NOVELREADER_LIVE=1 \
+	xcodebuild test -project $(PROJECT) \
+		-scheme $(SCHEME) \
+		-configuration $(CONFIGURATION) \
+		-derivedDataPath $(LIVE_DERIVED) \
+		-destination 'platform=iOS Simulator,name=$(SIMULATOR)' \
+		-only-testing:NovelReaderTests/LiveFeedTests
+
+# --- Device: requires the paired iPhone, awake and either cabled or on this network ---
+
+test-device: generate ## Run the UI walk on the connected iPhone (see DEVICE_ID)
+	@# Same walk as `make test-ui`, one destination away. -allowProvisioningUpdates
+	@# is not optional here: a UI test installs two signed bundles, the app and the
+	@# XCUITest runner, and the runner has no provisioning profile until Xcode is
+	@# allowed to mint one.
+	@#
+	@# The phone connects over the local network, so it drops off whenever it sleeps
+	@# or leaves the subnet. `xcrun devicectl list devices` reporting `available`
+	@# is not the same as reachable — check tunnelState, or just plug it in.
+	xcodebuild test -project $(PROJECT) \
+		-scheme $(SCHEME) \
+		-configuration $(CONFIGURATION) \
+		-derivedDataPath $(DERIVED) \
+		-destination 'platform=iOS,id=$(DEVICE_ID)' \
+		-allowProvisioningUpdates \
+		-only-testing:NovelReaderUITests
+
+run-device: generate ## Build, then install & launch on the connected iPhone
+	xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
+		-configuration $(CONFIGURATION) \
+		-destination 'platform=iOS,id=$(DEVICE_ID)' \
+		-derivedDataPath $(DERIVED) \
+		-allowProvisioningUpdates \
+		build
+	xcrun devicectl device install app --device $(DEVICE_ID) "$(DEVICE_APP)"
+	xcrun devicectl device process launch --device $(DEVICE_ID) --terminate-existing $(BUNDLE_ID)
 
 run: build ## Build, then install & launch on BOTH the iPhone and iPad simulators
 	@# Target devices by name (not "booted") so both can run side by side.

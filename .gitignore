@@ -12,6 +12,9 @@ DerivedData/
 # — it is SwiftPM's default, and what an ad-hoc `xcodebuild -derivedDataPath .build`
 # leaves behind. Once, that was six thousand object files in a commit.
 build/
+# The live measurement's own path, so a run left going unattended cannot be deleted
+# out from under itself by a `make test` started meanwhile — see the Makefile.
+build-live/
 .build/
 
 # --- macOS ---
