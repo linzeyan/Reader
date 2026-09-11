@@ -21,6 +21,14 @@ import Foundation
 /// out of the sync drawn over text nobody chose. The key budget says the same thing
 /// from the other side: this store is one key per book, and marks per book are
 /// unbounded.
+///
+/// **A subscription's read articles are synced**, which looks like an exception to that
+/// last sentence and is not. An article's id comes from the feed document rather than from
+/// a rule, so it means the same thing on every device — the objection to bookmarks does not
+/// apply — and what travels is the *unread* set, which shrinks as the feed is read and is
+/// refused outright past `unreadLimit`. It has to travel at all because it is not a
+/// convenience: until `v12.articleRead` this state was the reading position, and the
+/// position has always synced.
 @MainActor
 @Observable
 final class CloudSync {
@@ -74,7 +82,34 @@ final class CloudSync {
         /// before this field existed, which decodes to nil and reads as "which chapter,
         /// and nothing finer" — the same thing a fresh install shows.
         var fraction: Double?
+        /// Which of a subscription's articles are still unread, by the id the feed gave
+        /// them. Absent for novels and comics, which have no such thing.
+        ///
+        /// The *unread* set rather than the read one, because it is the smaller of the two
+        /// by construction and this store has a byte budget: a subscription anybody reads
+        /// holds far more read articles than unread ones, and the payload therefore shrinks
+        /// as the thing it describes gets used. See `unreadLimit` for what happens when it
+        /// does not.
+        var unreadArticles: [String]?
+        /// The newest article the sending device's catalog held, which is where its
+        /// knowledge stops.
+        ///
+        /// Load-bearing, and the reason an absent unread id cannot simply be read as
+        /// "read": a refresh on the receiving device can easily beat the sync, and without
+        /// a cutoff every article that arrived in the meantime would be marked read for
+        /// not appearing on a list written before it existed.
+        var articlesThrough: Date?
     }
+
+    /// How many unread ids a subscription may publish before its read state stops being
+    /// synced at all.
+    ///
+    /// This store is a megabyte across every book, so an unbounded list is a way to lose
+    /// the whole library's sync to one feed nobody reads. The cap is not a compromise on
+    /// what gets synced so much as a statement about what is worth syncing: a subscription
+    /// sitting on three hundred unread articles is one nobody has read on either device,
+    /// and "everything is unread" is already what the receiving device shows.
+    private static let unreadLimit = 250
 
     private(set) var lastSyncedAt: Date?
     private(set) var lastError: String?
@@ -200,14 +235,53 @@ final class CloudSync {
     /// a record whose text only exists on one device must not claim otherwise.
     private func write(_ book: Book) {
         guard !book.isLocal else { return }
-        let record = Record(
+        var record = Record(
             siteId: book.siteId, siteBookId: book.siteBookId, kind: book.kind, title: book.title,
             displayName: book.displayName, author: book.author, coverURL: book.coverURL,
             addedAt: book.addedAt, updatedAt: book.updatedAt,
             position: book.readingPosition, fraction: book.lastReadFraction
         )
+        if book.kind == .feed { attachReadState(to: &record, bookId: book.id) }
         guard let data = try? JSONEncoder().encode(record) else { return }
         store.set(data, forKey: Self.keyPrefix + book.id)
+    }
+
+    /// Puts a subscription's read state on the record, unless there is too much of it.
+    ///
+    /// Both fields or neither: an unread list without the cutoff it was written against
+    /// cannot be applied safely, so a feed over the cap publishes nothing rather than half
+    /// of it.
+    private func attachReadState(to record: inout Record, bookId: String) {
+        guard let unread = try? repo.unreadArticleIds(bookId: bookId),
+              unread.count <= Self.unreadLimit,
+              let through = try? repo.newestArticleDate(bookId: bookId)
+        else { return }
+        record.unreadArticles = unread
+        record.articlesThrough = through
+    }
+
+    /// Fills in the read state another device published for a subscription whose articles
+    /// this one has only just fetched.
+    ///
+    /// The case `pull` cannot cover on its own: setting a new device up, the book rows
+    /// arrive from iCloud before there is a single article to apply them to, and by the
+    /// time the first refresh brings the articles in, the record has already been merged
+    /// and will not be looked at again — last-writer-wins says this device's row is as new
+    /// as the one in the store.
+    ///
+    /// Marks read only. It is recovering state the other device already published, not
+    /// arbitrating between two devices, so it must not be able to reach forward over an
+    /// article somebody has deliberately put back to unread here since.
+    func fillInReadState(bookId: String) {
+        guard isEnabled,
+              let data = store.data(forKey: Self.keyPrefix + bookId),
+              let record = try? JSONDecoder().decode(Record.self, from: data),
+              let through = record.articlesThrough
+        else { return }
+        try? repo.applyRemoteReadState(
+            bookId: bookId, unread: Set(record.unreadArticles ?? []),
+            through: through, monotonic: true
+        )
     }
 
     // MARK: - Pull
@@ -249,5 +323,12 @@ final class CloudSync {
                 bookId: id, position: position, fraction: record.fraction, now: record.updatedAt
             )
         }
+        // After the bookmark, which may have created the row this points into. Not
+        // monotonic: this record won last-writer-wins, so an article it calls unread was
+        // put back to unread on the other device more recently than anything here.
+        try repo.applyRemoteReadState(
+            bookId: id, unread: Set(record.unreadArticles ?? []),
+            through: record.articlesThrough, monotonic: false, now: record.updatedAt
+        )
     }
 }

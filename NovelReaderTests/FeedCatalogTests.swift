@@ -200,8 +200,12 @@ final class FeedCatalogTests: XCTestCase {
         XCTAssertEqual(try repo.newChapterCount(bookId: book.id), 2)
     }
 
-    /// And the count falls as they read, because the reading position is the only thing
-    /// it is made of.
+    /// And the count falls as they read, because the read flags are the only thing it is
+    /// made of.
+    ///
+    /// The reading position is deliberately not: it used to be the whole of this rule, and
+    /// "where you are standing" and "what you have read" are the same number only in a
+    /// book read front to back. A feed is not, which is what `Chapter.readAt` exists for.
     func testReadingAnArticleTakesItOutOfTheCount() throws {
         let book = try subscribe()
         try repo.mergeCatalog(bookId: book.id, entries: [
@@ -209,6 +213,11 @@ final class FeedCatalogTests: XCTestCase {
         ])
 
         try repo.updateProgress(bookId: book.id, position: .chapterStart("a"))
+        XCTAssertEqual(
+            try repo.newChapterCount(bookId: book.id), 2, "landing on it is not reading it"
+        )
+
+        try repo.setArticlesRead(true, bookId: book.id, siteChapterIds: ["a"])
 
         XCTAssertEqual(try repo.newChapterCount(bookId: book.id), 1)
         XCTAssertEqual(try repo.newChapterCounts()[book.id], 1)

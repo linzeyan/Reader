@@ -37,6 +37,9 @@ final class AppEnvironment {
     let downloader: DownloadManager
     /// Shared by every unattended fetch — downloads and the reader's read-ahead.
     let pacer: RequestPacer
+    /// Books and subscriptions being added right now. Owned here, rather than by the
+    /// sheet that starts a batch, so that closing the sheet is not abandoning the work.
+    let additions: BookAdditions
     let cloud: CloudSync
     let monitor: NetworkMonitor
     let downloadSettings: DownloadSettings
@@ -150,6 +153,7 @@ final class AppEnvironment {
         self.search = SearchService(fetcher: fetcher)
         let pacer = RequestPacer()
         self.pacer = pacer
+        self.additions = BookAdditions(pacer: pacer)
         let downloader = DownloadManager(
             service: bookService, downloads: self.downloads, images: images, pacer: pacer,
             queueStore: queueStore
@@ -187,6 +191,19 @@ final class AppEnvironment {
         )
         self.cloud.onRemoteChange = { [weak self] in self?.reloadLibrary() }
         monitor.onChange = { [weak self] _ in self?.networkChanged() }
+        // Last of the wiring, because every closure in it calls back into this object.
+        // `unowned` rather than `weak`: the queue is owned here and cannot outlive it.
+        self.additions.connect(
+            BookAdditions.Work(
+                subscribe: { [unowned self] address, progress in
+                    try await self.subscribeToFeed(address, progress: progress).shownName
+                },
+                addBook: { [unowned self] address in try await self.addPastedBook(address) },
+                keep: { [unowned self] address, title in self.keepUnreadableFeed(address, title) },
+                settled: { [unowned self] in self.reloadLibrary() },
+                report: { [unowned self] error in self.report(error) }
+            )
+        )
         reloadLibrary()
         // Last, because a queue read back from disk points into the library and may
         // start fetching straight away: everything it touches has to exist first.
@@ -373,6 +390,58 @@ final class AppEnvironment {
         return book
     }
 
+    /// One pasted address, turned into whatever book its host's rule says it is.
+    ///
+    /// Nothing here asks what shelf the reader is looking at: the rule an address matches
+    /// is what decides, which is the same answer the book will give for the rest of its
+    /// life. A novel address and a comic address can therefore be pasted together and each
+    /// lands where it belongs.
+    ///
+    /// - Returns: the title the site published, which is the confirmation that the address
+    ///   led where the reader thought it did.
+    private func addPastedBook(_ address: String) async throws -> String {
+        guard let url = URL(string: address), let rule = sites.rule(matching: url) else {
+            throw AddBookError.noRule
+        }
+        guard let siteBookId = rule.bookId(from: url) else { throw AddBookError.noBookId }
+        let info = try await bookService.info(rule: rule, siteBookId: siteBookId)
+        try await addBook(rule: rule, siteBookId: siteBookId, info: info)
+        return info.title
+    }
+
+    /// Puts a subscription on the shelf whose own document would not answer.
+    ///
+    /// Only ever reached from an imported subscription list, and only there because the
+    /// file is the evidence: the reader *did* subscribe to this, on some other reader, and
+    /// a network that was unhelpful for a minute is a bad reason to drop it silently from
+    /// a file they may have deleted by then. The row is stale by construction, so opening
+    /// the app is enough to fill it in.
+    ///
+    /// - Returns: the name it went on under, or nil if the address was never one.
+    private func keepUnreadableFeed(_ address: String, _ title: String?) -> String? {
+        guard let url = FeedService.url(from: address) else { return nil }
+        let name = title?.nonBlank ?? url.host() ?? url.absoluteString
+        guard (try? repo.bookmark(
+            siteId: Book.feedSiteId, siteBookId: url.absoluteString, kind: .feed, title: name
+        )) != nil else { return nil }
+        return name
+    }
+
+    enum AddBookError: LocalizedError {
+        /// No installed rule claims the address's host.
+        case noRule
+        /// The rule claims the host but cannot find a book id in the path — a search
+        /// page, or a chapter link pasted instead of the book's own.
+        case noBookId
+
+        var errorDescription: String? {
+            switch self {
+            case .noRule: return String(localized: "library.add.error.noRule")
+            case .noBookId: return String(localized: "library.add.error.noBookId")
+            }
+        }
+    }
+
     /// Reads a subscription again.
     ///
     /// Failures are the caller's to report, unlike a catalog refresh's: the two callers
@@ -384,28 +453,106 @@ final class AppEnvironment {
     /// does it once at the end rather than re-running the shelf's four queries per feed.
     @discardableResult
     func refreshFeed(_ book: Book) async throws -> [Chapter] {
-        try await feeds.refresh(book)
+        let chapters = try await feeds.refresh(book)
+        // Articles have just landed, which is the one moment a read state published by
+        // another device can be applied to something. Cheap enough to do unconditionally:
+        // it returns immediately with iCloud off or with no record for this book, and
+        // otherwise reads one indexed query over a catalog bounded by retention — next to
+        // nothing beside the request that just came back. See `CloudSync.fillInReadState`.
+        cloud.fillInReadState(bookId: book.id)
+        return chapters
+    }
+
+    // MARK: - Read articles
+
+    /// Marks some of a subscription's articles read, or puts them back to unread.
+    ///
+    /// Not `reloadLibrary()`, for `publishProgress`'s reason: the reader scrolling through
+    /// a feed marks an article at every chapter boundary, and the library-wide joins behind
+    /// a reload would run at each of them for shelf screens nobody can see. Only what a
+    /// read mark can change is refreshed — this book's row and its badge.
+    ///
+    /// - Returns: whether anything actually changed, so a screen can skip redrawing for a
+    ///   swipe that marked an already-read article read.
+    @discardableResult
+    func setArticlesRead(_ read: Bool, book: Book, siteChapterIds: [String]) -> Bool {
+        guard book.kind == .feed else { return false }
+        let changed =
+            (try? repo.setArticlesRead(read, bookId: book.id, siteChapterIds: siteChapterIds)) ?? 0
+        guard changed > 0 else { return false }
+        publishReadState(bookId: book.id)
+        return true
+    }
+
+    /// Marks every article of one subscription read.
+    ///
+    /// - Returns: how many articles it took, which is what the row that offers it can say
+    ///   nothing about beforehand — the list on screen may be filtered by a search.
+    @discardableResult
+    func markAllRead(_ book: Book) -> Int {
+        guard book.kind == .feed else { return 0 }
+        let changed = (try? repo.markAllRead(bookId: book.id)) ?? 0
+        guard changed > 0 else { return 0 }
+        publishReadState(bookId: book.id)
+        return changed
+    }
+
+    /// Marks every article of every subscription read.
+    ///
+    /// The one mark that *does* reload the library: it can touch every feed on the shelf,
+    /// so the four whole-library queries are cheaper than the same number of single-book
+    /// refreshes, and every row on screen has changed anyway.
+    ///
+    /// - Returns: how many subscriptions had anything to mark, so a shelf can stay silent
+    ///   when the answer is none.
+    @discardableResult
+    func markEveryFeedRead() -> Int {
+        let touched = (try? repo.markAllFeedsRead()) ?? []
+        guard !touched.isEmpty else { return 0 }
+        reloadLibrary()
+        for id in touched {
+            if let fresh = books.first(where: { $0.id == id }) { cloud.push(fresh) }
+        }
+        return touched.count
+    }
+
+    /// The single-book refresh a read mark needs: the row, its badge, and iCloud.
+    ///
+    /// `newChapterCount` rather than the whole map, and the book row rather than the whole
+    /// shelf — the same slice `publishProgress` takes, for the same reason. The push
+    /// carries the read state with it: `CloudSync.write` reads the unread set off the
+    /// database, and the row's `updatedAt` was stamped by the same transaction that moved
+    /// the flags, which is what lets the other device accept it.
+    private func publishReadState(bookId: String) {
+        guard let fresh = try? repo.book(id: bookId) else { return }
+        if let at = books.firstIndex(where: { $0.id == bookId }) { books[at] = fresh }
+        if let count = try? repo.newChapterCount(bookId: bookId) {
+            // Absent rather than zero, matching how `reloadLibrary` builds the map.
+            newChapterCounts[bookId] = count > 0 ? count : nil
+        }
+        cloud.push(fresh)
     }
 
     /// Takes in a subscription list exported from another feed reader.
     ///
-    /// Each address is subscribed to for real — fetched, named from its own document,
-    /// its first articles stored — because that is what makes the shelf immediately
-    /// readable rather than forty rows waiting for something. It is also why this is
-    /// slow enough to report progress: forty feeds is forty requests.
+    /// Each address is subscribed to for real — fetched, named from its own document, its
+    /// first articles stored — because that is what makes the shelf immediately readable
+    /// rather than forty rows waiting for something.
     ///
-    /// A feed that will not answer is still added, from the name the file gave it. The
-    /// alternative is losing subscriptions to a bad minute on a train, silently, from a
-    /// file the reader may have deleted by then — and a row with no articles yet is a row
-    /// the next refresh fills in.
+    /// Handed to `additions` rather than run here, which is what a pasted batch does too.
+    /// Forty feeds is forty unrelated hosts, so they are read several at a time; and the
+    /// reader is not held to the screen while it happens, which for a list this size was
+    /// minutes of an app that could do nothing else.
     ///
-    /// - Returns: how many subscriptions the shelf gained, which is what the reader is
-    ///   told. Feeds already on the shelf are re-read rather than duplicated — `Book.id`
-    ///   is the address — so importing the same file twice is not a way to make a mess.
+    /// Returns as soon as the file is read, so the only failure it can report is the
+    /// file's own. What became of each address is reported per row, by whichever of the
+    /// two screens watching the queue the reader has in front of them.
+    ///
+    /// - Returns: how many subscriptions the file listed. Feeds already on the shelf are
+    ///   re-read rather than duplicated — `Book.id` is the address — so importing the same
+    ///   file twice is not a way to make a mess.
     @discardableResult
-    func importSubscriptions(
-        from url: URL, progress: @escaping (SubscriptionImportStep) -> Void = { _ in }
-    ) async throws -> Int {
+    func importSubscriptions(from url: URL) throws -> Int {
         // Files handed over by the document picker live outside the sandbox.
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -413,33 +560,9 @@ final class AppEnvironment {
         let subscriptions = OPML.subscriptions(in: data)
         guard !subscriptions.isEmpty else { throw OPMLError.noSubscriptions }
 
-        let before = Set(books.filter { $0.kind == .feed }.map(\.id))
-        defer { reloadLibrary() }
-        for (index, subscription) in subscriptions.enumerated() {
-            try Task.checkCancellation()
-            // Named, not just counted. Forty feeds is minutes of work, and the difference
-            // between a bar that has been at 30% for a while and "reading Example Blog,
-            // 12 of 40" is whether the reader can tell it is stuck from it being slow —
-            // and which subscription to blame when it is.
-            progress(SubscriptionImportStep(
-                index: index, count: subscriptions.count,
-                subscription: subscription.title ?? subscription.address
-            ))
-            do {
-                try await feeds.subscribe(to: subscription.address)
-            } catch {
-                guard let address = FeedService.url(from: subscription.address) else { continue }
-                _ = try? repo.bookmark(
-                    siteId: Book.feedSiteId, siteBookId: address.absoluteString, kind: .feed,
-                    title: subscription.title ?? address.host() ?? address.absoluteString
-                )
-            }
-        }
-        progress(SubscriptionImportStep(
-            index: subscriptions.count, count: subscriptions.count, subscription: nil
-        ))
-        let after = Set((try? repo.allBooks())?.filter { $0.kind == .feed }.map(\.id) ?? [])
-        return after.subtracting(before).count
+        let lines = AddBookLine.numbered(subscriptions.map { ($0.address, $0.title) })
+        guard additions.start(lines, as: .subscriptionList) else { throw OPMLError.busy }
+        return lines.count
     }
 
     /// The shelf's subscriptions as an OPML file's worth of text.
@@ -503,40 +626,35 @@ final class AppEnvironment {
         )
     }
 
-    /// Where reading a subscription list has got to.
-    ///
-    /// One step per feed rather than per article, unlike `FeedService.Progress`. A list of
-    /// forty is forty subscriptions being fetched, named and filled in, and the reader
-    /// watching it wants to know which one is being read — inside any one of them, a
-    /// second count of its articles is detail at the wrong scale.
-    struct SubscriptionImportStep: Equatable {
-        /// Which subscription of how many, counting from zero. `index == count` is the
-        /// whole list, done.
-        let index: Int
-        let count: Int
-        /// What the file called the one being read now; nil once there is none.
-        let subscription: String?
-
-        var fraction: Double { count > 0 ? Double(index) / Double(count) : 1 }
-    }
-
     enum OPMLError: LocalizedError {
         /// A file that parsed but named no feeds — the commonest being an OPML of
         /// folders, and the second commonest being some other XML entirely.
         case noSubscriptions
+        /// A batch is already running. Said out loud rather than queued behind it: the
+        /// reader picked a file expecting it to start, and a second list silently waiting
+        /// its turn behind forty feeds is indistinguishable from a picker that did nothing.
+        case busy
 
         var errorDescription: String? {
             switch self {
             case .noSubscriptions: return String(localized: "library.opml.error.empty")
+            case .busy: return String(localized: "library.add.error.busy")
             }
         }
     }
 
     /// Reads every subscription that has not been read lately.
     ///
-    /// One at a time. Sequential because the expensive half of a refresh is the shared web
-    /// view turning articles into paragraphs, which serialises anyway — asking for forty at
-    /// once would only mean forty stalled requests instead of one running one.
+    /// Several at a time, and never two from one host. The web view that turns articles
+    /// into paragraphs does serialise, which is why this used to be a plain loop — but
+    /// measuring a shelf of thirteen showed that step to be a rounding error beside the
+    /// pictures each article carries, which come off the publisher's own CDN over
+    /// `URLSession` and have no reason to wait for anybody else's. One feed at a time was
+    /// twelve idle hosts and one busy one.
+    ///
+    /// Grouped by host rather than simply capped, so a reader subscribed to four feeds on
+    /// one blog still asks that blog for one thing at a time. See
+    /// `BookAdditions.maxConcurrentFeeds`, which is the same rule for the same reason.
     ///
     /// Silent throughout, on both paths. Coming to the front, nobody asked; pulled by hand,
     /// a shelf of forty subscriptions on a train would answer one gesture with a stack of
@@ -552,9 +670,30 @@ final class AppEnvironment {
         let due = books.filter { $0.kind == .feed && (force || $0.isCatalogStale) }
         guard !due.isEmpty else { return }
         defer { reloadLibrary() }
+        // One queue per host, each read in turn; the queues themselves run side by side,
+        // capped so that a shelf of forty does not put forty feeds' worth of articles into
+        // the web view's queue ahead of whatever the reader opens next.
+        var byHost: [String: [Book]] = [:]
         for book in due {
-            if Task.isCancelled { return }
-            _ = try? await refreshFeed(book)
+            let host = FeedService.url(from: book.siteBookId)?.host()?.lowercased()
+            byHost[host ?? book.siteBookId, default: []].append(book)
+        }
+        let queues = Array(byHost.values)
+        await withTaskGroup(of: Void.self) { group in
+            var next = queues.startIndex
+            func start() {
+                guard next < queues.endIndex, !Task.isCancelled else { return }
+                let queue = queues[next]
+                next += 1
+                group.addTask { @MainActor [weak self] in
+                    for book in queue {
+                        if Task.isCancelled { return }
+                        _ = try? await self?.refreshFeed(book)
+                    }
+                }
+            }
+            for _ in 0..<min(BookAdditions.maxConcurrentFeeds, queues.count) { start() }
+            while await group.next() != nil { start() }
         }
     }
 

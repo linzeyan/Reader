@@ -332,7 +332,7 @@ final class DownloadManager {
                 // chapter this run is done with.
                 if self.haltIfDraining() { return }
                 if self.remaining.isEmpty { break }
-                await self.pacer.pace()
+                await self.pacer.pace(host: context.rule.host)
                 if self.restIsDue() {
                     try? await Task.sleep(for: .seconds(Double.random(in: 15...45)))
                     // A drain asked for during the rest must not wait through one

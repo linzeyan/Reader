@@ -359,6 +359,7 @@ struct ReaderView: View {
             PaginatedChapterView(
                 title: current.chapter.title,
                 subtitle: current.subtitle,
+                titleLink: current.titleLink,
                 blocks: current.blocks,
                 imageDirectory: current.imageDirectory,
                 chapterKey: current.chapter.id,
@@ -507,17 +508,26 @@ struct ReaderView: View {
                 Button("common.back") { dismiss() }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("reader.failure.back")
-                // The one failure with a real answer on it. An article the publisher
-                // summarised to nothing will never load however many times it is
-                // retried, and the page it points at is where the piece actually is.
                 if let original = model.currentArticleURL {
                     Button("reader.openOriginal") { openURL(original) }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("reader.failure.openOriginal")
                 }
-                Button("reader.retry") { Task { await model.retry() } }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("reader.retry")
+                // Fetching the page *is* the retry for an article the publisher
+                // summarised to nothing: there is nothing in the feed to ask for again,
+                // so the ordinary retry button stood there promising an action it could
+                // not perform. The piece is at the address the entry links to, and the
+                // same extractor reads it — so this ends with the article in the reader,
+                // downloaded, rather than handing the reader to a browser.
+                if model.summaryOnlyArticle != nil {
+                    Button("reader.fetchFullText") { Task { await model.fetchFullText() } }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("reader.fetchFullText")
+                } else {
+                    Button("reader.retry") { Task { await model.retry() } }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("reader.retry")
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -531,7 +541,7 @@ struct ReaderView: View {
     /// arrive from the shelf.
     private var catalogChapters: [Chapter] {
         let all = model?.chapters ?? []
-        return env.librarySettings.isCatalogDescending(bookId: book.id)
+        return env.librarySettings.isCatalogDescending(bookId: book.id, kind: book.kind)
             ? Array(all.reversed())
             : all
     }
@@ -832,21 +842,30 @@ final class ReaderModel {
         /// scrolling reader marks the boundary between two articles with: one piece runs
         /// into the next, and a title alone was a thin thing to make that seam out of.
         let subtitle: String?
+        /// The page this piece came from, for an article whose publisher gave it one.
+        /// Tapping its title opens it — see `ChapterText.init(titleLink:)`. Nil for a
+        /// novel, whose chapters *are* the text: there is no original that is a different
+        /// thing from what is already on screen.
+        let titleLink: URL?
         var id: String { chapter.id }
 
         init(
             chapter: Chapter, blocks: [ArticleBlock], imageDirectory: URL? = nil,
-            subtitle: String? = nil
+            subtitle: String? = nil, titleLink: URL? = nil
         ) {
             self.chapter = chapter
             self.blocks = blocks
             self.paragraphs = blocks.map(\.plainText)
             self.imageDirectory = imageDirectory
             self.subtitle = subtitle
+            self.titleLink = titleLink
         }
 
-        init(chapter: Chapter, paragraphs: [String]) {
-            self.init(chapter: chapter, blocks: paragraphs.map(ArticleBlock.paragraph))
+        init(chapter: Chapter, paragraphs: [String], titleLink: URL? = nil) {
+            self.init(
+                chapter: chapter, blocks: paragraphs.map(ArticleBlock.paragraph),
+                titleLink: titleLink
+            )
         }
 
         /// One heading in the piece, as somewhere to jump to.
@@ -879,7 +898,22 @@ final class ReaderModel {
     private(set) var loaded: [LoadedChapter] = []
     private(set) var isLoading = false
     private(set) var error: String?
-    private(set) var currentChapterIndex = 0
+    /// The article the failure on screen is about, when fetching its own page could fix it.
+    ///
+    /// Non-nil exactly when the piece has no body *and* the publisher gave it an address.
+    /// That is the one failure here with an action behind it that can work: every other
+    /// one is answered by asking again, and this one provably is not — there is nothing in
+    /// the feed document to ask for. See `FeedService.fetchFullText`.
+    private(set) var summaryOnlyArticle: Chapter?
+    /// Which chapter the reader is in, in reading order.
+    ///
+    /// The `didSet` is how a subscription's articles get marked read, and it is here
+    /// rather than at the three places that assign — a jump, a scrolled frame, a settled
+    /// page — because "the reader is now in this one" is exactly what all three mean, and
+    /// a fourth way of arriving is the kind of thing that quietly stops marking anything.
+    private(set) var currentChapterIndex = 0 {
+        didSet { markCurrentArticleRead() }
+    }
     private(set) var currentAnchor = TextAnchor.start
     /// Ids of this book's saved positions, so the bookmark button can show whether
     /// the page on screen is one of them. Held as a set rather than re-queried on
@@ -968,11 +1002,8 @@ final class ReaderModel {
     /// Nil when the feed published no link of its own, which `FeedService` stores as an
     /// empty address rather than inventing one.
     var currentArticleURL: URL? {
-        guard book.kind == .feed, chapters.indices.contains(currentChapterIndex),
-              let url = URL(string: chapters[currentChapterIndex].url),
-              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
-        else { return nil }
-        return url
+        guard chapters.indices.contains(currentChapterIndex) else { return nil }
+        return articleLink(of: chapters[currentChapterIndex])
     }
 
     /// Whether what is being read is a subscription.
@@ -1303,6 +1334,7 @@ final class ReaderModel {
         let mine = generation
         isLoading = true
         error = nil
+        summaryOnlyArticle = nil
         defer { isLoading = false }
         do {
             let content = try await content(of: chapter)
@@ -1327,6 +1359,38 @@ final class ReaderModel {
                 env.report(error)
             }
             self.error = error.localizedDescription
+            // Only where there is a page to go and read instead. A feed that published no
+            // link either has left nothing to offer, and a button that could not act is
+            // what this whole screen exists to stop happening.
+            if case FeedService.FeedError.emptyArticle = error, articleLink(of: chapter) != nil {
+                summaryOnlyArticle = chapter
+            }
+        }
+    }
+
+    /// Fetches the piece from its own page and shows it.
+    ///
+    /// The chapter's row is corrected in memory as well as on disk, because the load this
+    /// ends with reads `isDownloaded` off the copy held here: left stale, it would walk
+    /// straight past the text just written and throw the same empty-article error again.
+    func fetchFullText() async {
+        guard let article = summaryOnlyArticle else { return }
+        isLoading = true
+        error = nil
+        do {
+            try await env.feeds.fetchFullText(for: article, in: book)
+            if let at = chapters.firstIndex(where: { $0.id == article.id }) {
+                chapters[at].downloadedAt = Date()
+            }
+            summaryOnlyArticle = nil
+            isLoading = false
+            await retry()
+        } catch {
+            isLoading = false
+            self.error = error.localizedDescription
+            // Still the same article with the same page behind it, so the offer stands: a
+            // publisher that answered 503 once is worth asking twice.
+            summaryOnlyArticle = article
         }
     }
 
@@ -1338,8 +1402,19 @@ final class ReaderModel {
     private func content(of chapter: Chapter) async throws -> LoadedChapter {
         if let stored = await storedContent(of: chapter) { return stored }
         return LoadedChapter(
-            chapter: chapter, blocks: try await paragraphs(for: chapter).map(ArticleBlock.paragraph)
+            chapter: chapter,
+            blocks: try await paragraphs(for: chapter).map(ArticleBlock.paragraph),
+            titleLink: articleLink(of: chapter)
         )
+    }
+
+    /// The page an article came from, where there is one worth opening.
+    ///
+    /// The `Book.kind` gate is the whole of what this adds to `Chapter.webURL`: a novel
+    /// chapter carries the address it was fetched from too, and offering to open it would
+    /// send the reader to the same text in a browser, wrapped in the site's advertising.
+    private func articleLink(of chapter: Chapter) -> URL? {
+        book.kind == .feed ? chapter.webURL : nil
     }
 
     /// What is on the device, or nil.
@@ -1358,11 +1433,14 @@ final class ReaderModel {
                     siteId: book.siteId, siteBookId: book.siteBookId,
                     siteChapterId: chapter.siteChapterId
                 ),
-                subtitle: Self.subtitle(of: chapter)
+                subtitle: Self.subtitle(of: chapter),
+                titleLink: articleLink(of: chapter)
             )
         }
         guard let text = await storedParagraphs(for: chapter), !text.isEmpty else { return nil }
-        return LoadedChapter(chapter: chapter, paragraphs: text)
+        return LoadedChapter(
+            chapter: chapter, paragraphs: text, titleLink: articleLink(of: chapter)
+        )
     }
 
     /// The date an article was published, as the line under its title.
@@ -1492,7 +1570,7 @@ final class ReaderModel {
                 self.readAhead = (chapterId: next.id, paragraphs: cached)
                 return
             }
-            await self.env.pacer.pace()
+            await self.env.pacer.pace(host: rule.host)
             guard !Task.isCancelled else { return }
             self.readAheadPhase = .fetching(chapterId: next.id)
             guard let paragraphs = try? await self.env.bookService.chapterParagraphs(
@@ -1631,6 +1709,29 @@ final class ReaderModel {
             fraction: currentFraction,
             publish: occasion == .leaving
         )
+    }
+
+    /// Marks the article the reader has arrived at as read.
+    ///
+    /// On arrival rather than on leaving, which is what every feed reader does and what a
+    /// reader expects: the badge has to fall as they work down the list, not once they
+    /// close the book. Scrolling through a subscription therefore marks each article as it
+    /// comes into view, which is the same gesture stated continuously.
+    ///
+    /// Subscriptions only. A novel chapter has no such flag — see `Chapter.readAt` — and
+    /// its "new" marker is about what the site published, which reading cannot change.
+    ///
+    /// The in-memory catalog is updated alongside the database so that the reader's own
+    /// chapter list, which is drawn from this array, drops the unread mark without
+    /// re-querying. The guard on it is not just an optimisation: this fires on every
+    /// chapter boundary a scroll crosses, including back over ground already covered.
+    private func markCurrentArticleRead() {
+        guard book.kind == .feed, chapters.indices.contains(currentChapterIndex) else { return }
+        let article = chapters[currentChapterIndex]
+        guard article.isUnread else { return }
+        guard env.setArticlesRead(true, book: book, siteChapterIds: [article.siteChapterId])
+        else { return }
+        chapters[currentChapterIndex].readAt = Date()
     }
 
     // MARK: Saved positions

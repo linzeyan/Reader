@@ -36,42 +36,105 @@ struct ArticleImages {
     /// - Parameter referer: the article's own page. Sent as `Referer` for the reason
     ///   `ImageFetcher` sends one: a host that serves its images only to its own pages
     ///   answers 403 to a request that arrives from nowhere.
+    /// How many of an article's pictures are fetched at once.
+    ///
+    /// One at a time was what this did, and on a feed it was the slowest thing the app
+    /// does: an illustrated post carries ten or twenty pictures, each its own round trip,
+    /// and a refresh of a shelf of subscriptions is hundreds of them end to end — minutes
+    /// of waiting on latency with the network otherwise idle.
+    ///
+    /// Six rather than "all of them". These are all one host — a post's pictures come off
+    /// the publisher's own CDN — so this is the number of connections that host sees, and
+    /// twenty at once from one reader is the shape that gets answered with a 429. Six is
+    /// what every desktop browser opens per host over HTTP/1.1, and over HTTP/2 — which is
+    /// what a CDN serving a blog speaks — it is six streams down one connection, so the
+    /// server sees less of a burst than the number suggests. A feed is a public document
+    /// nobody is being kept out of; `ImageFetcher` holds the comic reader to three against
+    /// hosts that are far less friendly.
+    static let maxConcurrent = 6
+
     func stored(
         _ blocks: [ArticleBlock], book: Book, siteChapterId: String, referer: URL?
     ) async throws -> [ArticleBlock] {
-        var stored = blocks
-        for (position, block) in blocks.enumerated() {
+        let wanted = blocks.enumerated().compactMap { position, block -> (Int, URL)? in
             guard block.kind == .image, let reference = block.image,
                   let url = URL(string: reference.source),
                   let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
-            else { continue }
-            try Task.checkCancellation()
-            guard let bytes = try await fetch(url, referer: referer),
-                  let prepared = Self.prepare(bytes)
-            else { continue }
+            else { return nil }
+            return (position, url)
+        }
+        guard !wanted.isEmpty else { return blocks }
 
-            // Named after the block it belongs to, so the name is unique without a counter
-            // and whoever opens the directory can tell which picture is which. The
-            // extension comes from the bytes: `ChapterFileStore.writePages` explains why an
-            // address is not evidence of a format.
-            var name = String(format: "%03d", position)
-            if let format = ImageFormat(sniffing: prepared.data) {
-                name += "." + format.fileExtension
+        var stored = blocks
+        let session = session
+        try await withThrowingTaskGroup(of: Fetched?.self) { group in
+            var next = wanted.startIndex
+            // The window is refilled as each picture lands rather than in batches of four,
+            // so one slow request holds up nothing but itself.
+            func fetchNext() {
+                guard next < wanted.endIndex else { return }
+                let (position, url) = wanted[next]
+                next += 1
+                group.addTask {
+                    try Task.checkCancellation()
+                    guard let bytes = try await Self.fetch(url, referer: referer, in: session),
+                          let prepared = Self.prepare(bytes)
+                    else { return nil }
+                    return Fetched(
+                        position: position, data: prepared.data,
+                        width: prepared.width, height: prepared.height
+                    )
+                }
             }
-            guard (try? downloads.write(
-                image: prepared.data, named: name, book: book, siteChapterId: siteChapterId
-            )) != nil else { continue }
+            for _ in 0..<min(Self.maxConcurrent, wanted.count) { fetchNext() }
 
-            stored[position].image?.file = name
-            stored[position].image?.width = prepared.width
-            stored[position].image?.height = prepared.height
+            // Written here rather than inside the tasks: the fetches are independent and
+            // the disk is not, and a `DownloadStore` write is the one step of this that
+            // has no business happening from four places at once.
+            while let result = try await group.next() {
+                fetchNext()
+                guard let result else { continue }
+                // Named after the block it belongs to, so the name is unique without a
+                // counter and whoever opens the directory can tell which picture is which.
+                // The extension comes from the bytes: `ChapterFileStore.writePages`
+                // explains why an address is not evidence of a format.
+                var name = String(format: "%03d", result.position)
+                if let format = ImageFormat(sniffing: result.data) {
+                    name += "." + format.fileExtension
+                }
+                guard (try? downloads.write(
+                    image: result.data, named: name, book: book, siteChapterId: siteChapterId
+                )) != nil else { continue }
+
+                stored[result.position].image?.file = name
+                stored[result.position].image?.width = result.width
+                stored[result.position].image?.height = result.height
+            }
         }
         return stored
     }
 
-    private func fetch(_ url: URL, referer: URL?) async throws -> Data? {
+    /// One picture, fetched and re-encoded, waiting for its turn at the disk.
+    private struct Fetched {
+        let position: Int
+        let data: Data
+        let width: Int
+        let height: Int
+    }
+
+    /// Static, and handed the session, so the fetch carries nothing of this struct into the
+    /// task group — the store it holds is the one thing here that must stay on one thread.
+    private static func fetch(
+        _ url: URL, referer: URL?, in session: URLSession
+    ) async throws -> Data? {
         var request = URLRequest(url: url)
-        request.timeoutInterval = 20
+        // Ten seconds, against `URLSession`'s default sixty and the twenty this used to
+        // send. `ImageFetcher` settled on the same number for the same observation: a CDN
+        // that is going to answer answers quickly, and one that is going to stall stalls
+        // for as long as it is given. Measured, the cost of the long wait was not
+        // theoretical — three image-heavy feeds of the thirteen took eighty-nine per cent
+        // of a cold subscribe between them, at thirty to forty seconds *per article*.
+        request.timeoutInterval = 10
         request.setValue(WebFetcher.mobileSafariUserAgent, forHTTPHeaderField: "User-Agent")
         if let referer { request.setValue(referer.absoluteString, forHTTPHeaderField: "Referer") }
 

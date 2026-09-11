@@ -154,6 +154,71 @@ final class FeedService {
         return try repo.chapters(bookId: book.id)
     }
 
+    // MARK: - Full text
+
+    /// Reads the piece off the page it actually lives on.
+    ///
+    /// For the feed that published a headline, a link and nothing else. That is not a
+    /// failure to fetch anything and there is nothing in the document to ask for again —
+    /// which is why the reader's retry button could never help here, and why this replaces
+    /// it rather than sitting beside it. Measured across a real shelf of thirteen, two of
+    /// them do exactly this: `<description>` elements averaging a hundred and fifty
+    /// characters, with no `content:encoded` anywhere in the file.
+    ///
+    /// Over `URLSession` rather than the shared web view, which is the exit the whole of
+    /// this service takes: a blog is a static page on somebody's host, not one of the
+    /// challenged novel sites, and evicting whatever the reader is part way through to
+    /// fetch one article would be a poor trade for it. Only the extraction borrows the
+    /// isolated import view, exactly as an article whose body *did* arrive in the document
+    /// does — and it is stored by the same writer, so images, retention and offline
+    /// reading all carry on knowing nothing about where the markup came from.
+    @discardableResult
+    func fetchFullText(for chapter: Chapter, in book: Book) async throws -> [ArticleBlock] {
+        guard let url = chapter.webURL else { throw FeedError.emptyArticle }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue(WebFetcher.mobileSafariUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(Self.acceptedPageTypes, forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+        guard (200..<300).contains(status) else { throw FeedError.http(status) }
+        let landed = response.url ?? url
+
+        // The address it landed on as the base, so everything relative inside the page
+        // resolves — the import view reads markup with a base of `about:blank`, and a
+        // redirect to a canonical URL is what most of these links are.
+        let script = try ExtractorScript.article(
+            baseURL: landed.absoluteString, title: chapter.title
+        )
+        fetcher.holdImportView()
+        defer { fetcher.releaseImportView() }
+        let payload = try await fetcher.extract(
+            html: data, extracting: script, as: ExtractorScript.ArticlePayload.self
+        )
+        // A page that reads to nothing is the same answer as before, not a new failure: a
+        // paywall, a consent wall, or a site that builds its article in JavaScript the
+        // import view is not allowed to run.
+        guard payload.blocks.contains(where: { !$0.plainText.isEmpty || $0.kind == .image })
+        else { throw FeedError.emptyArticle }
+
+        let illustrated = try await images.stored(
+            payload.blocks, book: book, siteChapterId: chapter.siteChapterId, referer: landed
+        )
+        try downloads.save(
+            blocks: illustrated, book: book, siteChapterId: chapter.siteChapterId
+        )
+        return illustrated
+    }
+
+    /// What a request for a *page* will take, as against `acceptedTypes`, which asks for a
+    /// feed. Safari's own header: the hosts that serve one document to browsers and
+    /// another to readers key off exactly this, and here the browser's copy is the one
+    /// wanted — it is the page a person would see.
+    private static let acceptedPageTypes =
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
     // MARK: - Retention
 
     /// Deletes the articles this subscription is no longer keeping, and their text.
@@ -316,7 +381,9 @@ final class FeedService {
 
         // `defer` works here where `LocalBookImporter` had to spell both exits out,
         // because this type is main-actor isolated and giving the view back is therefore
-        // not a hop it would have to await.
+        // not a hop it would have to await. The claim is what makes it safe to have
+        // several feeds in this loop at once — see `WebFetcher.holdImportView`.
+        fetcher.holdImportView()
         defer { fetcher.releaseImportView() }
         progress(Progress(stored: 0, total: pending.count))
         for (index, item) in pending.enumerated() {

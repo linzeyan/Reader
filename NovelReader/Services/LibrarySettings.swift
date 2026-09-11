@@ -98,13 +98,25 @@ final class LibrarySettings {
         didSet { defaults.set(catalogDescending, forKey: Keys.catalogDescending) }
     }
 
-    func isCatalogDescending(bookId: String) -> Bool { catalogDescending[bookId] ?? false }
+    /// Which way a catalog runs before the reader has said anything about it.
+    ///
+    /// Newest first for a subscription, oldest first for everything else. A novel is read
+    /// from chapter one, so the top of an ascending list is where reading starts. A feed is
+    /// not read in an order at all — what the reader opened it for is whatever was
+    /// published since they last looked, and ascending buries that at the bottom, past a
+    /// thousand articles they have already seen.
+    static func defaultDescending(for kind: SiteRule.Kind) -> Bool { kind == .feed }
 
-    /// Ascending is stored as *no entry*, not as `false`: it is what a book that was
+    func isCatalogDescending(bookId: String, kind: SiteRule.Kind) -> Bool {
+        catalogDescending[bookId] ?? Self.defaultDescending(for: kind)
+    }
+
+    /// The default is stored as *no entry*, not as its value: it is what a book that was
     /// never touched already answers, so keeping the row would leave one behind for
     /// every book whose order was changed and changed back.
-    func setCatalogDescending(_ descending: Bool, bookId: String) {
-        catalogDescending[bookId] = descending ? true : nil
+    func setCatalogDescending(_ descending: Bool, bookId: String, kind: SiteRule.Kind) {
+        catalogDescending[bookId] =
+            descending == Self.defaultDescending(for: kind) ? nil : descending
     }
 
     /// Dropped along with the book. Nothing else clears these, and a book removed and

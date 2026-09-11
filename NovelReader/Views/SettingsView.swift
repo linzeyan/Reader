@@ -456,7 +456,13 @@ struct StorageView: View {
                                 }
                             }
                     }
-                    Button("storage.deleteSite", role: .destructive) {
+                    // Scoped by the header above it rather than by naming what the group
+                    // is, because the groups are not all one kind of thing: two are sites,
+                    // one is the imported shelf, and one is every subscription there is.
+                    // "Delete all downloads from this site" was written when only the
+                    // first kind existed, and under the subscriptions heading it names
+                    // something that is not there.
+                    Button("storage.deleteGroup", role: .destructive) {
                         delete(
                             .site(siteId: group.siteId),
                             reversible: group.siteId != Book.localSiteId

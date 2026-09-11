@@ -438,6 +438,67 @@ final class AppDatabase {
             }
         }
 
+        // Whether an article has been read, as a fact about the article rather than as a
+        // consequence of where the reader is standing.
+        //
+        // Until now a subscription's unread count was derived from the reading position:
+        // everything past `book.lastReadSiteChapterId` was unread, everything before it
+        // was not. That is the right model for a novel, where the reader moves through a
+        // book in one direction, and the wrong one for a feed. It cannot say "this one
+        // article is read" — opening the twelfth of twenty marked the first eleven read
+        // too, silently — and it cannot say "read, but leave the older ones alone", which
+        // is the ordinary way anybody uses a feed reader.
+        //
+        // On `chapter` rather than in a table of its own, for the reason `publishedAt` is:
+        // a feed's article *is* a chapter, and a row beside it would be a second thing to
+        // keep in step. Nullable, and null means unread — so a novel's chapters, which
+        // never get one, are simply not asked this question (see `Chapter.isUnread`).
+        //
+        // The backfill converts each subscription's watermark into the flags it stood for,
+        // which is what keeps an upgrade from changing a single number on the shelf: an
+        // article at or before the stored position was read under the old rule and is
+        // marked read under the new one. It is stamped with `lastReadAt` — when the reader
+        // was last in that book — because that is the closest thing to a truth about when
+        // the reading happened. Novels and comics are left entirely alone: the column
+        // means nothing for them, and a stamp would be a claim nothing made.
+        migrator.registerMigration("v12.articleRead") { db in
+            try db.alter(table: Chapter.databaseTableName) { t in
+                t.add(column: "readAt", .datetime)
+            }
+            // `index <= NULL` is NULL, never true, so a subscription nobody has opened —
+            // and every novel and comic, which the inner query filters out by kind — comes
+            // out of this untouched. The kind is spelled as a literal for the reason v9
+            // gives: a migration converts to the shape it converted to the day it shipped.
+            try db.execute(sql: """
+                UPDATE "chapter"
+                SET "readAt" = (
+                    SELECT COALESCE("book"."lastReadAt", "book"."updatedAt")
+                    FROM "book" WHERE "book"."id" = "chapter"."bookId"
+                )
+                WHERE "index" <= (
+                    SELECT lastRead."index"
+                    FROM "book"
+                    JOIN "chapter" AS lastRead
+                      ON lastRead."bookId" = "book"."id"
+                     AND lastRead."siteChapterId" = "book"."lastReadSiteChapterId"
+                    WHERE "book"."id" = "chapter"."bookId"
+                      AND "book"."kind" = 'feed'
+                )
+                """)
+
+            // Unread is now a column, and the shelf's count is a count of nulls in it —
+            // one per subscription, over a table that holds every chapter of every novel
+            // too. Partial, so the index carries only the rows the question is ever asked
+            // about: on a library of one long novel and forty feeds that is a few hundred
+            // entries instead of tens of thousands.
+            try db.create(
+                index: "chapter_unread",
+                on: Chapter.databaseTableName,
+                columns: ["bookId"],
+                condition: Column("readAt") == nil
+            )
+        }
+
         return migrator
     }
 }

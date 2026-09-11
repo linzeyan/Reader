@@ -90,11 +90,11 @@ final class BookCatalogTests: XCTestCase {
     /// `LibrarySettings.catalogDescending`.
     func testOrderIsRememberedPerBookAndNothingElseHears() {
         let settings = makeSettings()
-        settings.setCatalogDescending(true, bookId: "site|serial")
+        settings.setCatalogDescending(true, bookId: "site|serial", kind: .novel)
 
-        XCTAssertTrue(settings.isCatalogDescending(bookId: "site|serial"))
+        XCTAssertTrue(settings.isCatalogDescending(bookId: "site|serial", kind: .novel))
         XCTAssertFalse(
-            settings.isCatalogDescending(bookId: "site|novel"),
+            settings.isCatalogDescending(bookId: "site|novel", kind: .novel),
             "a book nobody has touched reads from chapter one, as every catalog did before"
         )
     }
@@ -104,17 +104,21 @@ final class BookCatalogTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        LibrarySettings(defaults: defaults).setCatalogDescending(true, bookId: "site|serial")
+        LibrarySettings(defaults: defaults)
+            .setCatalogDescending(true, bookId: "site|serial", kind: .novel)
 
-        XCTAssertTrue(LibrarySettings(defaults: defaults).isCatalogDescending(bookId: "site|serial"))
+        XCTAssertTrue(
+            LibrarySettings(defaults: defaults)
+                .isCatalogDescending(bookId: "site|serial", kind: .novel)
+        )
     }
 
     /// Ascending is stored as nothing at all, so changing the order and changing it back
     /// leaves no trace — otherwise the defaults accumulate a row per book ever opened.
     func testGoingBackToAscendingLeavesNothingBehind() {
         let settings = makeSettings()
-        settings.setCatalogDescending(true, bookId: "site|serial")
-        settings.setCatalogDescending(false, bookId: "site|serial")
+        settings.setCatalogDescending(true, bookId: "site|serial", kind: .novel)
+        settings.setCatalogDescending(false, bookId: "site|serial", kind: .novel)
 
         XCTAssertTrue(settings.catalogDescending.isEmpty)
     }
@@ -123,13 +127,39 @@ final class BookCatalogTests: XCTestCase {
     /// reader never chose for it.
     func testDeletingABookForgetsItsOrder() {
         let settings = makeSettings()
-        settings.setCatalogDescending(true, bookId: "site|gone")
-        settings.setCatalogDescending(true, bookId: "site|kept")
+        settings.setCatalogDescending(true, bookId: "site|gone", kind: .novel)
+        settings.setCatalogDescending(true, bookId: "site|kept", kind: .novel)
 
         settings.forgetCatalogOrder(bookId: "site|gone")
 
-        XCTAssertFalse(settings.isCatalogDescending(bookId: "site|gone"))
-        XCTAssertTrue(settings.isCatalogDescending(bookId: "site|kept"))
+        XCTAssertFalse(settings.isCatalogDescending(bookId: "site|gone", kind: .novel))
+        XCTAssertTrue(settings.isCatalogDescending(bookId: "site|kept", kind: .novel))
+    }
+
+    /// A subscription runs the other way round, and does so without being asked.
+    ///
+    /// The reason it is a default rather than something the reader turns on per feed: a
+    /// novel is read from chapter one, so the top of an ascending list is where reading
+    /// starts, while nobody opens a blog to read its oldest post. Ascending puts what they
+    /// came for at the bottom, past everything they have already seen.
+    func testASubscriptionRunsNewestFirstWithoutBeingAsked() {
+        let settings = makeSettings()
+
+        XCTAssertTrue(settings.isCatalogDescending(bookId: "feed|blog", kind: .feed))
+        XCTAssertFalse(settings.isCatalogDescending(bookId: "site|novel", kind: .novel))
+    }
+
+    /// And a reader who turns a feed back to oldest-first is obeyed — with the same
+    /// "the default is stored as nothing" rule, read the other way round.
+    func testAFeedTurnedBackToOldestFirstIsRememberedAndCostsOneRow() {
+        let settings = makeSettings()
+
+        settings.setCatalogDescending(false, bookId: "feed|blog", kind: .feed)
+        XCTAssertFalse(settings.isCatalogDescending(bookId: "feed|blog", kind: .feed))
+        XCTAssertEqual(settings.catalogDescending, ["feed|blog": false])
+
+        settings.setCatalogDescending(true, bookId: "feed|blog", kind: .feed)
+        XCTAssertTrue(settings.catalogDescending.isEmpty, "back to the default, back to no row")
     }
 
     // MARK: - Helpers

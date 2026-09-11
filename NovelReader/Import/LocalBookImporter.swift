@@ -143,6 +143,11 @@ struct LocalBookImporter {
 
         let script = try ExtractorScript.chapter(Self.embeddedDocumentRule)
         var chapters: [ImportedChapter] = []
+        // Claimed for the length of the import, not per document: the view is shared
+        // with whatever else is extracting right now — a shelf of subscriptions being
+        // read, most likely — and the claim is what stops their release taking it away
+        // mid-spine. See `WebFetcher.holdImportView`.
+        await fetcher.holdImportView()
         // Spelled out rather than deferred, because giving the view back is a hop onto
         // the main actor and `defer` cannot await one. Both exits do it: the web view
         // the spine documents are read in is wanted for the length of one import, and

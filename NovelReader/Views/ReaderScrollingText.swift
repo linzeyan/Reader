@@ -255,6 +255,7 @@ final class ReaderScrollCoordinator {
             let siteId = chapter.chapter.siteChapterId
             let title = chapter.chapter.title
             let subtitle = chapter.subtitle
+            let titleLink = chapter.titleLink
             let blocks = chapter.blocks
             let script = key.script
             let typography = ReaderTypography(
@@ -264,18 +265,23 @@ final class ReaderScrollCoordinator {
             // the reader scrolls past it without ever seeing it whole. Falls back to the
             // measure when the view has not been sized yet, which is a portrait-ish
             // rectangle rather than a number that would let an image grow without limit.
+            // Read here, on the main thread, and carried into the queue below: a trait
+            // collection asked for from the layout queue is not this screen's.
+            let displayScale = view?.traitCollection.displayScale
+                ?? UITraitCollection.current.displayScale
             let layout = chapter.imageDirectory.map {
                 ArticleLayout(
                     width: key.width,
                     maxImageHeight: max(view?.visibleHeight ?? 0, key.width),
-                    directory: $0
+                    directory: $0,
+                    displayScale: displayScale
                 )
             }
             layoutQueue.async { [weak self] in
                 let column = ChapterColumn(
                     text: ChapterText(
-                        title: title, subtitle: subtitle, blocks: blocks,
-                        typography: typography, layout: layout,
+                        title: title, subtitle: subtitle, titleLink: titleLink,
+                        blocks: blocks, typography: typography, layout: layout,
                         // Ragged, unlike a page: this column has no visible right edge
                         // to justify against.
                         alignment: .natural,

@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -157,9 +158,14 @@ struct ChapterText {
     ///   moment before the text becomes glyphs, rather than where the chapter was fetched:
     ///   the stored text stays the publisher's, so changing the setting redraws the book
     ///   instead of re-downloading it, and a chapter cached in one script is not stuck in it.
+    /// - Parameter titleLink: the page this piece came from, for an article whose publisher
+    ///   gave it one. Tapping the title opens it — the affordance every feed reader has,
+    ///   and the one that matters most on the feeds that publish a summary and keep the
+    ///   piece on their own site.
     init(
         title: String,
         subtitle: String? = nil,
+        titleLink: URL? = nil,
         blocks: [ArticleBlock],
         typography: ReaderTypography,
         layout: ArticleLayout? = nil,
@@ -187,14 +193,19 @@ struct ChapterText {
         // A heading needs more air under it than between two paragraphs, or the
         // first line of the chapter reads as part of the title.
         titleStyle.paragraphSpacing = subtitle == nil ? betweenParagraphs + 8 : 2
-        composed.append(NSAttributedString(
-            string: title,
-            attributes: [
-                .font: typography.title,
-                .foregroundColor: typography.color,
-                .paragraphStyle: titleStyle,
-            ]
-        ))
+        var titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: typography.title,
+            .foregroundColor: typography.color,
+            .paragraphStyle: titleStyle,
+        ]
+        // Linked but not *styled* as a link, which is the one place this composes a link
+        // without the tint and the underline. A headline set in link blue reads as a
+        // hyperlink someone dropped into the prose; what is wanted is the affordance every
+        // feed reader has, where the piece's own title is the way back to the page it came
+        // from. Both renderers pick this up for free — `links` below is collected over the
+        // whole string, and the tap that opens it is the one inline links already use.
+        if let titleLink { titleAttributes[.link] = titleLink }
+        composed.append(NSAttributedString(string: title, attributes: titleAttributes))
 
         let bodyStyle = NSMutableParagraphStyle()
         bodyStyle.lineSpacing = typography.lineSpacing
@@ -425,14 +436,11 @@ struct ChapterText {
         style.paragraphSpacingBefore = spacing
         style.alignment = .center
 
-        guard let layout, let reference = block.image, let file = reference.file,
-              let width = reference.width, let height = reference.height, width > 0, height > 0,
-              let image = UIImage(contentsOfFile: layout.directory.appendingPathComponent(file).path)
-        else {
-            // Nothing to draw. The alt text stands in where there is one — it is the
-            // sentence the author wrote for exactly this case — and an empty block keeps
-            // the numbering that every anchor resolves through.
-            return NSAttributedString(
+        // Nothing to draw. The alt text stands in where there is one — it is the sentence
+        // the author wrote for exactly this case — and an empty block keeps the numbering
+        // that every anchor resolves through.
+        func alt() -> NSAttributedString {
+            NSAttributedString(
                 string: block.image?.alt ?? "",
                 attributes: [
                     .font: typography.caption,
@@ -442,21 +450,67 @@ struct ChapterText {
             )
         }
 
+        guard let layout, let reference = block.image, let file = reference.file,
+              let width = reference.width, let height = reference.height, width > 0, height > 0
+        else { return alt() }
+
         let scale = min(
             layout.width / CGFloat(width),
             layout.maxImageHeight / CGFloat(height),
             1
         )
-        let attachment = NSTextAttachment()
-        attachment.image = image
-        attachment.bounds = CGRect(
-            x: 0, y: 0,
+        let size = CGSize(
             width: (CGFloat(width) * scale).rounded(),
             height: (CGFloat(height) * scale).rounded()
         )
+        guard let image = decoded(
+            at: layout.directory.appendingPathComponent(file),
+            fitting: size,
+            scale: layout.displayScale
+        ) else { return alt() }
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(origin: .zero, size: size)
         let composed = NSMutableAttributedString(attachment: attachment)
         composed.addAttributes([.paragraphStyle: style], range: NSRange(location: 0, length: composed.length))
         return composed
+    }
+
+    /// The picture, decoded once at the size it is going to be drawn at.
+    ///
+    /// `UIImage(contentsOfFile:)` was what this did, and it is why an article scrolled
+    /// worse than a novel. The canvas redraws every visible line on every scroll frame —
+    /// see `ReaderTextScrollView.scrollViewDidScroll` — and an attachment holding the
+    /// stored file at its own size makes each of those frames a resample of up to four
+    /// megapixels down to a column about a thousand pixels across, on the thread doing the
+    /// scrolling. A novel has no attachments, which is the whole of the difference a
+    /// reader can feel. Decoded to its on-screen size instead, the same per-frame draw is
+    /// a straight blit.
+    ///
+    /// It is also the memory: a stored picture is capped at 2048 pixels on its long edge,
+    /// which is twelve megabytes of bitmap apiece, and an illustrated post carries twenty.
+    ///
+    /// `ComicPageStore.decode` is this call for these reasons, against pages several times
+    /// larger. The difference is only where the scale comes from: a comic page is decoded
+    /// off the main thread and told what screen it is for, and so is this — `layout` is
+    /// built by the renderer, because `ChapterText` is composed on a background queue
+    /// where `UITraitCollection.current` is not the screen's.
+    private static func decoded(at url: URL, fitting size: CGSize, scale: CGFloat) -> UIImage? {
+        let scale = max(scale, 1)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            // Decoded here rather than lazily at the first draw, which would otherwise be
+            // a stutter the first time each picture came on screen — during a scroll,
+            // which is exactly when it must not happen.
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(size.width, size.height) * scale,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: image, scale: scale, orientation: .up)
     }
 }
 
@@ -475,6 +529,13 @@ struct ArticleLayout: Equatable {
     var maxImageHeight: CGFloat
     /// The article's own image directory.
     var directory: URL
+    /// Pixels the screen draws per point, which is what a picture is decoded to.
+    ///
+    /// Carried here rather than read where it is used, because where it is used is a
+    /// background queue: `ReaderScrollingText` composes the text off the main thread, and
+    /// `UITraitCollection.current` there is not the screen's — it would silently decode
+    /// every picture at 1x and make them soft on every device sold since 2014.
+    var displayScale: CGFloat
 }
 
 // MARK: - Text coordinates

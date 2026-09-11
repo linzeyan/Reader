@@ -94,12 +94,17 @@ struct Book: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord
     /// means a daily reader keeps hitting an end that is not the end.
     static let catalogMaxAge: TimeInterval = 24 * 60 * 60
 
-    /// Half an hour for a subscription, which is a different shape of content and a
+    /// Five minutes for a subscription, which is a different shape of content and a very
     /// different cost. A feed can publish several times an hour, and asking a reader who
     /// opened the app to see what is new to instead see this morning's list would be
-    /// answering the wrong question — while the request itself is conditional (see
-    /// `FeedFetchState`), so the usual answer is a few hundred bytes saying "nothing".
-    static let feedMaxAge: TimeInterval = 30 * 60
+    /// answering the wrong question.
+    ///
+    /// Short because the request is nearly free and nobody is being kept out: a feed is a
+    /// document published to be polled, it is fetched conditionally (see `FeedFetchState`),
+    /// and the usual answer is a `304` — a few hundred bytes and no parsing, no articles,
+    /// no pictures. Half an hour was the novel sites' caution applied to something that
+    /// does not need it.
+    static let feedMaxAge: TimeInterval = 5 * 60
 
     var isCatalogStale: Bool {
         guard let catalogUpdatedAt else { return true }
@@ -206,8 +211,43 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     var publishedAt: Date?
     /// Non-nil exactly when a local text file exists (requirement 4.2).
     var downloadedAt: Date?
+    /// When this article was read, for the one medium where that is a fact about the
+    /// article rather than about where the reader is standing: a feed.
+    ///
+    /// Null for every novel and comic chapter, and never written for one. A novel is read
+    /// in one direction and its position says everything — a chapter "before" the position
+    /// has been passed, and that is all "read" could mean there. A feed is not read that
+    /// way: articles are picked out of a list in whatever order they look interesting, so
+    /// the only honest record is one per article. See the `v12.articleRead` migration for
+    /// what the watermark this replaces could not say.
+    var readAt: Date?
 
     var isDownloaded: Bool { downloadedAt != nil }
+
+    /// Whether this article is still waiting to be read.
+    ///
+    /// A question only a subscription answers meaningfully: every novel and comic chapter
+    /// is "unread" by this measure for ever, because nothing writes the column for them.
+    /// Callers branch on `Book.kind` before asking — `ChapterRow` and the shelf's counting
+    /// query both do, and `LibraryRepo.newChapterCounts` restates this in SQL.
+    var isUnread: Bool { readAt == nil }
+
+    /// The page this chapter came from, where that is an address worth opening.
+    ///
+    /// Nil for an article the feed published no link for: `LibraryRepo.mergeCatalog`
+    /// stores an empty string there rather than the feed's own address, which would send a
+    /// reader asking for the original to a document instead of a page. The scheme is
+    /// checked for the same reason `ArticleImages` checks it — a `javascript:` or `data:`
+    /// URL out of a publisher's document is not something to hand to the system opener.
+    ///
+    /// One definition, because three places ask: the reader's "open original", the tap on
+    /// an article's title, and the catalog's copy-link swipe.
+    var webURL: URL? {
+        guard let url = URL(string: url), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { return nil }
+        return url
+    }
 
     /// Whether to flag this chapter as newly published by the site.
     ///
@@ -228,31 +268,22 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     /// site published last month is not news the reader is missing, it is simply a
     /// chapter they have not reached, which their position already tells them.
     ///
+    /// Novels and comics only. A subscription asks `isUnread` instead, which is a
+    /// different question with a different answer: the marker on an article means "you
+    /// have not read this", and the one here means "the site published this while you were
+    /// away". Feeds used to come through here with `expiring: false`, which made the two
+    /// one function answering both badly — it could only say "unread" as "past the reading
+    /// position", and that is precisely what `readAt` exists to stop being the definition.
+    ///
     /// - Parameter lastReadIndex: reading order of the chapter the reader left off in,
     ///   as `Book.lastReadIndex(in:)` resolves it. Nil means they have no place in this
     ///   catalog — never opened, or the site dropped the chapter they were in — and
     ///   then every recently added chapter is ahead of them.
-    /// - Parameter expiring: whether "new" wears off. True for a novel and a comic, for
-    ///   everything the paragraphs above say. False for a subscription, where unread *is*
-    ///   the question the medium is read for: an article from last month that the reader
-    ///   has not reached is exactly what the marker is meant to point at, and one that
-    ///   expired after a day would say nothing at all to someone who looks twice a week.
-    ///   Spelled at every call site rather than defaulted, because the shelf's count
-    ///   restates this rule in SQL and the two silently disagreeing is the failure this
-    ///   parameter exists to prevent.
-    ///
-    ///   It drops the arrival stamp with the clock, not just the deadline: for a
-    ///   subscription "unread" is purely a matter of the reading position, so a feed
-    ///   added today offers everything the first fetch brought back. That is the point of
-    ///   subscribing, and it is the one place this differs from a novel, where a first
-    ///   catalog of three hundred chapters marked new would be noise.
-    func isNew(lastReadIndex: Int?, expiring: Bool, now: Date = .now) -> Bool {
-        if expiring {
-            // Recent *and* stamped: a chapter indexed before the column existed has no
-            // honest arrival date, and reading one as "now" would mark a whole library.
-            guard let addedAt, now.timeIntervalSince(addedAt) < Self.newWindow else {
-                return false
-            }
+    func isNew(lastReadIndex: Int?, now: Date = .now) -> Bool {
+        // Recent *and* stamped: a chapter indexed before the column existed has no
+        // honest arrival date, and reading one as "now" would mark a whole library.
+        guard let addedAt, now.timeIntervalSince(addedAt) < Self.newWindow else {
+            return false
         }
         guard let lastReadIndex else { return true }
         return index > lastReadIndex

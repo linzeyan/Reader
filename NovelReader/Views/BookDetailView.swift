@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// Where a bookmark is turned into something readable: metadata, the chapter
@@ -54,7 +55,7 @@ struct BookDetailView: View {
         BookCatalog(
             chapters: chapters,
             query: query,
-            descending: env.librarySettings.isCatalogDescending(bookId: book.id),
+            descending: env.librarySettings.isCatalogDescending(bookId: book.id, kind: book.kind),
             lastReadSiteChapterId: current.lastReadSiteChapterId
         )
     }
@@ -130,9 +131,13 @@ struct BookDetailView: View {
                 // A menu wherever there are two text formats to choose between; a button
                 // for a comic, because there is one archive and a menu of one item is a
                 // tap nobody needs. A subscription takes the text path — its articles
-                // are paragraphs on disk, which is what both text writers read.
+                // are paragraphs on disk, which is what both text writers read — and adds
+                // the one action that is about the whole subscription rather than one
+                // article, which is the same kind of thing an export is.
                 if current.kind == .comic {
                     comicExportButton
+                } else if current.kind == .feed {
+                    feedMenu
                 } else {
                     exportMenu
                 }
@@ -290,13 +295,7 @@ struct BookDetailView: View {
                 // a thirteen-hundred-chapter list quadratic.
                 let lastRead = lastReadIndex
                 ForEach(catalog.chapters) { chapter in
-                    NavigationLink(
-                        value: ReadingTarget(
-                            book: current, position: .chapterStart(chapter.siteChapterId)
-                        )
-                    ) {
-                        ChapterRow(chapter: chapter, lastReadIndex: lastRead, kind: current.kind)
-                    }
+                    catalogRow(chapter, lastReadIndex: lastRead)
                 }
             }
         } header: {
@@ -314,6 +313,80 @@ struct BookDetailView: View {
                 // order yet.
                 if !chapters.isEmpty { orderToggle }
             }
+        }
+    }
+
+    /// One row of the catalog, with the gesture the medium has a use for.
+    ///
+    /// The swipe is a subscription's only, and on the leading edge: the trailing one is
+    /// where the system puts destructive actions and where every other list in this app
+    /// puts delete, so a mark that is trivially undoable does not belong there. A novel's
+    /// chapters have nothing to toggle — "read" is not a fact a novel chapter carries, see
+    /// `Chapter.readAt` — so they get no swipe rather than an inert one.
+    @ViewBuilder
+    private func catalogRow(_ chapter: Chapter, lastReadIndex: Int?) -> some View {
+        let row = NavigationLink(
+            value: ReadingTarget(book: current, position: .chapterStart(chapter.siteChapterId))
+        ) {
+            ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex, kind: current.kind)
+        }
+        if current.kind == .feed {
+            row.swipeActions(edge: .leading) {
+                Button {
+                    toggleRead(chapter)
+                } label: {
+                    Label(
+                        chapter.isUnread ? "chapter.markRead" : "chapter.markUnread",
+                        systemImage: chapter.isUnread ? "envelope.open" : "envelope.badge"
+                    )
+                }
+                .tint(chapter.isUnread ? .blue : .gray)
+                .accessibilityIdentifier("chapter.toggleRead")
+                // Second, so a full swipe still runs the read toggle: the system fires the
+                // *first* button of an edge, and marking read is the gesture somebody
+                // repeats down a list while copying a link is one they aim at.
+                //
+                // Only where the publisher gave the article an address of its own — see
+                // `Chapter.webURL`. A button that copied nothing would be worse than none.
+                if let link = chapter.webURL {
+                    Button {
+                        UIPasteboard.general.url = link
+                    } label: {
+                        Label("chapter.copyLink", systemImage: "link")
+                    }
+                    .tint(.indigo)
+                    .accessibilityIdentifier("chapter.copyLink")
+                }
+            }
+        } else {
+            row
+        }
+    }
+
+    /// Flips one article between read and unread.
+    ///
+    /// The in-memory catalog is corrected alongside the database rather than re-read from
+    /// it: this screen holds the whole list, and re-querying a thousand-article feed to
+    /// redraw one row is the shape of thing that makes a swipe feel slow.
+    private func toggleRead(_ chapter: Chapter) {
+        let read = chapter.isUnread
+        guard env.setArticlesRead(read, book: current, siteChapterIds: [chapter.siteChapterId])
+        else { return }
+        guard let at = chapters.firstIndex(where: { $0.id == chapter.id }) else { return }
+        chapters[at].readAt = read ? Date() : nil
+    }
+
+    /// Marks the whole subscription read.
+    ///
+    /// Everything it holds, not everything the list is currently showing: the search box
+    /// above can have narrowed the rows to three, and "mark all read" meaning "these
+    /// three" would be a gesture whose effect depends on a field the reader has probably
+    /// forgotten is filled in.
+    private func markAllRead() {
+        guard env.markAllRead(current) > 0 else { return }
+        let now = Date()
+        for index in chapters.indices where chapters[index].isUnread {
+            chapters[index].readAt = now
         }
     }
 
@@ -372,8 +445,10 @@ struct BookDetailView: View {
     /// keyed by book, so the binding is built by hand rather than with `@Bindable`.
     private var orderBinding: Binding<Bool> {
         Binding(
-            get: { env.librarySettings.isCatalogDescending(bookId: book.id) },
-            set: { env.librarySettings.setCatalogDescending($0, bookId: book.id) }
+            get: { env.librarySettings.isCatalogDescending(bookId: book.id, kind: book.kind) },
+            set: {
+                env.librarySettings.setCatalogDescending($0, bookId: book.id, kind: book.kind)
+            }
         )
     }
 
@@ -387,16 +462,7 @@ struct BookDetailView: View {
             ProgressView()
         } else {
             Menu {
-                Button {
-                    beginExport(.text)
-                } label: {
-                    Label("book.export.text", systemImage: "doc.plaintext")
-                }
-                Button {
-                    beginExport(.epub)
-                } label: {
-                    Label("book.export.epub", systemImage: "book.closed")
-                }
+                exportButtons
             } label: {
                 Label("book.export", systemImage: "square.and.arrow.up")
             }
@@ -405,6 +471,61 @@ struct BookDetailView: View {
             // how many chapters are on the device, so a greyed-out export reads as
             // "nothing to write yet" rather than as a broken button.
             .disabled(downloadedCount == 0)
+        }
+    }
+
+    /// The two text formats, shared by the novel's export menu and the subscription's
+    /// actions menu. Each carries its own `disabled`, because inside the feed menu there
+    /// is no enclosing control to carry it — and "nothing on the device to write" is a
+    /// fact about the exports, not about the menu they sit in.
+    @ViewBuilder
+    private var exportButtons: some View {
+        Button {
+            beginExport(.text)
+        } label: {
+            Label("book.export.text", systemImage: "doc.plaintext")
+        }
+        .disabled(downloadedCount == 0)
+        Button {
+            beginExport(.epub)
+        } label: {
+            Label("book.export.epub", systemImage: "book.closed")
+        }
+        .disabled(downloadedCount == 0)
+    }
+
+    /// A subscription's whole-book actions: marking it read, and the two exports.
+    ///
+    /// One menu rather than a second toolbar button, because the toolbar already carries
+    /// the refresh and a third control would crowd the title on a narrow phone. "Mark all
+    /// read" goes first and above the divider: it is the one anybody opens this menu for,
+    /// while an export of a blog is a thing somebody does once.
+    ///
+    /// Disabled with nothing unread rather than hidden — a row that appears only when it
+    /// has something to do is a row nobody finds — and the count on it is what says why.
+    @ViewBuilder
+    private var feedMenu: some View {
+        if exportProgress != nil {
+            ProgressView()
+        } else {
+            let unread = chapters.lazy.filter(\.isUnread).count
+            Menu {
+                Button {
+                    markAllRead()
+                } label: {
+                    Label(
+                        "book.articles.markAllRead \(unread)",
+                        systemImage: "envelope.open"
+                    )
+                }
+                .accessibilityIdentifier("book.markAllRead")
+                .disabled(unread == 0)
+                Divider()
+                exportButtons
+            } label: {
+                Label("book.articles.actions", systemImage: "ellipsis.circle")
+            }
+            .accessibilityIdentifier("book.articles.actions")
         }
     }
 
@@ -675,11 +796,11 @@ struct ChapterRow: View {
     /// no default: three screens draw this row, and a default would let one of them
     /// silently stop showing the marker.
     let lastReadIndex: Int?
-    /// What the book is, for the one thing the marker asks it: whether "new" wears off
-    /// after a day. It does for a novel and a comic and does not for a subscription —
-    /// see `Chapter.isNew(lastReadIndex:expiring:)`. Passed for the same reason the index
-    /// above is, and it has to agree with the shelf's count, which restates the rule in
-    /// SQL.
+    /// What the book is, for the one thing the marker asks it: which question to ask at
+    /// all. A novel and a comic ask `Chapter.isNew` — did the site publish this while I
+    /// was away — and a subscription asks `Chapter.isUnread`, which is a flag on the
+    /// article itself. Passed for the same reason the index above is, and it has to agree
+    /// with the shelf's count, which restates both rules in SQL.
     let kind: SiteRule.Kind
 
     var body: some View {
@@ -703,12 +824,15 @@ struct ChapterRow: View {
             Spacer()
             // Deliberately the same weight as the downloaded arrow next to it:
             // this is a hint about one row, not a call to action.
-            if chapter.isNew(lastReadIndex: lastReadIndex, expiring: kind != .feed) {
-                // Two words for one marker, because it means two things. On a novel it
-                // says the site published this while you were away; on a subscription
-                // there is no clock, so it says only that you have not read it — and an
-                // article from last year labelled "new" would be a plain untruth.
-                Text(kind == .feed ? "chapter.unread" : "chapter.new")
+            //
+            // One marker for both media, though the question behind it differs: a novel
+            // asks whether the site published this while the reader was away, a
+            // subscription asks whether they have read it. Worded the same because the
+            // answer means the same thing to the person scanning the list — this is the
+            // one to open — and two words for one dot of red was a distinction being drawn
+            // for the code's benefit rather than the reader's.
+            if kind == .feed ? chapter.isUnread : chapter.isNew(lastReadIndex: lastReadIndex) {
+                Text("chapter.new")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.red)
             }

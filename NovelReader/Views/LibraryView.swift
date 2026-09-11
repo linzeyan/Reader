@@ -19,22 +19,17 @@ struct LibraryView: View {
     @State private var exportingSubscriptions = false
     /// 0…1 while an import runs, nil otherwise — so it doubles as "busy".
     @State private var importProgress: Double?
-    /// What the import is working on right now, for the one import whose steps have
-    /// names: a subscription list, where each step is a whole feed being fetched.
-    @State private var importNote: String?
-    /// What a finished subscription import came to, held until the reader dismisses it.
-    ///
-    /// The only import that reports a result, because it is the only one whose result is
-    /// not on the screen behind it: a novel arrives as one row the reader can see, while
-    /// forty subscriptions land among the ones already there — and a list re-imported
-    /// from a backup can legitimately add nothing at all, which is indistinguishable from
-    /// having failed unless it is said.
-    @State private var importOutcome: String?
     @State private var renaming: Book?
     @State private var draftName = ""
     /// The imported book a swipe is about to destroy. Only imported books get
     /// asked about, because only they have nowhere to come back from.
     @State private var confirmingLocalDelete: Book?
+    /// Whether the "mark every subscription read" question is on screen.
+    ///
+    /// Asked at all — unlike the per-subscription mark, which is one tap and no question —
+    /// because this one reaches every feed on the shelf, and the thing it clears is the
+    /// only record of what the reader has not got to yet. There is no undo for it.
+    @State private var confirmingMarkAllRead = false
     /// Held so the reading history's handoff can lay down a whole route — shelf,
     /// book screen, reader — in one assignment. See `consumeHandoff`.
     @State private var path = NavigationPath()
@@ -133,8 +128,14 @@ struct LibraryView: View {
                     if env.mediaMode == .feed { subscriptionsMenu } else { importButton }
                 }
             }
-            .overlay(alignment: .top) { importBanner }
+            // One at a time, and the import wins: a file being turned into a book is
+            // something the reader picked seconds ago, while a batch of addresses is
+            // deliberately unattended and will still be there.
+            .overlay(alignment: .top) {
+                if importProgress != nil { importBanner } else { additionsBanner }
+            }
             .animation(.snappy, value: importProgress == nil)
+            .animation(.snappy, value: env.additions.lines.isEmpty)
             .sheet(isPresented: $adding) { AddBookSheet() }
             // Only the types this app can actually read, and only the ones that
             // belong to the shelf in front of the reader. Opening a book from
@@ -158,16 +159,13 @@ struct LibraryView: View {
             ) { result in
                 if case .failure(let error) = result { env.report(error) }
             }
-            .alert(
-                "library.opml.imported.title",
-                isPresented: Binding(
-                    get: { importOutcome != nil },
-                    set: { if !$0 { importOutcome = nil } }
-                )
+            .confirmationDialog(
+                "library.markAllRead.confirm",
+                isPresented: $confirmingMarkAllRead,
+                titleVisibility: .visible
             ) {
-                Button("common.done") { importOutcome = nil }
-            } message: {
-                Text(importOutcome ?? "")
+                Button("library.markAllRead.confirm.action") { _ = env.markEveryFeedRead() }
+                Button("common.cancel", role: .cancel) {}
             }
             .alert("library.rename", isPresented: renamingBinding) {
                 TextField("library.rename.placeholder", text: $draftName)
@@ -192,11 +190,26 @@ struct LibraryView: View {
         .disabled(importProgress != nil)
     }
 
-    /// The two halves of OPML. Export is disabled rather than hidden on an empty shelf:
-    /// it is not a feature that arrives with the first subscription, it is one there is
+    /// Everything the feed shelf can do to the subscriptions as a whole: clear them, and
+    /// move the list in or out.
+    ///
+    /// One menu rather than a control each, because the toolbar already carries four
+    /// things. Marking everything read goes above the divider as the only one of the three
+    /// anybody does weekly — a subscription list is imported once and exported when
+    /// somebody is leaving.
+    ///
+    /// Both of the lower two are disabled rather than hidden on an empty shelf: neither is
+    /// a feature that arrives with the first subscription, they are features there is
     /// briefly nothing to do with.
     private var subscriptionsMenu: some View {
-        Menu {
+        let unread = unreadSubscriptionCount
+        return Menu {
+            Button("library.markAllRead", systemImage: "envelope.open") {
+                confirmingMarkAllRead = true
+            }
+            .accessibilityIdentifier("library.markAllRead")
+            .disabled(unread == 0)
+            Divider()
             Button("library.opml.import", systemImage: "square.and.arrow.down") {
                 picking = true
             }
@@ -207,10 +220,23 @@ struct LibraryView: View {
             .accessibilityIdentifier("library.opml.export")
             .disabled(env.shelfBooks.isEmpty)
         } label: {
-            Label("library.opml", systemImage: "square.and.arrow.up.on.square")
+            Label("library.opml", systemImage: "ellipsis.circle")
         }
         .accessibilityIdentifier("library.opml")
-        .disabled(importProgress != nil)
+        // A second list picked while the first is still being read is refused rather than
+        // queued, so the control that would refuse it is not offered.
+        .disabled(importProgress != nil || env.additions.isRunning)
+    }
+
+    /// How many unread articles the whole shelf is holding.
+    ///
+    /// Read off the badge counts the shelf already loaded rather than asked of the
+    /// database: this is evaluated every time the toolbar is drawn, and the answer is only
+    /// used to decide whether one menu item is tappable.
+    private var unreadSubscriptionCount: Int {
+        env.books.lazy
+            .filter { $0.kind == .feed }
+            .reduce(0) { $0 + (env.newChapterCounts[$1.id] ?? 0) }
     }
 
     /// Dated, because what this file is for is keeping. Someone who exports twice ends up
@@ -284,31 +310,70 @@ struct LibraryView: View {
     @ViewBuilder
     private var importBanner: some View {
         if let importProgress {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
-                    ProgressView(value: importProgress) { Text("library.import.working") }
-                    if let importNote {
-                        Text(importNote)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .accessibilityIdentifier("library.import.note")
-                    }
-                }
+            banner {
+                ProgressView(value: importProgress) { Text("library.import.working") }
                 // A cancel button rather than a modal or nothing at all: importing
                 // a large EPUB is a minute of the app doing one thing, and the user
                 // who picked the wrong file should not have to wait it out.
                 Button("common.cancel") { env.cancelImport() }
                     .accessibilityIdentifier("library.import.cancel")
             }
+        }
+    }
+
+    /// What a batch of addresses is doing while nothing is watching it.
+    ///
+    /// The other half of moving the run out of the sheet: closing that sheet has to leave
+    /// something behind, or a reader who pasted forty addresses and went back to the shelf
+    /// would have no way to tell whether anything was still happening — nor any way to
+    /// stop it. Tapping it opens the sheet again, which is where the per-address detail is.
+    ///
+    /// It stays up after a run that had failures, because those are the only thing this
+    /// says that the shelf itself does not: a feed that would not answer leaves no row.
+    @ViewBuilder
+    private var additionsBanner: some View {
+        let additions = env.additions
+        if additions.isRunning {
+            banner {
+                Button {
+                    adding = true
+                } label: {
+                    ProgressView(
+                        value: Double(additions.finished), total: Double(additions.lines.count)
+                    ) {
+                        Text("library.add.running \(additions.finished) \(additions.lines.count)")
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("library.add.banner")
+                Button("library.add.stop") { additions.stop() }
+            }
+        } else if additions.failures > 0 {
+            banner {
+                Button {
+                    adding = true
+                } label: {
+                    Text("library.add.failed \(additions.failures)")
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("library.add.banner")
+                Button("common.done") { additions.clear() }
+            }
+        }
+    }
+
+    /// The one shape both banners have: a line of status, a button to end it, floating
+    /// over the shelf rather than pushing it down.
+    private func banner(@ViewBuilder _ content: () -> some View) -> some View {
+        HStack(spacing: 14) { content() }
             .font(.footnote)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(.bar, in: .rect(cornerRadius: 12))
             .padding(.horizontal)
             .transition(.move(edge: .top).combined(with: .opacity))
-        }
     }
 
     /// Explicitly main-actor: the import runs off the main thread on purpose, so
@@ -328,34 +393,25 @@ struct LibraryView: View {
     }
 
     private func runImport(_ url: URL) async {
-        importProgress = 0
-        defer {
-            importProgress = nil
-            importNote = nil
+        // The one import that is not a book: a list of addresses, each of which is then
+        // subscribed to for real. It reads the file and hands the addresses to the same
+        // queue a pasted batch goes through, so it reports itself through that queue's own
+        // banner — and, unlike the two below, the reader is free to walk away from it.
+        if env.mediaMode == .feed {
+            do {
+                try env.importSubscriptions(from: url)
+            } catch {
+                env.report(error)
+            }
+            return
         }
+        importProgress = 0
+        defer { importProgress = nil }
         do {
             switch env.mediaMode {
             case .novel: try await env.importLocalBook(from: url) { importProgress = $0 }
             case .comic: try await env.importComicArchive(from: url) { importProgress = $0 }
-            // The one import that is not a book: a list of addresses, each of which is
-            // then subscribed to for real. Determinate for the same reason a novel's is —
-            // forty feeds is forty requests, and a spinner would look stuck — and named,
-            // because every one of those requests is a subscription the reader chose.
-            case .feed:
-                // How many the file listed, taken from the progress it reports rather than
-                // read out of the file a second time: the count the reader watched climb is
-                // the one the result has to agree with.
-                var listed = 0
-                let added = try await env.importSubscriptions(from: url) { step in
-                    listed = step.count
-                    importProgress = step.fraction
-                    importNote = step.subscription.map {
-                        String(
-                            localized: "library.import.subscription \($0) \(step.index + 1) \(step.count)"
-                        )
-                    }
-                }
-                importOutcome = String(localized: "library.opml.imported \(listed) \(added)")
+            case .feed: break
             }
         } catch is CancellationError {
             // Not reported. The user asked for this and the banner going away is
@@ -455,6 +511,22 @@ struct LibraryView: View {
                 Label("library.rename", systemImage: "pencil")
             }
             .tint(.indigo)
+        }
+        // The leading edge, opposite the two that change what is on the shelf. A
+        // subscription only: it is the one kind of row whose badge is a list of things
+        // waiting, and the one where clearing it is a normal part of reading rather than
+        // an edit. No confirmation, matching the per-article swipe — what it clears is
+        // recoverable a row at a time, and the shelf-wide version, which is not, asks.
+        .swipeActions(edge: .leading) {
+            if book.kind == .feed, (env.newChapterCounts[book.id] ?? 0) > 0 {
+                Button {
+                    _ = env.markAllRead(book)
+                } label: {
+                    Label("library.markRead", systemImage: "envelope.open")
+                }
+                .tint(.blue)
+                .accessibilityIdentifier("library.markRead")
+            }
         }
     }
 

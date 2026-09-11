@@ -10,9 +10,9 @@ import XCTest
 /// into a wall of red and the marker into decoration, so each of those is
 /// pinned separately here.
 ///
-/// A subscription takes the other branch of the same rule — there the marker means
-/// unread, and it is the reading position alone that clears it — which is pinned under
-/// "Subscriptions" below.
+/// A subscription answers a different question with the same badge — there the marker
+/// means unread, it is a flag on the article itself, and nothing but reading that article
+/// clears it — which is pinned under "Subscriptions" below.
 final class NewChapterTests: XCTestCase {
     private let day: TimeInterval = 24 * 60 * 60
 
@@ -56,13 +56,13 @@ final class NewChapterTests: XCTestCase {
         let book = try XCTUnwrap(repo.book(id: bookId))
         let chapters = try repo.chapters(bookId: bookId)
         let lastReadIndex = book.lastReadIndex(in: chapters)
-        // The kind decides whether "new" expires, which is the one thing the two
-        // statements of this rule disagree about by design — see
-        // `Chapter.isNew(lastReadIndex:expiring:)`. Read off the book here so this helper
-        // stays what it claims to be: the per-row rule as a screen would ask it.
-        return chapters.filter {
-            $0.isNew(lastReadIndex: lastReadIndex, expiring: book.kind != .feed, now: now)
-        }
+        // The kind decides which question is asked at all, which is what the shelf's
+        // `CASE` restates in SQL: a subscription asks whether the article has been read,
+        // everything else whether the site published it while the reader was away. Read
+        // off the book here so this helper stays what it claims to be — the per-row rule
+        // as a screen would ask it.
+        guard book.kind != .feed else { return chapters.filter(\.isUnread) }
+        return chapters.filter { $0.isNew(lastReadIndex: lastReadIndex, now: now) }
     }
 
     // MARK: - Migration
@@ -94,10 +94,89 @@ final class NewChapterTests: XCTestCase {
         let stored = try XCTUnwrap(chapter)
         XCTAssertNil(stored.addedAt, "There is no honest answer for a row written before the column")
         XCTAssertFalse(
-            stored.isNew(
-                lastReadIndex: try XCTUnwrap(book).lastReadIndex(in: [stored]), expiring: true
-            )
+            stored.isNew(lastReadIndex: try XCTUnwrap(book).lastReadIndex(in: [stored]))
         )
+    }
+
+    /// The upgrade to per-article read flags must not change a single number on the shelf.
+    ///
+    /// Before `v12.articleRead` a subscription's unread count *was* the reading position:
+    /// everything at or before it read, everything after it not. So the migration writes
+    /// down exactly what the watermark stood for. Getting this wrong is not a subtle
+    /// failure — it is every reader's shelf either lighting up with hundreds of unread
+    /// articles they have already read, or going silent about the ones they have not.
+    func testTheReadFlagBackfillPreservesWhatTheWatermarkMeant() throws {
+        let queue = try DatabaseQueue()
+        let migrator = AppDatabase.migrator
+        try migrator.migrate(queue, upTo: "v11.feedWindow")
+        try queue.write { db in
+            // A subscription read as far as its second article, and a novel — which has
+            // a position too, and must come out of this with nothing written at all.
+            for (id, kind, position) in [
+                ("feed|f", "feed", "a1"), ("demo|1", "novel", "n1")
+            ] {
+                try db.execute(sql: """
+                    INSERT INTO book (id, siteId, siteBookId, title, kind, addedAt, updatedAt,
+                                      lastReadSiteChapterId, lastReadAt)
+                    VALUES (?, 'x', 'y', 't', ?, '2024-01-01 00:00:00.000',
+                            '2024-01-02 00:00:00.000', ?, '2024-01-03 00:00:00.000')
+                    """, arguments: [id, kind, position])
+            }
+            for (book, prefix) in [("feed|f", "a"), ("demo|1", "n")] {
+                for index in 0..<4 {
+                    try db.execute(sql: """
+                        INSERT INTO chapter (id, bookId, siteChapterId, "index", title, url)
+                        VALUES (?, ?, ?, ?, 't', 'https://demo.test/x')
+                        """, arguments: ["\(book)|\(prefix)\(index)", book, "\(prefix)\(index)", index])
+                }
+            }
+        }
+
+        try migrator.migrate(queue)
+
+        let (feed, novel) = try queue.read { db in
+            (
+                try Chapter.filter(Column("bookId") == "feed|f").order(Column("index")).fetchAll(db),
+                try Chapter.filter(Column("bookId") == "demo|1").fetchAll(db)
+            )
+        }
+        XCTAssertEqual(
+            feed.map(\.isUnread), [false, false, true, true],
+            "the watermark said articles 0 and 1 were read, so the flags do too"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(feed.first).readAt,
+            Date(timeIntervalSince1970: 1_704_240_000),
+            "stamped with when the reader was last in the book, which is the nearest truth"
+        )
+        XCTAssertTrue(
+            novel.allSatisfy(\.isUnread),
+            "a novel chapter has no read flag, and a position is not a claim that it does"
+        )
+    }
+
+    /// A subscription nobody has opened has no watermark to convert, and must not be
+    /// mistaken for one that was read to the end.
+    func testTheReadFlagBackfillLeavesAnUnopenedSubscriptionAlone() throws {
+        let queue = try DatabaseQueue()
+        let migrator = AppDatabase.migrator
+        try migrator.migrate(queue, upTo: "v11.feedWindow")
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO book (id, siteId, siteBookId, title, kind, addedAt, updatedAt)
+                VALUES ('feed|f', 'feed', 'y', 't', 'feed', '2024-01-01 00:00:00.000',
+                        '2024-01-01 00:00:00.000')
+                """)
+            try db.execute(sql: """
+                INSERT INTO chapter (id, bookId, siteChapterId, "index", title, url)
+                VALUES ('feed|f|a', 'feed|f', 'a', 0, 't', 'https://demo.test/x')
+                """)
+        }
+
+        try migrator.migrate(queue)
+
+        let stored = try queue.read { db in try Chapter.fetchOne(db, key: "feed|f|a") }
+        XCTAssertTrue(try XCTUnwrap(stored).isUnread)
     }
 
     // MARK: - Catalog diff
@@ -358,23 +437,94 @@ final class NewChapterTests: XCTestCase {
     /// of the rule once the clock is out of it.
     func testReadingDownASubscriptionLowersItsCountOnBothSides() throws {
         let repo = try makeRepo()
-        let feed = try repo.bookmark(
-            siteId: Book.feedSiteId, siteBookId: "https://demo.test/feed.xml",
-            kind: .feed, title: "feed"
-        )
-        let first = Date(timeIntervalSince1970: 1_700_000_000)
-        try repo.mergeCatalog(
-            bookId: feed.id, entries: articles(["a", "b", "c"], from: first), now: first
-        )
+        let feed = try makeFeed(in: repo, articles: ["a", "b", "c"])
 
-        try repo.updateProgress(bookId: feed.id, position: .chapterStart("b"))
+        try repo.setArticlesRead(true, bookId: feed.id, siteChapterIds: ["a", "b"])
 
-        let aWeekOn = first.addingTimeInterval(7 * day)
+        let aWeekOn = Date(timeIntervalSince1970: 1_700_000_000).addingTimeInterval(7 * day)
         XCTAssertEqual(try repo.newChapterCounts(now: aWeekOn)[feed.id], 1)
         XCTAssertEqual(try repo.newChapterCount(bookId: feed.id, now: aWeekOn), 1)
         XCTAssertEqual(
             try newChapters(of: feed.id, in: repo, now: aWeekOn).map(\.siteChapterId), ["c"]
         )
+    }
+
+    /// The claim the `readAt` column exists to make, and the one its predecessor could not:
+    /// an article is read when the reader read *it*.
+    ///
+    /// Under the watermark this replaced, opening the third article of four marked the
+    /// first two read as a side effect — they were "before the position" — so a reader who
+    /// jumped to the piece that looked interesting silently lost the two they had skipped.
+    /// Nothing about the position may touch the count now.
+    func testReadingOneArticleLeavesTheOthersUnread() throws {
+        let repo = try makeRepo()
+        let feed = try makeFeed(in: repo, articles: ["a", "b", "c", "d"])
+
+        // The reader opens the third piece, which is what a position records.
+        try repo.updateProgress(bookId: feed.id, position: .chapterStart("c"))
+        XCTAssertEqual(
+            try repo.newChapterCount(bookId: feed.id), 4,
+            "standing somewhere is not reading anything"
+        )
+
+        try repo.setArticlesRead(true, bookId: feed.id, siteChapterIds: ["c"])
+        XCTAssertEqual(try repo.newChapterCount(bookId: feed.id), 3)
+        XCTAssertEqual(
+            try newChapters(of: feed.id, in: repo).map(\.siteChapterId), ["a", "b", "d"],
+            "the two older ones were skipped past, not read"
+        )
+    }
+
+    /// Both marks that clear a whole subscription, and the one thing they must not do:
+    /// reach across into a novel, whose chapters have no such flag.
+    func testMarkingEverythingReadClearsOnlySubscriptions() throws {
+        let repo = try makeRepo()
+        let novel = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "novel")
+        try repo.replaceCatalog(bookId: novel.id, entries: entries(2), now: Date())
+        try repo.replaceCatalog(bookId: novel.id, entries: entries(3), now: Date())
+        let first = try makeFeed(in: repo, articles: ["a", "b"], id: "1")
+        let second = try makeFeed(in: repo, articles: ["c", "d", "e"], id: "2")
+
+        XCTAssertEqual(try repo.markAllRead(bookId: first.id), 2)
+        XCTAssertNil(try repo.newChapterCounts()[first.id])
+        XCTAssertEqual(try repo.newChapterCounts()[second.id], 3, "one subscription, not both")
+
+        XCTAssertEqual(try repo.markAllFeedsRead().sorted(), [second.id])
+        XCTAssertNil(try repo.newChapterCounts()[second.id])
+        XCTAssertEqual(
+            try repo.newChapterCounts()[novel.id], 1,
+            "a novel's marker is about what the site published and is not a read flag"
+        )
+    }
+
+    /// Read state is what iCloud merges on, so it has to move `updatedAt` with it —
+    /// otherwise the other device is entitled to ignore the record carrying it, and the
+    /// article comes back unread on the next pull.
+    func testMarkingReadStampsTheBookSoTheSyncCanSeeIt() throws {
+        let repo = try makeRepo()
+        let feed = try makeFeed(in: repo, articles: ["a", "b"])
+        let before = try XCTUnwrap(repo.book(id: feed.id)).updatedAt
+
+        try repo.setArticlesRead(true, bookId: feed.id, siteChapterIds: ["a"])
+        XCTAssertGreaterThan(try XCTUnwrap(repo.book(id: feed.id)).updatedAt, before)
+
+        // And a mark that changes nothing must not: a swipe on an already-read article is
+        // a gesture readers make constantly, and each one would otherwise publish a record.
+        let stamped = try XCTUnwrap(repo.book(id: feed.id)).updatedAt
+        XCTAssertEqual(try repo.setArticlesRead(true, bookId: feed.id, siteChapterIds: ["a"]), 0)
+        XCTAssertEqual(try XCTUnwrap(repo.book(id: feed.id)).updatedAt, stamped)
+    }
+
+    private func makeFeed(
+        in repo: LibraryRepo, articles ids: [String], id: String = "1"
+    ) throws -> Book {
+        let feed = try repo.bookmark(
+            siteId: Book.feedSiteId, siteBookId: "https://demo.test/\(id).xml",
+            kind: .feed, title: "feed \(id)"
+        )
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        try repo.mergeCatalog(bookId: feed.id, entries: articles(ids, from: first), now: first)
+        return feed
     }
 
     /// The library shelf counts new chapters with one grouped query, which means the rule

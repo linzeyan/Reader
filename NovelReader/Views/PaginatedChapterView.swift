@@ -108,6 +108,9 @@ struct PaginatedChapterView: View {
     let title: String
     /// The line under the title, where an article's date goes.
     let subtitle: String?
+    /// The page an article came from. Tapping its title opens it — see
+    /// `ChapterText.init(titleLink:)`. Nil for a novel.
+    let titleLink: URL?
     let blocks: [ArticleBlock]
     /// Where this chapter's pictures are, for an article that has any.
     let imageDirectory: URL?
@@ -619,7 +622,8 @@ struct PaginatedChapterView: View {
         let typography = ReaderTypography(settings: settings, color: palette.foreground.uiColor)
         let next = ChapterPaginator(
             text: ChapterText(
-                title: title, subtitle: subtitle, blocks: blocks, typography: typography,
+                title: title, subtitle: subtitle, titleLink: titleLink,
+                blocks: blocks, typography: typography,
                 layout: imageDirectory.map {
                     ArticleLayout(
                         width: size.width,
@@ -633,7 +637,8 @@ struct PaginatedChapterView: View {
                             size.height - typography.paragraphSpacing * 2
                                 - typography.body.lineHeight
                         ),
-                        directory: $0
+                        directory: $0,
+                        displayScale: UITraitCollection.current.displayScale
                     )
                 },
                 script: settings.chineseScript

@@ -166,7 +166,7 @@ final class ArticleTextTests: XCTestCase {
                     width: 800, height: 600, alt: "A picture"
                 )
             )],
-            layout: ArticleLayout(width: 300, maxImageHeight: 500, directory: directory)
+            layout: ArticleLayout(width: 300, maxImageHeight: 500, directory: directory, displayScale: 2)
         )
 
         let attachment = try XCTUnwrap(
@@ -177,6 +177,18 @@ final class ArticleTextTests: XCTestCase {
         )
         XCTAssertEqual(attachment.bounds.width, 300, accuracy: 1, "scaled down to the measure")
         XCTAssertEqual(attachment.bounds.height, 225, accuracy: 1, "and kept in proportion")
+
+        // And decoded to that size, not to the file's. The scrolling canvas redraws every
+        // visible line on every scroll frame, so an attachment holding the stored picture
+        // at its own size makes each frame a resample of the whole thing — which is the
+        // entire reason an article used to scroll worse than a novel. A stored picture is
+        // capped at 2048 pixels on its long edge; this one would arrive at 800 or 1600
+        // depending on the renderer's scale, and either is several times too much.
+        let decoded = try XCTUnwrap(attachment.image?.cgImage)
+        XCTAssertEqual(
+            CGFloat(decoded.width), 300 * 2, accuracy: 2,
+            "the measure at the screen's scale, and no more detail than that"
+        )
     }
 
     func testASmallPictureIsNotBlownUpToFillTheMeasure() throws {
@@ -198,7 +210,7 @@ final class ArticleTextTests: XCTestCase {
                     width: 40, height: 40
                 )
             )],
-            layout: ArticleLayout(width: 300, maxImageHeight: 500, directory: directory)
+            layout: ArticleLayout(width: 300, maxImageHeight: 500, directory: directory, displayScale: 2)
         )
 
         let attachment = try XCTUnwrap(

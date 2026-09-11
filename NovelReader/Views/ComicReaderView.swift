@@ -138,7 +138,7 @@ struct ComicReaderView: View {
     /// The same order the book's own catalog screen is in — one book, one direction.
     private var catalogChapters: [Chapter] {
         let all = model?.chapters ?? []
-        return env.librarySettings.isCatalogDescending(bookId: book.id)
+        return env.librarySettings.isCatalogDescending(bookId: book.id, kind: book.kind)
             ? Array(all.reversed())
             : all
     }

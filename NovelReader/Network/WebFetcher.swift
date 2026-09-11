@@ -360,7 +360,23 @@ final class WebFetcher: NSObject {
         }
     }
 
-    /// Gives back the web view an import was read in.
+    /// How many runs are currently reading documents through the import view.
+    ///
+    /// Counted rather than simply released by whoever finishes, because a shelf of
+    /// subscriptions is read several feeds at a time and each of those is its own run of
+    /// `extract` calls. The first to finish would otherwise take the view out from under
+    /// the rest — and `decidePolicyFor` recognises the import view *by identity*, so a
+    /// document left holding a detached one is a document handed the fetcher's own
+    /// navigation policy, which is "go anywhere". That is the hole the separate view
+    /// exists to close.
+    private var importViewHolders = 0
+
+    /// Claims the import view for a run of extractions. Balanced by `releaseImportView`.
+    func holdImportView() {
+        importViewHolders += 1
+    }
+
+    /// Gives back the web view an import was read in, once the last run is done with it.
     ///
     /// Called when an import finishes, not when a document does: an EPUB is one
     /// `extract` per spine document, and the rule-list compile that building this view
@@ -370,6 +386,8 @@ final class WebFetcher: NSObject {
     /// process — tens of megabytes — and it was living for the rest of the session on
     /// the strength of one import, still holding the DOM of the last document it read.
     func releaseImportView() {
+        importViewHolders = max(0, importViewHolders - 1)
+        guard importViewHolders == 0 else { return }
         importView = nil
     }
 

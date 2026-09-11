@@ -81,19 +81,18 @@ enum FeedRetention {
             else { return false }
             // Unread articles keep their own, longer clock — the reader has not had their
             // turn with these yet.
-            if isUnread(chapter, lastReadIndex: lastReadIndex) {
+            //
+            // The article's own flag, which is what the shelf's count reads too. It used
+            // to be "past the reading position", and that made this protection weaker than
+            // it looked: an article the reader deliberately skipped past counted as read
+            // and lost its longer clock, while one they had read and then scrolled back
+            // from kept it.
+            if chapter.isUnread {
                 guard let unreadRetention = policy.unreadRetention,
                       now.timeIntervalSince(arrived) >= unreadRetention
                 else { return false }
             }
             return true
         }
-    }
-
-    /// The same rule the shelf's count uses, minus the clock: for a subscription, unread
-    /// is everything past the reading position. See `Chapter.isNew(lastReadIndex:expiring:)`.
-    private static func isUnread(_ chapter: Chapter, lastReadIndex: Int?) -> Bool {
-        guard let lastReadIndex else { return true }
-        return chapter.index > lastReadIndex
     }
 }
