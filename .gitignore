@@ -15,6 +15,9 @@ build/
 # The live measurement's own path, so a run left going unattended cannot be deleted
 # out from under itself by a `make test` started meanwhile — see the Makefile.
 build-live/
+# Where a release is checked for compiler warnings, which has to be a Release build and
+# must not disturb the Debug one the test suites keep.
+build-release/
 .build/
 
 # --- macOS ---
