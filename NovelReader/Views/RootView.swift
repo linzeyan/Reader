@@ -83,7 +83,13 @@ struct RootView: View {
         // handoff is consumed by `LibraryView`, which is also what makes it work on
         // a launch where the library has never been on screen.
         .onChange(of: env.readingHandoff) { _, target in
-            if target != nil { tab = .library }
+            guard let target else { return }
+            tab = .library
+            // And onto the shelf this book is actually on, because that is where the
+            // reader ends up when they back out of it. Left alone, closing a subscription
+            // opened from History drops them on the default shelf, looking at novels they
+            // did not ask for and with no sign of what they were just reading.
+            env.mediaMode = target.book.kind
         }
         // Owned here, like the challenge sheet: a download can be queued from the
         // book screen and the answer must survive that screen going away.
