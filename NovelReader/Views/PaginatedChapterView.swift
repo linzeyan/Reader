@@ -117,7 +117,7 @@ struct PaginatedChapterView: View {
     /// Identity of the chapter on screen. A change here means the pages measured so
     /// far describe text that is no longer being shown.
     let chapterKey: String
-    let settings: ReaderSettings
+    let metrics: ReadingMetrics
     let landing: PageLanding
     /// A place inside this chapter to turn to, asked for from outside — the article
     /// outline. Separate from `landing`, which is only read when the pages are rebuilt:
@@ -126,7 +126,7 @@ struct PaginatedChapterView: View {
     let jumpTo: TextAnchor?
     /// Called once the jump has been made, so the same one is not made twice.
     let onJumped: () -> Void
-    /// The colours, already resolved. Handed down rather than read off `settings`,
+    /// The colours, already resolved. Handed down rather than read off the settings,
     /// because the system's own light-or-dark answer is a trait of the view tree and this
     /// view's owner is the one holding it.
     let palette: ReaderPalette
@@ -500,7 +500,7 @@ struct PaginatedChapterView: View {
     /// above an unmarked one still belongs to nobody.
     private func highlight(at point: CGPoint) -> TextHighlight? {
         guard !highlights.isEmpty, let paginator else { return nil }
-        let slack = (settings.lineSpacing + settings.paragraphSpacing) / 2
+        let slack = (metrics.lineSpacing + metrics.paragraphSpacing) / 2
         return highlights.first { highlight in
             paginator.text.ranges(of: highlight).contains { range in
                 paginator.rects(for: range, onPage: pageIndex).contains {
@@ -600,11 +600,11 @@ struct PaginatedChapterView: View {
             chapterKey: chapterKey,
             width: size.width,
             height: size.height,
-            fontName: settings.fontName,
-            fontSize: settings.fontSize,
-            lineSpacing: settings.lineSpacing,
-            paragraphSpacing: settings.paragraphSpacing,
-            script: settings.chineseScript
+            fontName: metrics.fontName,
+            fontSize: metrics.fontSize,
+            lineSpacing: metrics.lineSpacing,
+            paragraphSpacing: metrics.paragraphSpacing,
+            script: metrics.script
         )
     }
 
@@ -619,7 +619,7 @@ struct PaginatedChapterView: View {
         clearSelection()
         let fresh = renderedKey != chapterKey
         let carried = fresh ? nil : paginator?.anchor(at: pageIndex)
-        let typography = ReaderTypography(settings: settings, color: palette.foreground.uiColor)
+        let typography = ReaderTypography(metrics: metrics, color: palette.foreground.uiColor)
         let next = ChapterPaginator(
             text: ChapterText(
                 title: title, subtitle: subtitle, titleLink: titleLink,
@@ -641,7 +641,7 @@ struct PaginatedChapterView: View {
                         displayScale: UITraitCollection.current.displayScale
                     )
                 },
-                script: settings.chineseScript
+                script: metrics.script
             ),
             pageSize: size
         )

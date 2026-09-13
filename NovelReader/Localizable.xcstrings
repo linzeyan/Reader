@@ -5226,7 +5226,7 @@
     },
     "reader.fetchFullText" : {
       "comment" : "Fetches an article's own page, for a feed that published only a summary.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5704,6 +5704,30 @@
         }
       }
     },
+    "reader.settings.followDefault %@" : {
+      "comment" : "Names what a setting falls back to where it has not been answered: a picker row for a book or a medium that follows, and the line under each of one book's own controls. The placeholder is that default's current value — the mode, the size, the colours — so a reader can see what they are following.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow the default (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随默认（%@）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟隨預設（%@）"
+          }
+        }
+      }
+    },
     "reader.settings.font" : {
       "comment" : "Font family picker.",
       "extractionState" : "manual",
@@ -5872,30 +5896,6 @@
         }
       }
     },
-    "reader.settings.mode.followDefault %@" : {
-      "comment" : "Picker row in the reader's own settings: this book is turned whichever way the reader's default says. The placeholder is that default's current value, named so a reader can see what they are following.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Follow the default (%@)"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "跟随默认（%@）"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "跟隨預設（%@）"
-          }
-        }
-      }
-    },
     "reader.settings.mode.footer" : {
       "comment" : "Explains how much text each reading mode can mark: a whole paragraph while scrolling, a sentence on a page.",
       "extractionState" : "manual",
@@ -5988,6 +5988,126 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "段距"
+          }
+        }
+      }
+    },
+    "reader.settings.scope" : {
+      "comment" : "Label for the switch at the top of the reader's settings panel choosing which books a change applies to.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用于"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "套用到"
+          }
+        }
+      }
+    },
+    "reader.settings.scope.book" : {
+      "comment" : "Scope of the reader's settings panel: the controls below change only the book being read.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This book"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这本书"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這本書"
+          }
+        }
+      }
+    },
+    "reader.settings.scope.book.footer" : {
+      "comment" : "Explains that the controls below change this book alone, and that only some settings can be answered per book.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only this book changes. Everything else keeps following the defaults."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有这本书会变，其他书仍跟随默认。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有這本書會變，其他書仍跟隨預設。"
+          }
+        }
+      }
+    },
+    "reader.settings.scope.defaults" : {
+      "comment" : "Scope of the reader's settings panel: the controls below change what every book is read with.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Defaults"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預設"
+          }
+        }
+      }
+    },
+    "reader.settings.scope.defaults.footer" : {
+      "comment" : "Explains that the controls below change every book that has not been given its own answer.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every book changes, except those you have set separately."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有书都会变，个别设定过的除外。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有書都會變，個別設定過的除外。"
           }
         }
       }

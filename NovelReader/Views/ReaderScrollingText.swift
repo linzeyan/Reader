@@ -74,8 +74,8 @@ struct ReaderTap {
 struct ReaderScrollingText: UIViewRepresentable {
     /// The loaded window, in reading order.
     let chapters: [ReaderModel.LoadedChapter]
-    let settings: ReaderSettings
-    /// The colours, already resolved. Handed down rather than read off `settings`,
+    let metrics: ReadingMetrics
+    /// The colours, already resolved. Handed down rather than read off the settings,
     /// because the system's own light-or-dark answer is a trait of the view tree and
     /// this view's owner is the one holding it.
     let palette: ReaderPalette
@@ -188,12 +188,12 @@ final class ReaderScrollCoordinator {
         view?.showFooter(config.footer)
         let key = LayoutKey(
             width: view?.textWidth ?? 0,
-            fontName: config.settings.fontName,
-            fontSize: config.settings.fontSize,
-            lineSpacing: config.settings.lineSpacing,
-            paragraphSpacing: config.settings.paragraphSpacing,
+            fontName: config.metrics.fontName,
+            fontSize: config.metrics.fontSize,
+            lineSpacing: config.metrics.lineSpacing,
+            paragraphSpacing: config.metrics.paragraphSpacing,
             ink: config.palette.textKey,
-            script: config.settings.chineseScript
+            script: config.metrics.script
         )
         guard key.width > 0 else { return }
         view?.apply(palette: config.palette)
@@ -259,7 +259,7 @@ final class ReaderScrollCoordinator {
             let blocks = chapter.blocks
             let script = key.script
             let typography = ReaderTypography(
-                settings: config.settings, color: config.palette.foreground.uiColor
+                metrics: config.metrics, color: config.palette.foreground.uiColor
             )
             // A screenful, which is as tall as a picture may usefully be here: taller and
             // the reader scrolls past it without ever seeing it whole. Falls back to the
@@ -625,7 +625,7 @@ final class ReaderScrollCoordinator {
             x: point.x - ReaderTextScrollView.textMargin,
             y: point.y + view.readingOffset - chapter.top
         )
-        let slack = (config.settings.lineSpacing + config.settings.paragraphSpacing) / 2
+        let slack = (config.metrics.lineSpacing + config.metrics.paragraphSpacing) / 2
         return marks.first { mark in
             chapter.column.text.ranges(of: mark).contains { range in
                 chapter.column.rects(for: range).contains {

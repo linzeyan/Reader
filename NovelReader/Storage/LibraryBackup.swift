@@ -240,16 +240,17 @@ extension LibraryBackup {
         }
 
         var readerMode: String?
-        /// What subscriptions are read in, where the reader gave them an answer of their
-        /// own. The empty string is "follows the general answer"; nil is "this file was
-        /// written before the setting existed". A plain optional cannot tell those apart,
-        /// and telling them apart is what stops an older backup from silently clearing a
-        /// choice it never knew about.
+        /// What subscriptions are read with, where the reader gave them answers of their
+        /// own. A present-but-empty record is "they follow the general answers"; nil is
+        /// "this file was written before the setting existed". Telling those apart is what
+        /// stops an older backup from silently clearing a choice it never knew about —
+        /// which is why the record is carried whole rather than flattened into fields that
+        /// would each have to answer the question separately.
         ///
-        /// Only the defaults travel. A book's own override is not here for
+        /// Only the defaults travel. A book's own overrides are not here for
         /// `LibrarySettings.catalogDescending`'s reason — per-book answers are about books
         /// this device has, and a settings file is not where they belong.
-        var readerFeedMode: String?
+        var readerFeedOverrides: ReaderSettings.Overrides?
         var fontSize: Double?
         var lineSpacing: Double?
         var paragraphSpacing: Double?
@@ -276,7 +277,7 @@ extension LibraryBackup {
 
         init(capturing targets: Targets) {
             readerMode = targets.reader.mode.rawValue
-            readerFeedMode = targets.reader.feedMode?.rawValue ?? ""
+            readerFeedOverrides = targets.reader.feedOverrides
             fontSize = targets.reader.fontSize
             lineSpacing = targets.reader.lineSpacing
             paragraphSpacing = targets.reader.paragraphSpacing
@@ -301,12 +302,12 @@ extension LibraryBackup {
             if let value = readerMode.flatMap(ReaderSettings.Mode.init(rawValue:)) {
                 targets.reader.mode = value
             }
-            // Through `init(rawValue:)`, which answers nil for the empty string — which is
-            // exactly the "follows the general answer" that was written for a reader who
-            // had not given subscriptions one. The outer `if` is what keeps a file from
-            // before this setting from saying anything at all.
-            if let readerFeedMode {
-                targets.reader.feedMode = ReaderSettings.Mode(rawValue: readerFeedMode)
+            // An empty record restores as empty — a reader who left subscriptions
+            // following, and a device that had set one has to come back to following too.
+            // The `if` is what keeps a file written before this setting from saying
+            // anything at all.
+            if let readerFeedOverrides {
+                targets.reader.feedOverrides = readerFeedOverrides
             }
             if let fontSize { targets.reader.fontSize = fontSize }
             if let lineSpacing { targets.reader.lineSpacing = lineSpacing }

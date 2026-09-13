@@ -241,13 +241,13 @@ final class LibraryBackupTests: XCTestCase {
     func testTheSubscriptionModeComesBack() throws {
         let source = try makeLibrary("source")
         source.targets.reader.mode = .paginated
-        source.targets.reader.feedMode = .scroll
+        source.targets.reader.feedOverrides.mode = .scroll
 
         let restored = try makeLibrary("restored")
         try restore(capture(source), into: restored)
 
         XCTAssertEqual(restored.targets.reader.mode, .paginated)
-        XCTAssertEqual(restored.targets.reader.feedMode, .scroll)
+        XCTAssertEqual(restored.targets.reader.feedOverrides.mode, .scroll)
     }
 
     /// The two ways this setting can be absent, which one optional could not tell apart.
@@ -259,21 +259,21 @@ final class LibraryBackupTests: XCTestCase {
     /// heard of.
     func testAnAbsentSubscriptionModeIsToldApartFromOneThatFollows() throws {
         let library = try makeLibrary("target")
-        library.targets.reader.feedMode = .paginated
+        library.targets.reader.feedOverrides.mode = .paginated
 
         var settings = LibraryBackup.Settings(capturing: library.targets)
         // A file from before the setting existed.
-        settings.readerFeedMode = nil
+        settings.readerFeedOverrides = nil
         settings.apply(to: library.targets)
         XCTAssertEqual(
-            library.targets.reader.feedMode, .paginated,
+            library.targets.reader.feedOverrides.mode, .paginated,
             "an older file says nothing about this and must not clear it"
         )
 
         // A file from a reader who left subscriptions following the general mode.
-        settings.readerFeedMode = ""
+        settings.readerFeedOverrides = ReaderSettings.Overrides()
         settings.apply(to: library.targets)
-        XCTAssertNil(library.targets.reader.feedMode)
+        XCTAssertNil(library.targets.reader.feedOverrides.mode)
     }
 
     // MARK: - Restoring onto a library that is not empty

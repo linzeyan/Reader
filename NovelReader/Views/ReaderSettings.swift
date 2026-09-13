@@ -18,7 +18,11 @@ final class ReaderSettings {
 
         var id: String { rawValue }
 
-        var nameKey: LocalizedStringKey {
+        /// A resource rather than a `LocalizedStringKey`: the reader's own panel names the
+        /// default a book is following inside a line of running text — "follow the default
+        /// (dark)" — and a key cannot be read out as the string that goes in there. `Text`
+        /// takes either, so nothing that already draws this had to change.
+        var nameKey: LocalizedStringResource {
             switch self {
             case .system: return "reader.theme.system"
             case .light: return "reader.theme.light"
@@ -39,10 +43,7 @@ final class ReaderSettings {
 
         var id: String { rawValue }
 
-        /// A resource rather than a `LocalizedStringKey`, unlike `Theme` beside it: the
-        /// reader's own picker names the default inside one of its rows — "follow the
-        /// default (scrolling)" — and a key cannot be read out as the string that goes in
-        /// there. `Text` takes either, so nothing that already draws this had to change.
+        /// A resource rather than a key, for `Theme.nameKey`'s reason.
         var nameKey: LocalizedStringResource {
             switch self {
             case .scroll: return "reader.settings.mode.scroll"
@@ -51,41 +52,77 @@ final class ReaderSettings {
         }
     }
 
+    /// The reading appearance that one book, or one whole medium, may answer differently.
+    ///
+    /// Three settings rather than all of them, and the three are not arbitrary: they are
+    /// the ones whose right answer is a property of *what is being read*. How the text is
+    /// turned, how big it is, and what it sits on all change with the shape of the thing —
+    /// an illustrated article and a nine-hundred-chapter serial genuinely want different
+    /// answers. The face, the spacing and the script conversion are about the reader's eyes
+    /// and their language, and those do not change from book to book.
+    ///
+    /// Nil per field, so a book can disagree about one of them and inherit the rest.
+    struct Overrides: Codable, Equatable {
+        /// Raw values rather than the enums, for `LibraryBackup.Settings`' reason: this
+        /// travels in a backup file, and a case some later build renames has to degrade to
+        /// "no answer here" rather than fail to decode the file it sits in.
+        private var modeRaw: String?
+        private var themeRaw: String?
+        var fontSize: Double?
+
+        var mode: Mode? {
+            get { modeRaw.flatMap(Mode.init(rawValue:)) }
+            set { modeRaw = newValue?.rawValue }
+        }
+
+        var theme: Theme? {
+            get { themeRaw.flatMap(Theme.init(rawValue:)) }
+            set { themeRaw = newValue?.rawValue }
+        }
+
+        /// Whether this layer says anything at all. What "follows in every respect" looks
+        /// like, and what an entry is dropped for rather than stored empty.
+        var isEmpty: Bool { modeRaw == nil && themeRaw == nil && fontSize == nil }
+
+        init(mode: Mode? = nil, fontSize: Double? = nil, theme: Theme? = nil) {
+            self.modeRaw = mode?.rawValue
+            self.themeRaw = theme?.rawValue
+            self.fontSize = fontSize
+        }
+    }
+
     static let shared = ReaderSettings()
 
     /// How text is turned, in every book that has not been given an answer of its own and
     /// in every medium that has not either.
     var mode: Mode { didSet { defaults.set(mode.rawValue, forKey: Keys.mode) } }
-    /// The default for subscriptions, where the reader wants one of its own. Nil is "the
-    /// same as everything else", which is where every device starts.
+    /// What subscriptions are read with, where the reader wants an answer of their own.
+    /// Every field nil is "the same as everything else", which is where each device starts.
     ///
-    /// The one medium that gets its own default, because it is the one whose content is a
+    /// The one medium with its own layer, because it is the one whose content is a
     /// different shape rather than a different taste. An article is a few screens long, it
     /// carries pictures and headings, and it *ends* — pages cut a five-minute read at
     /// boundaries it did not ask for, while a novel is the thing pages were invented for.
     /// A reader who wants that distinction should not have to make it forty times, once
     /// per subscription, and then again for every feed they add afterwards.
     ///
-    /// Comics have no such setting to inherit: they are drawn by a renderer of their own
-    /// that never reads this type.
-    var feedMode: Mode? {
-        didSet { defaults.set(feedMode?.rawValue, forKey: Keys.feedMode) }
+    /// Comics have no such layer to inherit: they are drawn by a renderer of their own that
+    /// never reads this type.
+    var feedOverrides: Overrides {
+        didSet { write(feedOverrides, forKey: Keys.feedOverrides) }
     }
-    /// The books that are read in a mode of their own, by book id.
+    /// The books read with an answer of their own, by book id.
     ///
     /// One dictionary rather than a key per book, and dropped when the book is — the shape
     /// `LibrarySettings.catalogDescending` already uses for the same kind of answer, for
     /// the same reasons. What differs is what an override stores: that one writes *no
-    /// entry* when the choice equals the default, because a catalog's default is a
-    /// constant per medium. This default is the reader's own `mode` and they can change it
-    /// tomorrow, so "scrolling, explicitly" and "whatever the default is" have to stay
-    /// different things on disk — collapsing them would silently unpin every book that was
-    /// pinned to the mode the default happened to hold that day.
-    ///
-    /// Raw values because this goes into `UserDefaults`, which holds property-list types
-    /// and not enums.
-    private(set) var modeByBook: [String: String] {
-        didSet { defaults.set(modeByBook, forKey: Keys.modeByBook) }
+    /// entry* when the choice equals the default, because a catalog's default is a constant
+    /// per medium. These defaults are the reader's own and they can change them tomorrow,
+    /// so "scrolling, explicitly" and "whatever the default is" have to stay different
+    /// things on disk — collapsing them would silently unpin every book that was pinned to
+    /// the answer the default happened to hold that day.
+    private(set) var overridesByBook: [String: Overrides] {
+        didSet { write(overridesByBook, forKey: Keys.overridesByBook) }
     }
     var fontSize: Double { didSet { defaults.set(fontSize, forKey: Keys.fontSize) } }
     var lineSpacing: Double { didSet { defaults.set(lineSpacing, forKey: Keys.lineSpacing) } }
@@ -140,47 +177,95 @@ final class ReaderSettings {
         }
     }
 
+    // MARK: - What one book, or one medium, is read with
+
     /// How this book is read: its own answer where it has one, its medium's otherwise.
     ///
-    /// The whole resolution, in the order a reader would say it out loud — this book, then
-    /// this kind of reading, then what I usually do.
+    /// The resolution in the order a reader would say it out loud — this book, then this
+    /// kind of reading, then what I usually do. The two below take the same walk down the
+    /// same two layers; only the field and the answer at the bottom differ.
     func resolvedMode(forBook bookId: String, kind: SiteRule.Kind) -> Mode {
-        chosenMode(forBook: bookId) ?? defaultMode(for: kind)
+        overrides(forBook: bookId).mode ?? defaultMode(for: kind)
     }
 
-    /// What a medium is read in before any book of it disagrees.
+    func resolvedFontSize(forBook bookId: String, kind: SiteRule.Kind) -> Double {
+        overrides(forBook: bookId).fontSize ?? defaultFontSize(for: kind)
+    }
+
+    func resolvedTheme(forBook bookId: String, kind: SiteRule.Kind) -> Theme {
+        overrides(forBook: bookId).theme ?? defaultTheme(for: kind)
+    }
+
+    /// What a medium is read with before any book of it disagrees — and what the reader's
+    /// own panel names as the thing a book is following.
     ///
-    /// Comics are answered too, and with the reader's usual mode, which is neither wrong
-    /// nor used: nothing draws a comic through these settings. A `switch` that refused
+    /// Comics are answered too, out of the general defaults, which is neither wrong nor
+    /// ever used: nothing draws a comic through these settings. A `switch` that refused
     /// them would be a crash waiting for the day one does.
     func defaultMode(for kind: SiteRule.Kind) -> Mode {
-        kind == .feed ? (feedMode ?? mode) : mode
+        mediumOverrides(for: kind).mode ?? mode
     }
 
-    /// The mode this book was explicitly given, or nil for one that follows the default.
+    func defaultFontSize(for kind: SiteRule.Kind) -> Double {
+        mediumOverrides(for: kind).fontSize ?? fontSize
+    }
+
+    func defaultTheme(for kind: SiteRule.Kind) -> Theme {
+        mediumOverrides(for: kind).theme ?? theme
+    }
+
+    /// What this book was explicitly given and nothing more — the layer the reader's own
+    /// panel edits. Empty for a book that follows in every respect, which is most of them.
     ///
-    /// What the reader's own picker is bound to. A resolved mode cannot say "following",
-    /// and following is a state the picker has to be able to show and to return to.
-    func chosenMode(forBook bookId: String) -> Mode? {
-        modeByBook[bookId].flatMap(Mode.init(rawValue:))
+    /// The overrides rather than the resolved values, because a resolved value cannot say
+    /// "following", and following is a state the panel has to show and to return to.
+    func overrides(forBook bookId: String) -> Overrides {
+        overridesByBook[bookId] ?? Overrides()
     }
 
-    /// Nil puts the book back to following the default.
-    func setMode(_ mode: Mode?, forBook bookId: String) {
-        modeByBook[bookId] = mode?.rawValue
+    /// A layer that says nothing is stored as no entry at all: a book given an answer and
+    /// then put back to following must not leave a row behind, or the defaults accumulate
+    /// one per book ever opened. This is about the layer being *empty*, not about a field
+    /// agreeing with what it would inherit — see `overridesByBook` for why those differ.
+    func setOverrides(_ overrides: Overrides, forBook bookId: String) {
+        overridesByBook[bookId] = overrides.isEmpty ? nil : overrides
     }
 
     /// Dropped along with the book — `LibrarySettings.forgetCatalogOrder`'s reason: a book
-    /// removed and added again would otherwise come back in a mode the reader never chose
-    /// for it.
-    func forgetMode(forBook bookId: String) {
-        modeByBook[bookId] = nil
+    /// removed and added again would otherwise come back reading in a way the reader never
+    /// chose for it.
+    func forgetOverrides(forBook bookId: String) {
+        overridesByBook[bookId] = nil
+    }
+
+    private func mediumOverrides(for kind: SiteRule.Kind) -> Overrides {
+        kind == .feed ? feedOverrides : Overrides()
+    }
+
+    /// What a book's text is laid out with: its resolved size, and the four settings that
+    /// do not vary from book to book.
+    func metrics(forBook bookId: String, kind: SiteRule.Kind) -> ReadingMetrics {
+        ReadingMetrics(
+            fontName: fontName,
+            fontSize: resolvedFontSize(forBook: bookId, kind: kind),
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing,
+            script: chineseScript
+        )
+    }
+
+    /// JSON rather than a plist dictionary: `Overrides` is a record, and `UserDefaults`
+    /// holds property-list types only. A value that will not encode is dropped rather than
+    /// trapped — which for three optional scalars it cannot be.
+    private func write(_ value: some Encodable, forKey key: String) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        defaults.set(data, forKey: key)
     }
 
     private enum Keys {
         static let mode = "reader.mode"
-        static let feedMode = "reader.feedMode"
-        static let modeByBook = "reader.modeByBook"
+        static let feedOverrides = "reader.feedOverrides"
+        static let overridesByBook = "reader.overridesByBook"
         static let fontSize = "reader.fontSize"
         static let lineSpacing = "reader.lineSpacing"
         static let paragraphSpacing = "reader.paragraphSpacing"
@@ -198,10 +283,13 @@ final class ReaderSettings {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mode = (defaults.string(forKey: Keys.mode).flatMap(Mode.init(rawValue:))) ?? .scroll
-        // No key at all is the default here, so nothing needs the sentinel `fontName` uses
-        // below: "follows the general answer" and "has never been set" are the same state.
-        feedMode = defaults.string(forKey: Keys.feedMode).flatMap(Mode.init(rawValue:))
-        modeByBook = defaults.dictionary(forKey: Keys.modeByBook) as? [String: String] ?? [:]
+        // Decoded here rather than through `write`'s counterpart, because an instance
+        // method cannot be called until every stored property has a value — the same
+        // reason `customPalette` below is decoded inline.
+        feedOverrides = defaults.data(forKey: Keys.feedOverrides)
+            .flatMap { try? JSONDecoder().decode(Overrides.self, from: $0) } ?? Overrides()
+        overridesByBook = defaults.data(forKey: Keys.overridesByBook)
+            .flatMap { try? JSONDecoder().decode([String: Overrides].self, from: $0) } ?? [:]
         fontSize = defaults.object(forKey: Keys.fontSize) as? Double ?? 19
         lineSpacing = defaults.object(forKey: Keys.lineSpacing) as? Double ?? 9
         paragraphSpacing = defaults.object(forKey: Keys.paragraphSpacing) as? Double ?? 14
@@ -258,7 +346,10 @@ final class ReaderSettings {
     /// outside the view tree and has no traits to resolve against, and a stored copy of
     /// the system's appearance is a copy that is one frame stale every time the reader
     /// walks under a lamp.
-    func palette(systemIsDark: Bool) -> ReaderPalette {
+    /// - Parameter theme: the one in force for what is being read, which is not always the
+    ///   general one — see `resolvedTheme(forBook:kind:)`. Passed in rather than read here
+    ///   for the same reason `systemIsDark` is: this type does not know which book is open.
+    func palette(theme: Theme, systemIsDark: Bool) -> ReaderPalette {
         switch theme {
         case .system: return systemIsDark ? .dark : .light
         case .light: return .light
@@ -270,7 +361,7 @@ final class ReaderSettings {
     /// A dark page must force dark chrome even when the system is in light mode,
     /// otherwise the bars floating over the text sit at the wrong contrast. Nil for
     /// `.system`, which is the one case with nothing to override.
-    var forcedColorScheme: ColorScheme? {
+    func forcedColorScheme(for theme: Theme) -> ColorScheme? {
         switch theme {
         case .system: return nil
         case .light: return .light

@@ -2,6 +2,22 @@ import ImageIO
 import SwiftUI
 import UIKit
 
+/// What a line of this reader's text looks like, as the numbers rather than as the object
+/// that holds them.
+///
+/// The two renderers take this instead of `ReaderSettings`, which they used to hold. Size
+/// can differ from book to book now — see `ReaderSettings.Overrides` — and a renderer
+/// reading it off a shared settings object would lay out whatever the last book set.
+/// Resolving happens once, in `ReaderView`, which is the only place that knows which book
+/// is on screen. The other four travel with it because they are the rest of one question.
+struct ReadingMetrics: Equatable {
+    var fontName: String?
+    var fontSize: Double
+    var lineSpacing: Double
+    var paragraphSpacing: Double
+    var script: ChineseScript
+}
+
 /// The appearance settings as text attributes.
 ///
 /// A value of its own rather than a read of `ReaderSettings` because pagination has
@@ -28,14 +44,14 @@ struct ReaderTypography: Equatable {
     /// The colour arrives separately because it is the one part of the reader's
     /// appearance that `ReaderSettings` cannot answer alone: with the theme following the
     /// system, only the view tree knows whether the page is light or dark right now.
-    init(settings: ReaderSettings, color: UIColor) {
-        let size = settings.fontSize
-        body = settings.fontName.flatMap { UIFont(name: $0, size: size) } ?? .systemFont(ofSize: size)
+    init(metrics: ReadingMetrics, color: UIColor) {
+        let size = metrics.fontSize
+        body = metrics.fontName.flatMap { UIFont(name: $0, size: size) } ?? .systemFont(ofSize: size)
         // Headings stay on the system face even when the body has a chosen font,
         // matching the scrolling reader's chapter titles.
         title = .systemFont(ofSize: size + 4, weight: .semibold)
-        lineSpacing = settings.lineSpacing
-        paragraphSpacing = settings.paragraphSpacing
+        lineSpacing = metrics.lineSpacing
+        paragraphSpacing = metrics.paragraphSpacing
         self.color = color
     }
 

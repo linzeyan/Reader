@@ -66,7 +66,9 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         onPlaceChange: @escaping (ReaderPlace) -> Void = { _ in }
     ) -> ReaderScrollingText {
         ReaderScrollingText(
-            chapters: chapters, settings: settings, palette: palette,
+            chapters: chapters,
+            metrics: settings.metrics(forBook: "book", kind: .novel),
+            palette: palette,
             highlights: [:], marked: nil,
             target: nil, footer: .none,
             onPlaceChange: onPlaceChange, onNeedsNext: {}, onNeedsPrevious: {},

@@ -68,10 +68,10 @@ final class ReaderAppearanceTests: XCTestCase {
     func testTheSystemThemeFollowsTheSystem() {
         let settings = ReaderSettings(defaults: defaults)
         XCTAssertEqual(settings.theme, .system)
-        XCTAssertEqual(settings.palette(systemIsDark: false), .light)
-        XCTAssertEqual(settings.palette(systemIsDark: true), .dark)
+        XCTAssertEqual(settings.palette(theme: .system, systemIsDark: false), .light)
+        XCTAssertEqual(settings.palette(theme: .system, systemIsDark: true), .dark)
         XCTAssertNil(
-            settings.forcedColorScheme,
+            settings.forcedColorScheme(for: .system),
             "the one theme with nothing to override must not override anything"
         )
     }
@@ -89,7 +89,7 @@ final class ReaderAppearanceTests: XCTestCase {
 
         let relaunched = ReaderSettings(defaults: defaults)
         XCTAssertEqual(relaunched.customPalette, mixed)
-        XCTAssertEqual(relaunched.palette(systemIsDark: false), mixed)
+        XCTAssertEqual(relaunched.palette(theme: .custom, systemIsDark: false), mixed)
     }
 
     /// Trying the shipped palettes must not cost the reader the one they built.
@@ -100,7 +100,7 @@ final class ReaderAppearanceTests: XCTestCase {
         )
         settings.customPalette = mixed
         settings.theme = .light
-        XCTAssertEqual(settings.palette(systemIsDark: true), .light)
+        XCTAssertEqual(settings.palette(theme: .light, systemIsDark: true), .light)
         XCTAssertEqual(settings.customPalette, mixed, "the reader's own page is still there")
     }
 
@@ -164,13 +164,14 @@ final class ReaderAppearanceTests: XCTestCase {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .paginated
 
-        XCTAssertNil(settings.feedMode)
+        XCTAssertNil(settings.feedOverrides.mode)
         XCTAssertEqual(settings.defaultMode(for: .feed), .paginated)
 
-        settings.feedMode = .scroll
+        settings.feedOverrides.mode = .scroll
         XCTAssertEqual(settings.defaultMode(for: .feed), .scroll)
         XCTAssertEqual(
-            ReaderSettings(defaults: defaults).feedMode, .scroll, "and it survives a launch"
+            ReaderSettings(defaults: defaults).feedOverrides.mode, .scroll,
+            "and it survives a launch"
         )
     }
 
@@ -181,7 +182,7 @@ final class ReaderAppearanceTests: XCTestCase {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .paginated
 
-        settings.feedMode = .scroll
+        settings.feedOverrides.mode = .scroll
 
         XCTAssertEqual(settings.resolvedMode(forBook: "feed|blog", kind: .feed), .scroll)
         XCTAssertEqual(settings.resolvedMode(forBook: "site|novel", kind: .novel), .paginated)
@@ -192,9 +193,9 @@ final class ReaderAppearanceTests: XCTestCase {
     func testABooksOwnAnswerOutranksItsMediums() {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .paginated
-        settings.feedMode = .scroll
+        settings.feedOverrides.mode = .scroll
 
-        settings.setMode(.paginated, forBook: "feed|longform")
+        settings.setOverrides(.init(mode: .paginated), forBook: "feed|longform")
 
         XCTAssertEqual(settings.resolvedMode(forBook: "feed|longform", kind: .feed), .paginated)
         XCTAssertEqual(
@@ -203,44 +204,82 @@ final class ReaderAppearanceTests: XCTestCase {
         )
     }
 
-    // MARK: - One book's own page turning
+    // MARK: - One book's own page turning, size and colours
 
     /// The default answers for every book that has not been given one, which is all of
-    /// them until a reader says otherwise — this is how the setting behaved before books
-    /// could disagree with it at all.
-    func testABookWithNoAnswerOfItsOwnFollowsTheDefault() {
+    /// them until a reader says otherwise — this is how these settings behaved before
+    /// books could disagree with them at all.
+    func testABookWithNoAnswerOfItsOwnFollowsTheDefaults() {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .paginated
+        settings.fontSize = 21
+        settings.theme = .dark
 
-        XCTAssertEqual(
-            settings.resolvedMode(forBook: "site|untouched", kind: .novel), .paginated
-        )
-        XCTAssertNil(settings.chosenMode(forBook: "site|untouched"))
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|untouched", kind: .novel), .paginated)
+        XCTAssertEqual(settings.resolvedFontSize(forBook: "site|untouched", kind: .novel), 21)
+        XCTAssertEqual(settings.resolvedTheme(forBook: "site|untouched", kind: .novel), .dark)
+        XCTAssertTrue(settings.overrides(forBook: "site|untouched").isEmpty)
     }
 
     /// One book's answer is one book's: the novel read in pages and the one beside it
     /// scrolled through are the whole request behind this.
-    func testAModeChosenForOneBookLeavesTheRestAlone() {
+    func testAnAnswerChosenForOneBookLeavesTheRestAlone() {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .scroll
+        settings.fontSize = 18
+        settings.theme = .light
 
-        settings.setMode(.paginated, forBook: "site|serial")
+        settings.setOverrides(
+            .init(mode: .paginated, fontSize: 26, theme: .dark), forBook: "site|serial"
+        )
 
         XCTAssertEqual(settings.resolvedMode(forBook: "site|serial", kind: .novel), .paginated)
+        XCTAssertEqual(settings.resolvedFontSize(forBook: "site|serial", kind: .novel), 26)
+        XCTAssertEqual(settings.resolvedTheme(forBook: "site|serial", kind: .novel), .dark)
+
         XCTAssertEqual(settings.resolvedMode(forBook: "site|other", kind: .novel), .scroll)
+        XCTAssertEqual(settings.resolvedFontSize(forBook: "site|other", kind: .novel), 18)
+        XCTAssertEqual(settings.resolvedTheme(forBook: "site|other", kind: .novel), .light)
     }
 
-    /// The claim the storage rule exists for: choosing a mode is not the same as
+    /// Each setting inherits on its own. A reader who made one book bigger did not thereby
+    /// decide anything about its colours, and a later change to the default palette has to
+    /// reach it like it reaches every other book.
+    func testABookThatOverridesOneSettingStillFollowsTheOthers() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.setOverrides(.init(fontSize: 28), forBook: "site|tired-eyes")
+
+        settings.theme = .dark
+
+        XCTAssertEqual(settings.resolvedFontSize(forBook: "site|tired-eyes", kind: .novel), 28)
+        XCTAssertEqual(settings.resolvedTheme(forBook: "site|tired-eyes", kind: .novel), .dark)
+    }
+
+    /// What the renderers are handed: one book's own size, and the four settings that are
+    /// about the reader's eyes rather than about the book.
+    func testTheMetricsHandedToTheRenderersCarryTheBooksOwnSize() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.fontSize = 19
+        settings.lineSpacing = 7
+        settings.setOverrides(.init(fontSize: 28), forBook: "site|serial")
+
+        let own = settings.metrics(forBook: "site|serial", kind: .novel)
+        XCTAssertEqual(own.fontSize, 28)
+        XCTAssertEqual(own.lineSpacing, 7, "line spacing is not a book's to answer")
+        XCTAssertEqual(settings.metrics(forBook: "site|other", kind: .novel).fontSize, 19)
+    }
+
+    /// The claim the storage rule exists for: choosing an answer is not the same as
     /// following one, even while the two agree.
     ///
     /// `LibrarySettings.catalogDescending` stores a choice equal to its default as no
-    /// entry at all, and is right to — a catalog's default is a constant per medium. This
-    /// default is the reader's own and they can change it tomorrow, so collapsing the two
-    /// would silently unpin every book that was pinned on a day the default agreed.
+    /// entry at all, and is right to — a catalog's default is a constant per medium. These
+    /// defaults are the reader's own and they can change them tomorrow, so collapsing the
+    /// two would silently unpin every book that was pinned on a day the default agreed.
     func testABookPinnedToTodaysDefaultStaysPinnedWhenTheDefaultChanges() {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .scroll
-        settings.setMode(.scroll, forBook: "site|pinned")
+        settings.setOverrides(.init(mode: .scroll), forBook: "site|pinned")
 
         settings.mode = .paginated
 
@@ -251,36 +290,44 @@ final class ReaderAppearanceTests: XCTestCase {
         XCTAssertEqual(settings.resolvedMode(forBook: "site|following", kind: .novel), .paginated)
     }
 
-    /// And the way back out: "follow the default" is a row the picker can return to, not
-    /// a state a book leaves once and for all.
+    /// And the way back out: following is somewhere a book can be put back to, not a state
+    /// it leaves once and for all. A book that follows in every respect has to leave no
+    /// entry behind, or the store grows a row for every book ever opened.
     func testPuttingABookBackToFollowingLeavesNothingBehind() {
         let settings = ReaderSettings(defaults: defaults)
-        settings.setMode(.paginated, forBook: "site|serial")
+        settings.setOverrides(.init(mode: .paginated, fontSize: 28), forBook: "site|serial")
 
-        settings.setMode(nil, forBook: "site|serial")
-
-        XCTAssertTrue(settings.modeByBook.isEmpty)
-        XCTAssertEqual(settings.resolvedMode(forBook: "site|serial", kind: .novel), settings.mode)
-    }
-
-    func testTheChosenModeSurvivesALaunch() {
-        ReaderSettings(defaults: defaults).setMode(.paginated, forBook: "site|serial")
-
+        settings.setOverrides(.init(fontSize: 28), forBook: "site|serial")
         XCTAssertEqual(
-            ReaderSettings(defaults: defaults).chosenMode(forBook: "site|serial"), .paginated
+            settings.resolvedMode(forBook: "site|serial", kind: .novel), settings.mode,
+            "one setting put back to following must not take the others with it"
         )
+        XCTAssertEqual(settings.resolvedFontSize(forBook: "site|serial", kind: .novel), 28)
+
+        settings.setOverrides(.init(), forBook: "site|serial")
+        XCTAssertTrue(settings.overridesByBook.isEmpty)
     }
 
-    /// A book removed and added again must not come back in a mode the reader never chose
-    /// for it — `AppEnvironment.removeBookmark` is where this is called from.
-    func testDeletingABookForgetsItsMode() {
+    func testABooksOwnAnswersSurviveALaunch() {
+        ReaderSettings(defaults: defaults)
+            .setOverrides(.init(mode: .paginated, fontSize: 28, theme: .dark), forBook: "site|s")
+
+        let relaunched = ReaderSettings(defaults: defaults)
+        XCTAssertEqual(relaunched.overrides(forBook: "site|s").mode, .paginated)
+        XCTAssertEqual(relaunched.overrides(forBook: "site|s").fontSize, 28)
+        XCTAssertEqual(relaunched.overrides(forBook: "site|s").theme, .dark)
+    }
+
+    /// A book removed and added again must not come back read in a way the reader never
+    /// chose for it — `AppEnvironment.removeBookmark` is where this is called from.
+    func testDeletingABookForgetsHowItWasRead() {
         let settings = ReaderSettings(defaults: defaults)
-        settings.setMode(.paginated, forBook: "site|gone")
-        settings.setMode(.paginated, forBook: "site|kept")
+        settings.setOverrides(.init(mode: .paginated), forBook: "site|gone")
+        settings.setOverrides(.init(mode: .paginated), forBook: "site|kept")
 
-        settings.forgetMode(forBook: "site|gone")
+        settings.forgetOverrides(forBook: "site|gone")
 
-        XCTAssertNil(settings.chosenMode(forBook: "site|gone"))
-        XCTAssertEqual(settings.chosenMode(forBook: "site|kept"), .paginated)
+        XCTAssertTrue(settings.overrides(forBook: "site|gone").isEmpty)
+        XCTAssertEqual(settings.overrides(forBook: "site|kept").mode, .paginated)
     }
 }

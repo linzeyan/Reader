@@ -59,7 +59,18 @@ struct ReaderView: View {
     /// in the one view that has both the setting and the system's own appearance, so the
     /// page, the text and the highlights cannot disagree about which theme is on.
     private var palette: ReaderPalette {
-        settings.palette(systemIsDark: systemColorScheme == .dark)
+        settings.palette(theme: theme, systemIsDark: systemColorScheme == .dark)
+    }
+
+    /// The three settings this book may answer for itself, resolved in the one view that
+    /// knows which book is on screen. Everything below is handed the answers rather than
+    /// the settings object — see `ReadingMetrics`.
+    private var theme: ReaderSettings.Theme {
+        settings.resolvedTheme(forBook: book.id, kind: book.kind)
+    }
+
+    private var metrics: ReadingMetrics {
+        settings.metrics(forBook: book.id, kind: book.kind)
     }
 
     var body: some View {
@@ -88,7 +99,7 @@ struct ReaderView: View {
         // phone with no sensor housing the status bar's height *is* safe area, so
         // toggling it shifts the text by exactly that much.
         .statusBarHidden(true)
-        .preferredColorScheme(settings.forcedColorScheme)
+        .preferredColorScheme(settings.forcedColorScheme(for: theme))
         .overlay(alignment: .top) {
             if showControls, let model {
                 ReaderTitleCapsule(model: model, fallbackTitle: book.shownName)
@@ -235,7 +246,7 @@ struct ReaderView: View {
         } else {
             ReaderScrollingText(
                 chapters: model.loaded,
-                settings: settings,
+                metrics: metrics,
                 palette: palette,
                 highlights: model.highlightsByChapter,
                 marked: markChoice.flatMap(\.beingMarked),
@@ -372,7 +383,7 @@ struct ReaderView: View {
                 blocks: current.blocks,
                 imageDirectory: current.imageDirectory,
                 chapterKey: current.chapter.id,
-                settings: settings,
+                metrics: metrics,
                 landing: openAtLastPage == current.chapter.id
                     ? .lastPage : .anchor(model.currentAnchor),
                 jumpTo: outlineJump,
