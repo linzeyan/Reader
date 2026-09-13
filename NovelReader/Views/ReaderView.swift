@@ -401,6 +401,13 @@ struct ReaderView: View {
                         .transition(.opacity)
                 }
             }
+            // The same floating panel the scrolling reader shows, for the same reason it
+            // shows it: until the control bar could ask for a re-read, every failure this
+            // renderer could produce arrived with an empty page and owned the screen
+            // below. A reload asked for over a page that is drawn and readable is the
+            // first one that must not take it away — and the first that would otherwise
+            // have failed in silence.
+            .overlay(alignment: .bottom) { loadFailure(model) }
             .animation(.default, value: reachedEndOfBook)
         } else if model.isLoading {
             ProgressView()
@@ -749,12 +756,29 @@ private struct ReaderControlBar: View {
             // Named for the walks that have to make a chapter jump. The label is
             // localized, so it is not a handle a test can hold.
             .accessibilityIdentifier("reader.nextChapter")
-            // Only where there is an original to open — see `currentArticleURL`. A
+            // Only where there is an original to read — see `currentArticleURL`. A
             // seventh control on every novel would be a browser button on text that is
             // already fully here.
+            //
+            // The tap re-reads the piece into this reader; the browser is the long press.
+            // Both gestures go to the same page, and which of them deserves the tap is
+            // settled by what happens afterwards: one leaves the reader where they were
+            // with the rest of the article under them, the other hands them to another app
+            // that does not know they were reading. The one that keeps the reader is the
+            // one that should not need to be discovered.
             if let original = model.currentArticleURL {
-                control("safari", label: "reader.openOriginal") { openURL(original) }
-                    .accessibilityIdentifier("reader.openOriginal")
+                Menu {
+                    Button("reader.fetchFullText", systemImage: "arrow.clockwise") {
+                        Task { await model.reloadFromPage() }
+                    }
+                    Button("reader.openOriginal", systemImage: "safari") { openURL(original) }
+                } label: {
+                    controlIcon("arrow.clockwise")
+                } primaryAction: {
+                    Task { await model.reloadFromPage() }
+                }
+                .accessibilityLabel(Text("reader.fetchFullText"))
+                .accessibilityIdentifier("reader.reloadFromPage")
             }
             control("textformat.size", label: "reader.settings") { showSettings = true }
         }
@@ -771,12 +795,19 @@ private struct ReaderControlBar: View {
         label: LocalizedStringKey,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 18))
-                .frame(maxWidth: .infinity, minHeight: 34)
-        }
-        .accessibilityLabel(Text(label))
+        Button(action: action) { controlIcon(systemImage) }
+            .accessibilityLabel(Text(label))
+    }
+
+    /// One control's glyph at the bar's own metrics, shared with the article control —
+    /// which is a `Menu` rather than a `Button` and so cannot go through `control`. The
+    /// bar's controls are evenly spaced by the width each of them claims, so a second
+    /// copy of these numbers is a bar that stops being evenly spaced the day one of them
+    /// is edited.
+    private func controlIcon(_ systemImage: String) -> some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 18))
+            .frame(maxWidth: .infinity, minHeight: 34)
     }
 }
 
@@ -1368,13 +1399,41 @@ final class ReaderModel {
         }
     }
 
-    /// Fetches the piece from its own page and shows it.
-    ///
-    /// The chapter's row is corrected in memory as well as on disk, because the load this
-    /// ends with reads `isDownloaded` off the copy held here: left stale, it would walk
-    /// straight past the text just written and throw the same empty-article error again.
+    /// Fetches the piece from its own page and shows it, for an article that arrived
+    /// without one.
     func fetchFullText() async {
         guard let article = summaryOnlyArticle else { return }
+        await readFromPage(article)
+    }
+
+    /// Re-reads the article on screen from its own page, whatever is already stored for it.
+    ///
+    /// The control bar's tap, and the far commoner half of the same complaint.
+    /// `fetchFullText` answers a feed that published a headline and a link; this answers
+    /// one that published a paragraph and a "read more" — nothing fails, nothing is empty,
+    /// and the only person who can see that the piece is longer where it lives is the
+    /// reader. Same fetch, same extractor, same writer: the difference is who asked.
+    ///
+    /// Silent for a novel, whose chapters have no other page to be read off — the control
+    /// that calls this is not drawn there at all (see `currentArticleURL`).
+    func reloadFromPage() async {
+        guard chapters.indices.contains(currentChapterIndex) else { return }
+        let article = chapters[currentChapterIndex]
+        guard articleLink(of: article) != nil else { return }
+        await readFromPage(article)
+    }
+
+    /// One article, read off its own page, stored, and put back on screen.
+    ///
+    /// The chapter's row is corrected in memory as well as on disk, because the redraw
+    /// this ends with reads `isDownloaded` off the copy held here: left stale, it would
+    /// walk straight past the text just written and throw the same empty-article error
+    /// again.
+    private func readFromPage(_ article: Chapter) async {
+        // A second tap on a fetch already running would take the screen back to loading
+        // and fetch the same page twice. The reader has no way to see that the first one
+        // is still going — this is a button, not a progress bar.
+        guard !isLoading else { return }
         isLoading = true
         error = nil
         do {
@@ -1384,7 +1443,7 @@ final class ReaderModel {
             }
             summaryOnlyArticle = nil
             isLoading = false
-            await retry()
+            await redraw(article)
             await fetchArticleImages(text, for: article)
         } catch {
             isLoading = false
@@ -1393,6 +1452,20 @@ final class ReaderModel {
             // publisher that answered 503 once is worth asking twice.
             summaryOnlyArticle = article
         }
+    }
+
+    /// Puts a re-read article back on screen.
+    ///
+    /// Which redraw is right is a fact about the article, not about who asked for it. One
+    /// the reader is standing in has to keep its anchor, or a reload would answer "give me
+    /// the rest of this" by throwing away the part they had already read. One they are not
+    /// standing in is the load that failed — the empty window, or the next article along —
+    /// and `retry` is the thing that knows which.
+    private func redraw(_ article: Chapter) async {
+        guard chapters.indices.contains(currentChapterIndex),
+              chapters[currentChapterIndex].id == article.id
+        else { return await retry() }
+        await jump(toChapterAt: currentChapterIndex, anchor: currentAnchor)
     }
 
     /// The article's pictures, fetched with its words already on screen.

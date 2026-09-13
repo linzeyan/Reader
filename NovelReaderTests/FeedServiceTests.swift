@@ -357,9 +357,53 @@ final class FeedServiceTests: XCTestCase {
         XCTAssertEqual(storedPictures(), [])
     }
 
+    /// The other half of the same complaint, and the half nothing used to answer: a feed
+    /// that published a paragraph and a "read more" rather than nothing at all.
+    ///
+    /// That article reads. Nothing fails, no error appears, and the reader is the only one
+    /// who can see that the piece is longer where it lives — which is why the reader asking
+    /// for it is the whole feature. Asking has to *replace* what the feed said: a fetch
+    /// that stored the page beside the summary, or declined to overwrite one, would be a
+    /// button that reports success and changes nothing on screen.
+    func testFetchingThePageReplacesASummaryTheFeedAlreadyPublished() async throws {
+        StubProtocol.answer = .ok(feed(item("1", body: "<p>The opening sentence… read more</p>")))
+        let book = try await service.subscribe(to: address)
+        let chapter = try XCTUnwrap(try repo.chapters(bookId: book.id).first)
+        XCTAssertEqual(
+            try storedParagraphs(of: chapter, in: book), ["The opening sentence… read more"],
+            "the summary is what subscribing stores, and the state this is asked from"
+        )
+        StubProtocol.answersByURL = ["https://example.com/1": .ok(Self.wholeArticlePage)]
+
+        _ = try await service.fetchFullText(for: chapter, in: book)
+
+        XCTAssertEqual(
+            try storedParagraphs(of: chapter, in: book),
+            ["The opening sentence, and everything after it.", "Which the feed did not publish."]
+        )
+    }
+
     // MARK: - Helpers for one article's own page
 
     private static let pictureURL = "https://example.com/pic.png"
+
+    /// The page behind an article the feed only summarised. The `<h1>` echoes the title,
+    /// as a real article's does, and the extractor drops it — so what is asserted is the
+    /// body alone.
+    private static let wholeArticlePage = """
+    <!DOCTYPE html><html><head><title>Article 1</title></head><body><article>
+      <h1>Article 1</h1>
+      <p>The opening sentence, and everything after it.</p>
+      <p>Which the feed did not publish.</p>
+    </article></body></html>
+    """
+
+    private func storedParagraphs(of chapter: Chapter, in book: Book) throws -> [String] {
+        try ChapterFileStore(root: tempRoot).readParagraphs(
+            siteId: book.siteId, siteBookId: book.siteBookId,
+            siteChapterId: chapter.siteChapterId
+        )
+    }
 
     private static let pageWithAPicture = """
     <!DOCTYPE html><html><head><title>Headline only</title></head><body><article>
