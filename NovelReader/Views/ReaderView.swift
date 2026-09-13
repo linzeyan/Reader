@@ -111,7 +111,7 @@ struct ReaderView: View {
                 .task { catalogTab = outlineEntries.isEmpty ? .chapters : .outline }
         }
         .sheet(isPresented: $showSettings) {
-            ReaderSettingsSheet(settings: settings, bookId: book.id)
+            ReaderSettingsSheet(settings: settings, book: book)
                 // Half height, and not resizable to full: every control in here
                 // changes how the page behind it looks, and a sheet that covers
                 // the page hides the only thing worth looking at while adjusting.
@@ -207,7 +207,7 @@ struct ReaderView: View {
     /// How this book is turned: its own answer where the reader gave it one, theirs
     /// otherwise. See `ReaderSettings.resolvedMode(forBook:)`.
     private var mode: ReaderSettings.Mode {
-        settings.resolvedMode(forBook: book.id)
+        settings.resolvedMode(forBook: book.id, kind: book.kind)
     }
 
     @ViewBuilder
@@ -1899,14 +1899,14 @@ struct ReaderSettingsSheet: View {
     @Bindable var settings: ReaderSettings
     /// Which book the sheet was opened from, so the page-turning control can be about
     /// this one. Everything else in here is about the reader's eyes and is the same
-    /// wherever it is set — see `ReadingAppearanceSections.bookId`.
-    let bookId: String
+    /// wherever it is set — see `ReadingAppearanceSections.book`.
+    let book: Book
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                ReadingAppearanceSections(settings: settings, bookId: bookId)
+                ReadingAppearanceSections(settings: settings, book: book)
             }
             .navigationTitle("reader.settings")
             .navigationBarTitleDisplayMode(.inline)

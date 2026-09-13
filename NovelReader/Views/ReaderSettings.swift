@@ -53,8 +53,24 @@ final class ReaderSettings {
 
     static let shared = ReaderSettings()
 
-    /// How text is turned in every book that has not been given an answer of its own.
+    /// How text is turned, in every book that has not been given an answer of its own and
+    /// in every medium that has not either.
     var mode: Mode { didSet { defaults.set(mode.rawValue, forKey: Keys.mode) } }
+    /// The default for subscriptions, where the reader wants one of its own. Nil is "the
+    /// same as everything else", which is where every device starts.
+    ///
+    /// The one medium that gets its own default, because it is the one whose content is a
+    /// different shape rather than a different taste. An article is a few screens long, it
+    /// carries pictures and headings, and it *ends* — pages cut a five-minute read at
+    /// boundaries it did not ask for, while a novel is the thing pages were invented for.
+    /// A reader who wants that distinction should not have to make it forty times, once
+    /// per subscription, and then again for every feed they add afterwards.
+    ///
+    /// Comics have no such setting to inherit: they are drawn by a renderer of their own
+    /// that never reads this type.
+    var feedMode: Mode? {
+        didSet { defaults.set(feedMode?.rawValue, forKey: Keys.feedMode) }
+    }
     /// The books that are read in a mode of their own, by book id.
     ///
     /// One dictionary rather than a key per book, and dropped when the book is — the shape
@@ -124,13 +140,21 @@ final class ReaderSettings {
         }
     }
 
-    /// How this book is read: its own answer where it has one, the default otherwise.
+    /// How this book is read: its own answer where it has one, its medium's otherwise.
     ///
-    /// Nil is "no book", which is Settings → Appearance — the screen that edits the
-    /// default itself, and where the only honest answer is the default.
-    func resolvedMode(forBook bookId: String?) -> Mode {
-        guard let bookId else { return mode }
-        return chosenMode(forBook: bookId) ?? mode
+    /// The whole resolution, in the order a reader would say it out loud — this book, then
+    /// this kind of reading, then what I usually do.
+    func resolvedMode(forBook bookId: String, kind: SiteRule.Kind) -> Mode {
+        chosenMode(forBook: bookId) ?? defaultMode(for: kind)
+    }
+
+    /// What a medium is read in before any book of it disagrees.
+    ///
+    /// Comics are answered too, and with the reader's usual mode, which is neither wrong
+    /// nor used: nothing draws a comic through these settings. A `switch` that refused
+    /// them would be a crash waiting for the day one does.
+    func defaultMode(for kind: SiteRule.Kind) -> Mode {
+        kind == .feed ? (feedMode ?? mode) : mode
     }
 
     /// The mode this book was explicitly given, or nil for one that follows the default.
@@ -155,6 +179,7 @@ final class ReaderSettings {
 
     private enum Keys {
         static let mode = "reader.mode"
+        static let feedMode = "reader.feedMode"
         static let modeByBook = "reader.modeByBook"
         static let fontSize = "reader.fontSize"
         static let lineSpacing = "reader.lineSpacing"
@@ -173,6 +198,9 @@ final class ReaderSettings {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mode = (defaults.string(forKey: Keys.mode).flatMap(Mode.init(rawValue:))) ?? .scroll
+        // No key at all is the default here, so nothing needs the sentinel `fontName` uses
+        // below: "follows the general answer" and "has never been set" are the same state.
+        feedMode = defaults.string(forKey: Keys.feedMode).flatMap(Mode.init(rawValue:))
         modeByBook = defaults.dictionary(forKey: Keys.modeByBook) as? [String: String] ?? [:]
         fontSize = defaults.object(forKey: Keys.fontSize) as? Double ?? 19
         lineSpacing = defaults.object(forKey: Keys.lineSpacing) as? Double ?? 9

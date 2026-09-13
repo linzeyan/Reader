@@ -240,6 +240,16 @@ extension LibraryBackup {
         }
 
         var readerMode: String?
+        /// What subscriptions are read in, where the reader gave them an answer of their
+        /// own. The empty string is "follows the general answer"; nil is "this file was
+        /// written before the setting existed". A plain optional cannot tell those apart,
+        /// and telling them apart is what stops an older backup from silently clearing a
+        /// choice it never knew about.
+        ///
+        /// Only the defaults travel. A book's own override is not here for
+        /// `LibrarySettings.catalogDescending`'s reason — per-book answers are about books
+        /// this device has, and a settings file is not where they belong.
+        var readerFeedMode: String?
         var fontSize: Double?
         var lineSpacing: Double?
         var paragraphSpacing: Double?
@@ -266,6 +276,7 @@ extension LibraryBackup {
 
         init(capturing targets: Targets) {
             readerMode = targets.reader.mode.rawValue
+            readerFeedMode = targets.reader.feedMode?.rawValue ?? ""
             fontSize = targets.reader.fontSize
             lineSpacing = targets.reader.lineSpacing
             paragraphSpacing = targets.reader.paragraphSpacing
@@ -289,6 +300,13 @@ extension LibraryBackup {
         func apply(to targets: Targets) {
             if let value = readerMode.flatMap(ReaderSettings.Mode.init(rawValue:)) {
                 targets.reader.mode = value
+            }
+            // Through `init(rawValue:)`, which answers nil for the empty string — which is
+            // exactly the "follows the general answer" that was written for a reader who
+            // had not given subscriptions one. The outer `if` is what keeps a file from
+            // before this setting from saying anything at all.
+            if let readerFeedMode {
+                targets.reader.feedMode = ReaderSettings.Mode(rawValue: readerFeedMode)
             }
             if let fontSize { targets.reader.fontSize = fontSize }
             if let lineSpacing { targets.reader.lineSpacing = lineSpacing }

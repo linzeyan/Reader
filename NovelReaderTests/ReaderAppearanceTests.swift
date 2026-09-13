@@ -156,6 +156,53 @@ final class ReaderAppearanceTests: XCTestCase {
         XCTAssertEqual(returned.blue, original.blue, accuracy: 0.001)
     }
 
+    // MARK: - What each medium is read in
+
+    /// Nothing changes for a reader who never opens this: subscriptions are turned the way
+    /// everything else is until they are given an answer of their own.
+    func testSubscriptionsFollowTheGeneralModeUntilGivenOneOfTheirOwn() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.mode = .paginated
+
+        XCTAssertNil(settings.feedMode)
+        XCTAssertEqual(settings.defaultMode(for: .feed), .paginated)
+
+        settings.feedMode = .scroll
+        XCTAssertEqual(settings.defaultMode(for: .feed), .scroll)
+        XCTAssertEqual(
+            ReaderSettings(defaults: defaults).feedMode, .scroll, "and it survives a launch"
+        )
+    }
+
+    /// The point of the medium having its own default rather than forty per-book
+    /// overrides: an article is a different shape of thing from a novel, and saying so
+    /// once has to cover the subscriptions added next month too.
+    func testAModeSetForSubscriptionsLeavesEverythingElseAlone() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.mode = .paginated
+
+        settings.feedMode = .scroll
+
+        XCTAssertEqual(settings.resolvedMode(forBook: "feed|blog", kind: .feed), .scroll)
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|novel", kind: .novel), .paginated)
+    }
+
+    /// And the order of the three answers, which is the order a reader would say them in:
+    /// this book, then this kind of reading, then what I usually do.
+    func testABooksOwnAnswerOutranksItsMediums() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.mode = .paginated
+        settings.feedMode = .scroll
+
+        settings.setMode(.paginated, forBook: "feed|longform")
+
+        XCTAssertEqual(settings.resolvedMode(forBook: "feed|longform", kind: .feed), .paginated)
+        XCTAssertEqual(
+            settings.resolvedMode(forBook: "feed|blog", kind: .feed), .scroll,
+            "the one feed that was singled out must not take the others with it"
+        )
+    }
+
     // MARK: - One book's own page turning
 
     /// The default answers for every book that has not been given one, which is all of
@@ -165,15 +212,13 @@ final class ReaderAppearanceTests: XCTestCase {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .paginated
 
-        XCTAssertEqual(settings.resolvedMode(forBook: "site|untouched"), .paginated)
-        XCTAssertNil(settings.chosenMode(forBook: "site|untouched"))
         XCTAssertEqual(
-            settings.resolvedMode(forBook: nil), .paginated,
-            "no book is Settings, where the default is the only honest answer"
+            settings.resolvedMode(forBook: "site|untouched", kind: .novel), .paginated
         )
+        XCTAssertNil(settings.chosenMode(forBook: "site|untouched"))
     }
 
-    /// One book's answer is one book's: the novel read in pages and the subscription
+    /// One book's answer is one book's: the novel read in pages and the one beside it
     /// scrolled through are the whole request behind this.
     func testAModeChosenForOneBookLeavesTheRestAlone() {
         let settings = ReaderSettings(defaults: defaults)
@@ -181,8 +226,8 @@ final class ReaderAppearanceTests: XCTestCase {
 
         settings.setMode(.paginated, forBook: "site|serial")
 
-        XCTAssertEqual(settings.resolvedMode(forBook: "site|serial"), .paginated)
-        XCTAssertEqual(settings.resolvedMode(forBook: "feed|blog"), .scroll)
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|serial", kind: .novel), .paginated)
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|other", kind: .novel), .scroll)
     }
 
     /// The claim the storage rule exists for: choosing a mode is not the same as
@@ -200,10 +245,10 @@ final class ReaderAppearanceTests: XCTestCase {
         settings.mode = .paginated
 
         XCTAssertEqual(
-            settings.resolvedMode(forBook: "site|pinned"), .scroll,
+            settings.resolvedMode(forBook: "site|pinned", kind: .novel), .scroll,
             "it was chosen, not inherited, and nothing since has unchosen it"
         )
-        XCTAssertEqual(settings.resolvedMode(forBook: "site|following"), .paginated)
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|following", kind: .novel), .paginated)
     }
 
     /// And the way back out: "follow the default" is a row the picker can return to, not
@@ -215,7 +260,7 @@ final class ReaderAppearanceTests: XCTestCase {
         settings.setMode(nil, forBook: "site|serial")
 
         XCTAssertTrue(settings.modeByBook.isEmpty)
-        XCTAssertEqual(settings.resolvedMode(forBook: "site|serial"), settings.mode)
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|serial", kind: .novel), settings.mode)
     }
 
     func testTheChosenModeSurvivesALaunch() {

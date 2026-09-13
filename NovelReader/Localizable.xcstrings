@@ -5848,6 +5848,30 @@
         }
       }
     },
+    "reader.settings.mode.feed" : {
+      "comment" : "Picker label in Settings: how a subscription's articles are turned, which the reader can set apart from everything else.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subscriptions"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "订阅文章"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訂閱文章"
+          }
+        }
+      }
+    },
     "reader.settings.mode.followDefault %@" : {
       "comment" : "Picker row in the reader's own settings: this book is turned whichever way the reader's default says. The placeholder is that default's current value, named so a reader can see what they are following.",
       "extractionState" : "manual",

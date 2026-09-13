@@ -14,15 +14,19 @@ struct ReadingAppearanceSections: View {
     /// setting: how the text is turned is the one preference here that a particular book
     /// can disagree with the reader's usual answer about. Everything else — the face, the
     /// size, the colours — is about the reader's eyes and is the same in every book.
-    var bookId: String?
+    ///
+    /// The whole book rather than its id, because resolving that setting takes both halves
+    /// of what a book is: which one it is, and what kind of reading it is.
+    var book: Book?
 
-    /// The mode in force where these controls are: this book's, or the default.
+    /// The mode in force where these controls are.
     ///
     /// What the sections that belong to one renderer key off, rather than `settings.mode`.
-    /// Read off the default, the reader's own sheet would offer the scrolling reader's tap
-    /// zones while they are looking at pages.
+    /// Read off the general default, the reader's own sheet would offer the scrolling
+    /// reader's tap zones while they are looking at pages.
     private var effectiveMode: ReaderSettings.Mode {
-        settings.resolvedMode(forBook: bookId)
+        guard let book else { return settings.mode }
+        return settings.resolvedMode(forBook: book.id, kind: book.kind)
     }
 
     var body: some View {
@@ -31,20 +35,19 @@ struct ReadingAppearanceSections: View {
                 // First: it is the one setting here that changes how the page behaves
                 // rather than how it looks, and the rest of this form reads differently
                 // depending on which side it is on.
-                if let bookId {
-                    // Three answers in a book rather than two, and the third one names the
-                    // default it is following. A reader who later changes that default has
-                    // to be able to see which books will come with them — and one who
-                    // wonders why this book ignored the change has to find the reason
-                    // here, in the book, rather than deduce it.
+                if let book {
+                    // Three answers in a book rather than two, and the third one names what
+                    // it is following. A reader who later changes that default has to be
+                    // able to see which books will come with them — and one who wonders why
+                    // this book ignored the change has to find the reason here, in the book,
+                    // rather than deduce it.
                     //
-                    // Not segmented, unlike the default's own picker below: "follow the
-                    // default (scrolling)" does not fit in a third of a phone, and a row
-                    // that spells the answer out on the right is the clearer control for a
+                    // Not segmented, unlike the defaults below: "follow the default
+                    // (scrolling)" does not fit in a third of a phone, and a row that
+                    // spells the answer out on the right is the clearer control for a
                     // choice that is about inheritance rather than about two options.
-                    Picker("reader.settings.mode", selection: bookMode(bookId)) {
-                        Text("reader.settings.mode.followDefault \(String(localized: settings.mode.nameKey))")
-                            .tag(ReaderSettings.Mode?.none)
+                    Picker("reader.settings.mode", selection: bookMode(book.id)) {
+                        followRow(settings.defaultMode(for: book.kind))
                         ForEach(ReaderSettings.Mode.allCases) { mode in
                             Text(mode.nameKey).tag(ReaderSettings.Mode?.some(mode))
                         }
@@ -58,6 +61,19 @@ struct ReadingAppearanceSections: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("reader.settings.mode")
+
+                    // Subscriptions, which are the one medium whose content is a different
+                    // shape rather than a different taste — see `ReaderSettings.feedMode`.
+                    // Only in Settings: inside a book the question is about that book, and
+                    // a row setting the default for its whole medium, one tap from the row
+                    // that overrides it, would be two controls reading as one.
+                    Picker("reader.settings.mode.feed", selection: $settings.feedMode) {
+                        followRow(settings.mode)
+                        ForEach(ReaderSettings.Mode.allCases) { mode in
+                            Text(mode.nameKey).tag(ReaderSettings.Mode?.some(mode))
+                        }
+                    }
+                    .accessibilityIdentifier("reader.settings.mode.feed")
                 }
             } footer: {
                 // The one place the asymmetry between the two renderers can be stated
@@ -148,10 +164,15 @@ struct ReadingAppearanceSections: View {
                 .accessibilityIdentifier("reader.settings.customTheme")
             }
 
-            // Only where it can do anything. Paginated reading turns pages by tapping
-            // already and cannot be talked out of it, so offering the switch there would
-            // be offering to turn off something that is not on.
-            if effectiveMode == .scroll {
+            // In a book, only where it can do anything: paginated reading turns pages by
+            // tapping already and cannot be talked out of it, so offering the switch there
+            // would be offering to turn off something that is not on.
+            //
+            // In Settings it always stands. There is no single mode in force to hide it
+            // against — the reader is setting up two — and a switch that disappeared
+            // because the general default moved to pages would take the subscriptions'
+            // zones with it, silently, from a screen that never mentioned subscriptions.
+            if book == nil || effectiveMode == .scroll {
                 Section {
                     Toggle("reader.settings.tapToTurn", isOn: $settings.tapToTurnPage)
                         .accessibilityIdentifier("reader.settings.tapToTurn")
@@ -171,9 +192,19 @@ struct ReadingAppearanceSections: View {
         }
     }
 
-    /// This book's own answer, with nil meaning "follow the default" in both directions:
-    /// it is what the picker shows for a book that has never been given one, and what it
-    /// writes back when the reader picks that row again.
+    /// The "follow" row of an inheriting picker, naming what it would inherit.
+    ///
+    /// Spelled out rather than left as the word "default", and the value differs by row: a
+    /// book follows its medium, a medium follows the general answer. A reader deciding
+    /// whether to override something has to see what they would be overriding.
+    private func followRow(_ inherited: ReaderSettings.Mode) -> some View {
+        Text("reader.settings.mode.followDefault \(String(localized: inherited.nameKey))")
+            .tag(ReaderSettings.Mode?.none)
+    }
+
+    /// This book's own answer, with nil meaning "follow" in both directions: it is what
+    /// the picker shows for a book that has never been given one, and what it writes back
+    /// when the reader picks that row again.
     private func bookMode(_ bookId: String) -> Binding<ReaderSettings.Mode?> {
         Binding(
             get: { settings.chosenMode(forBook: bookId) },

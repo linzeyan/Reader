@@ -235,6 +235,47 @@ final class LibraryBackupTests: XCTestCase {
         XCTAssertEqual(restored.targets.feeds.keep, .fifty)
     }
 
+    /// Subscriptions can be turned in a mode of their own. It is a default rather than a
+    /// per-book answer, so it travels with the other defaults — unlike a book's own
+    /// override, which is about books this device has and stays out of a settings file.
+    func testTheSubscriptionModeComesBack() throws {
+        let source = try makeLibrary("source")
+        source.targets.reader.mode = .paginated
+        source.targets.reader.feedMode = .scroll
+
+        let restored = try makeLibrary("restored")
+        try restore(capture(source), into: restored)
+
+        XCTAssertEqual(restored.targets.reader.mode, .paginated)
+        XCTAssertEqual(restored.targets.reader.feedMode, .scroll)
+    }
+
+    /// The two ways this setting can be absent, which one optional could not tell apart.
+    ///
+    /// A backup from a reader who left subscriptions following the general mode says so,
+    /// and restoring it has to put a device that had set one back to following. A backup
+    /// written before the setting existed says nothing at all, and must leave it alone.
+    /// Collapsed into one state, the older file would quietly clear a choice it had never
+    /// heard of.
+    func testAnAbsentSubscriptionModeIsToldApartFromOneThatFollows() throws {
+        let library = try makeLibrary("target")
+        library.targets.reader.feedMode = .paginated
+
+        var settings = LibraryBackup.Settings(capturing: library.targets)
+        // A file from before the setting existed.
+        settings.readerFeedMode = nil
+        settings.apply(to: library.targets)
+        XCTAssertEqual(
+            library.targets.reader.feedMode, .paginated,
+            "an older file says nothing about this and must not clear it"
+        )
+
+        // A file from a reader who left subscriptions following the general mode.
+        settings.readerFeedMode = ""
+        settings.apply(to: library.targets)
+        XCTAssertNil(library.targets.reader.feedMode)
+    }
+
     // MARK: - Restoring onto a library that is not empty
 
     /// A restore puts things back; it must never take anything away. Picking the wrong
