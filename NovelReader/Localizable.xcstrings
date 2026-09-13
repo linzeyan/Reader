@@ -5848,6 +5848,30 @@
         }
       }
     },
+    "reader.settings.mode.followDefault %@" : {
+      "comment" : "Picker row in the reader's own settings: this book is turned whichever way the reader's default says. The placeholder is that default's current value, named so a reader can see what they are following.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow the default (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随默认（%@）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟隨預設（%@）"
+          }
+        }
+      }
+    },
     "reader.settings.mode.footer" : {
       "comment" : "Explains how much text each reading mode can mark: a whole paragraph while scrolling, a sentence on a page.",
       "extractionState" : "manual",

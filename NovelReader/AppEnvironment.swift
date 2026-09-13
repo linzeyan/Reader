@@ -797,6 +797,10 @@ final class AppEnvironment {
         // kept about it outside the database.
         covers.remove(book)
         librarySettings.forgetCatalogOrder(bookId: book.id)
+        // `.shared` rather than an injected one, as `backupTargets` does: the reading
+        // page's settings are a singleton the whole app reads, and the mode a deleted
+        // book was pinned to is the only thing in it that belongs to one book.
+        ReaderSettings.shared.forgetMode(forBook: book.id)
         if downloader.progress?.bookId == book.id { downloader.cancel() }
         reloadLibrary()
     }

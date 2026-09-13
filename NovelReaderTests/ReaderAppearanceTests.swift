@@ -155,4 +155,87 @@ final class ReaderAppearanceTests: XCTestCase {
         XCTAssertEqual(returned.green, original.green, accuracy: 0.001)
         XCTAssertEqual(returned.blue, original.blue, accuracy: 0.001)
     }
+
+    // MARK: - One book's own page turning
+
+    /// The default answers for every book that has not been given one, which is all of
+    /// them until a reader says otherwise — this is how the setting behaved before books
+    /// could disagree with it at all.
+    func testABookWithNoAnswerOfItsOwnFollowsTheDefault() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.mode = .paginated
+
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|untouched"), .paginated)
+        XCTAssertNil(settings.chosenMode(forBook: "site|untouched"))
+        XCTAssertEqual(
+            settings.resolvedMode(forBook: nil), .paginated,
+            "no book is Settings, where the default is the only honest answer"
+        )
+    }
+
+    /// One book's answer is one book's: the novel read in pages and the subscription
+    /// scrolled through are the whole request behind this.
+    func testAModeChosenForOneBookLeavesTheRestAlone() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.mode = .scroll
+
+        settings.setMode(.paginated, forBook: "site|serial")
+
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|serial"), .paginated)
+        XCTAssertEqual(settings.resolvedMode(forBook: "feed|blog"), .scroll)
+    }
+
+    /// The claim the storage rule exists for: choosing a mode is not the same as
+    /// following one, even while the two agree.
+    ///
+    /// `LibrarySettings.catalogDescending` stores a choice equal to its default as no
+    /// entry at all, and is right to — a catalog's default is a constant per medium. This
+    /// default is the reader's own and they can change it tomorrow, so collapsing the two
+    /// would silently unpin every book that was pinned on a day the default agreed.
+    func testABookPinnedToTodaysDefaultStaysPinnedWhenTheDefaultChanges() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.mode = .scroll
+        settings.setMode(.scroll, forBook: "site|pinned")
+
+        settings.mode = .paginated
+
+        XCTAssertEqual(
+            settings.resolvedMode(forBook: "site|pinned"), .scroll,
+            "it was chosen, not inherited, and nothing since has unchosen it"
+        )
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|following"), .paginated)
+    }
+
+    /// And the way back out: "follow the default" is a row the picker can return to, not
+    /// a state a book leaves once and for all.
+    func testPuttingABookBackToFollowingLeavesNothingBehind() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.setMode(.paginated, forBook: "site|serial")
+
+        settings.setMode(nil, forBook: "site|serial")
+
+        XCTAssertTrue(settings.modeByBook.isEmpty)
+        XCTAssertEqual(settings.resolvedMode(forBook: "site|serial"), settings.mode)
+    }
+
+    func testTheChosenModeSurvivesALaunch() {
+        ReaderSettings(defaults: defaults).setMode(.paginated, forBook: "site|serial")
+
+        XCTAssertEqual(
+            ReaderSettings(defaults: defaults).chosenMode(forBook: "site|serial"), .paginated
+        )
+    }
+
+    /// A book removed and added again must not come back in a mode the reader never chose
+    /// for it — `AppEnvironment.removeBookmark` is where this is called from.
+    func testDeletingABookForgetsItsMode() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.setMode(.paginated, forBook: "site|gone")
+        settings.setMode(.paginated, forBook: "site|kept")
+
+        settings.forgetMode(forBook: "site|gone")
+
+        XCTAssertNil(settings.chosenMode(forBook: "site|gone"))
+        XCTAssertEqual(settings.chosenMode(forBook: "site|kept"), .paginated)
+    }
 }

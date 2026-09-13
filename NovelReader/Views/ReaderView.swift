@@ -111,7 +111,7 @@ struct ReaderView: View {
                 .task { catalogTab = outlineEntries.isEmpty ? .chapters : .outline }
         }
         .sheet(isPresented: $showSettings) {
-            ReaderSettingsSheet(settings: settings)
+            ReaderSettingsSheet(settings: settings, bookId: book.id)
                 // Half height, and not resizable to full: every control in here
                 // changes how the page behind it looks, and a sheet that covers
                 // the page hides the only thing worth looking at while adjusting.
@@ -146,7 +146,10 @@ struct ReaderView: View {
         // at the top of whatever is loaded. The target it is re-aimed with is applied
         // as soon as the chapter it names has a laid-out column, so it can be stated
         // here rather than a runloop turn later.
-        .onChange(of: settings.mode) { _, mode in retargetOnModeChange(mode) }
+        // Watched through `mode` rather than `settings.mode`: a book reading in one of its
+        // own is not affected by the default changing, and re-aiming it would move a reader
+        // who is not looking at anything that moved.
+        .onChange(of: mode) { _, mode in retargetOnModeChange(mode) }
         // The only thing this screen holds that is worth giving back, and the only
         // place that knows which chapters the reader still needs. Scoped to the reader
         // being on screen, which is exactly when there are chapters to give back.
@@ -201,9 +204,15 @@ struct ReaderView: View {
 
     // MARK: - Text
 
+    /// How this book is turned: its own answer where the reader gave it one, theirs
+    /// otherwise. See `ReaderSettings.resolvedMode(forBook:)`.
+    private var mode: ReaderSettings.Mode {
+        settings.resolvedMode(forBook: book.id)
+    }
+
     @ViewBuilder
     private func content(_ model: ReaderModel) -> some View {
-        switch settings.mode {
+        switch mode {
         case .scroll: scrollingText(model)
         case .paginated: pagedText(model)
         }
@@ -1888,12 +1897,16 @@ final class ReaderModel {
 
 struct ReaderSettingsSheet: View {
     @Bindable var settings: ReaderSettings
+    /// Which book the sheet was opened from, so the page-turning control can be about
+    /// this one. Everything else in here is about the reader's eyes and is the same
+    /// wherever it is set — see `ReadingAppearanceSections.bookId`.
+    let bookId: String
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                ReadingAppearanceSections(settings: settings)
+                ReadingAppearanceSections(settings: settings, bookId: bookId)
             }
             .navigationTitle("reader.settings")
             .navigationBarTitleDisplayMode(.inline)
