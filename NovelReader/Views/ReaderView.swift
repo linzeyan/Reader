@@ -1944,10 +1944,11 @@ struct ReaderSettingsSheet: View {
             Form {
                 ReadingAppearanceSections(settings: settings, book: book)
             }
-            // Named for what is in it. Opened on a comic this panel is the page-turn
-            // setting and nothing else — see `ReadingOverrideSections` — and a sheet titled
-            // 閱讀設定 holding one control reads like the rest of it failed to load.
-            .navigationTitle(book.kind == .comic ? "reader.settings.pageTurn" : "reader.settings")
+            // One title, even opened on a comic, where the only control in here is the page
+            // turning. Naming the sheet after it put 翻頁方式 directly above the section
+            // header that already says 翻頁方式, and a heading repeated twice in four lines
+            // reads as a mistake rather than as emphasis.
+            .navigationTitle("reader.settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

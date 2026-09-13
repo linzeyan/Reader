@@ -44,6 +44,11 @@ struct ReadingOverrideSections: View {
                 String(localized: inherited(\.mode, general: \.mode).nameKey),
                 revert: revert(\.mode)
             )
+        } header: {
+            // The general settings' reason, and one more here: a shelf or a book shows
+            // fewer sections, so the picker can end up with nothing around it to say what
+            // it is about.
+            Text("reader.settings.mode")
         } footer: {
             Text("reader.settings.mode.footer")
         }
@@ -153,6 +158,8 @@ struct ReadingOverrideSections: View {
                 String(localized: inherited(\.pageTurn, general: \.pageTurn).nameKey),
                 revert: revert(\.pageTurn)
             )
+        } header: {
+            Text("reader.settings.pageTurn")
         } footer: {
             Text("reader.settings.pageTurn.footer")
         }

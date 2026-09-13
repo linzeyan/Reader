@@ -111,6 +111,11 @@ struct ReadingAppearanceSections: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("reader.settings.mode")
+            } header: {
+                // Named, because a segmented picker swallows its own label and this form
+                // now holds two of them — 閱讀方式 and 翻頁方式 — one above the other. Two
+                // unnamed rows of segments is a reader guessing which is which.
+                Text("reader.settings.mode")
             } footer: {
                 // The one place the asymmetry between the two renderers can be stated
                 // where it is actionable. Both modes make marks and both show them; how
@@ -209,6 +214,8 @@ struct ReadingAppearanceSections: View {
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("reader.settings.pageTurn")
+        } header: {
+            Text("reader.settings.pageTurn")
         } footer: {
             // Which part of the screen does what, and the one thing this cannot promise:
             // scrolling stays. A reader who has to find the zones by tapping finds the
