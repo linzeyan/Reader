@@ -156,6 +156,20 @@ final class ReaderAppearanceTests: XCTestCase {
         XCTAssertEqual(returned.blue, original.blue, accuracy: 0.001)
     }
 
+    /// Off until asked for, which is the whole reason it is a setting: turning it on
+    /// takes the back button off both readers' control bars and, on pages, stops the
+    /// leading edge turning back. An update must not make that trade for anybody.
+    func testLeavingABookBySwipingIsOffUntilItIsAskedFor() {
+        XCTAssertFalse(ReaderSettings(defaults: defaults).swipeToGoBack)
+
+        let settings = ReaderSettings(defaults: defaults)
+        settings.swipeToGoBack = true
+
+        XCTAssertTrue(
+            ReaderSettings(defaults: defaults).swipeToGoBack, "and it survives a launch"
+        )
+    }
+
     // MARK: - What each medium is read in
 
     /// Nothing changes for a reader who never opens this: subscriptions are turned the way

@@ -6112,6 +6112,54 @@
         }
       }
     },
+    "reader.settings.swipeToGoBack" : {
+      "comment" : "Switch: leave a book with the system's swipe from the edge of the screen instead of a button on the reader's control bar.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipe to Close a Book"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑动离开书本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑動離開書本"
+          }
+        }
+      }
+    },
+    "reader.settings.swipeToGoBack.footer" : {
+      "comment" : "Explains what turning the swipe on costs: the control bar loses its back button, and in the paginated reader the leading edge stops turning pages.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipe in from the left edge to go back to the catalog or the shelf, as elsewhere in iOS. The control bar drops its back button, and on pages the left edge stops turning back."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从屏幕左缘往右滑，回到目录或书柜，跟 iOS 其他地方一样。工具栏不再显示返回键；分页模式下，左缘那一条不再往前翻页。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從畫面左緣往右滑，回到目錄或書櫃，跟 iOS 其他地方一樣。工具列不再顯示返回鍵；分頁模式下，左緣那一條不再往前翻頁。"
+          }
+        }
+      }
+    },
     "reader.settings.tapToTurn" : {
       "comment" : "Toggle: turn pages by tapping while scrolling.",
       "extractionState" : "manual",

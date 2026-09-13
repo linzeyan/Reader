@@ -250,6 +250,19 @@ final class LibraryBackupTests: XCTestCase {
         XCTAssertEqual(restored.targets.reader.feedOverrides.mode, .scroll)
     }
 
+    /// How a reader gets out of a book travels with the rest of the reading defaults —
+    /// `tapToTurnPage`'s reason: a new phone restored from a backup should be the phone
+    /// they had, and this one is visible the first time they open anything.
+    func testTheWayOutOfABookComesBack() throws {
+        let source = try makeLibrary("source")
+        source.targets.reader.swipeToGoBack = true
+
+        let restored = try makeLibrary("restored")
+        try restore(capture(source), into: restored)
+
+        XCTAssertTrue(restored.targets.reader.swipeToGoBack)
+    }
+
     /// The two ways this setting can be absent, which one optional could not tell apart.
     ///
     /// A backup from a reader who left subscriptions following the general mode says so,

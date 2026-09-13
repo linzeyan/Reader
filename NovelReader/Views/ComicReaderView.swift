@@ -24,6 +24,9 @@ struct ComicReaderView: View {
     @State private var model: ComicReaderModel?
     @State private var showControls = false
     @State private var showCatalog = false
+    /// Only for `swipeToGoBack`. Nothing else in here is a type setting — a comic has no
+    /// type — but leaving a book is the same act on every shelf, so it is answered once.
+    @State private var settings = ReaderSettings.shared
 
     var body: some View {
         ZStack {
@@ -37,11 +40,16 @@ struct ComicReaderView: View {
                 ProgressView().tint(.white)
             }
         }
-        .navigationBarBackButtonHidden()
+        // What decides the edge swipe rather than what the chevron looks like — the text
+        // reader's copy of this line says why. A comic has nothing to give up for it: the
+        // pages are scrolled through vertically, so no gesture of this reader's own starts
+        // at that edge.
+        .navigationBarBackButtonHidden(!settings.swipeToGoBack)
         // Hidden for the same reason the text reader hides them: a bar that comes and
         // goes changes the safe area, and a changed safe area moves the page under the
         // reader while they are looking at it.
         .toolbar(.hidden, for: .navigationBar)
+        .edgeSwipeGoesBack(settings.swipeToGoBack)
         .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(true)
         .preferredColorScheme(.dark)
@@ -53,7 +61,9 @@ struct ComicReaderView: View {
         .overlay(alignment: .bottom) {
             if showControls, let model {
                 ComicControlBar(
-                    model: model, onBack: { dismiss() }, showCatalog: $showCatalog
+                    model: model,
+                    onBack: settings.swipeToGoBack ? nil : { dismiss() },
+                    showCatalog: $showCatalog
                 )
             }
         }
@@ -228,13 +238,17 @@ private struct ComicTitleCapsule: View {
 /// button — see `ComicScrollView`. Reading direction is not in this version.
 private struct ComicControlBar: View {
     let model: ComicReaderModel
-    let onBack: () -> Void
+    /// Nil when the edge swipe leaves the book instead — see
+    /// `ReaderSettings.swipeToGoBack`, and the text reader's bar, which does the same.
+    let onBack: (() -> Void)?
     @Binding var showCatalog: Bool
 
     var body: some View {
         HStack(spacing: 0) {
-            control("chevron.left", label: "common.back") { onBack() }
-                .accessibilityIdentifier("comic.back")
+            if let onBack {
+                control("chevron.left", label: "common.back") { onBack() }
+                    .accessibilityIdentifier("comic.back")
+            }
             control("list.bullet", label: "reader.catalog") { showCatalog = true }
             control("arrow.up.to.line", label: "reader.previousChapter") {
                 Task { await model.jump(toChapterAt: model.currentChapterIndex - 1) }

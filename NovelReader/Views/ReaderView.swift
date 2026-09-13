@@ -88,12 +88,19 @@ struct ReaderView: View {
                 ProgressView()
             }
         }
-        .navigationBarBackButtonHidden()
+        // Nothing about the chevron, which the hidden bar takes off the screen anyway. What
+        // this modifier decides is the edge swipe: UIKit will not pop a screen
+        // interactively that has declared it has no way back, so claiming that is what
+        // used to switch the gesture off — see `ReaderSettings.swipeToGoBack`.
+        .navigationBarBackButtonHidden(!settings.swipeToGoBack)
         // Never, in either mode. A navigation bar that comes and goes changes the safe
         // area, and a changed safe area moves every line of text down while the reader is
         // looking at it; in paginated mode it also re-measures the page breaks. What the
         // bar used to carry now floats over the text instead — see `titleCapsule`.
         .toolbar(.hidden, for: .navigationBar)
+        // Which is what takes the edge swipe away with it, so it is asked for back — see
+        // `EdgeSwipeToGoBack`.
+        .edgeSwipeGoesBack(settings.swipeToGoBack)
         .toolbar(.hidden, for: .tabBar)
         // Always hidden, for the same reason, rather than following the controls: on a
         // phone with no sensor housing the status bar's height *is* safe area, so
@@ -108,7 +115,10 @@ struct ReaderView: View {
         .overlay(alignment: .bottom) {
             if showControls, let model {
                 ReaderControlBar(
-                    model: model, onBack: { dismiss() },
+                    model: model,
+                    // Nil where the edge swipe does this instead: two ways out is a
+                    // sixth of the bar spent saying the same thing twice.
+                    onBack: settings.swipeToGoBack ? nil : { dismiss() },
                     showCatalog: $showCatalog, showSettings: $showSettings
                 )
             }
@@ -390,6 +400,7 @@ struct ReaderView: View {
                 onJumped: { outlineJump = nil },
                 palette: palette,
                 highlights: model.highlights(inChapter: current.chapter.siteChapterId),
+                edgeGoesBack: settings.swipeToGoBack,
                 onAnchorChange: { anchor, fraction in
                     openAtLastPage = nil
                     // Any page that does turn answers the question the notice asked.
@@ -737,14 +748,20 @@ private struct ReaderTitleCapsule: View {
 /// reader's body.
 private struct ReaderControlBar: View {
     let model: ReaderModel
-    let onBack: () -> Void
+    /// Nil when the reader is left by the edge swipe instead — see
+    /// `ReaderSettings.swipeToGoBack`. Absence rather than a flag, because a button with
+    /// nothing to call is not a button.
+    let onBack: (() -> Void)?
     @Binding var showCatalog: Bool
     @Binding var showSettings: Bool
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         HStack(spacing: 0) {
-            control("chevron.left", label: "common.back") { onBack() }
+            if let onBack {
+                control("chevron.left", label: "common.back") { onBack() }
+                    .accessibilityIdentifier("reader.back")
+            }
             control(
                 "list.bullet",
                 label: model.isSubscription ? "reader.articles" : "reader.catalog"

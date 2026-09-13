@@ -207,6 +207,16 @@ struct ReadingAppearanceSections: View {
         }
 
         Section {
+            Toggle("reader.settings.swipeToGoBack", isOn: $settings.swipeToGoBack)
+                .accessibilityIdentifier("reader.settings.swipeToGoBack")
+        } footer: {
+            // Both halves of the bargain, because both are visible changes to a screen
+            // the reader is about to be looking at: the button goes away, and in the
+            // paginated reader the edge stops turning pages.
+            Text("reader.settings.swipeToGoBack.footer")
+        }
+
+        Section {
             Toggle("reader.settings.keepScreenOn", isOn: $settings.keepScreenOn)
                 .onChange(of: settings.keepScreenOn) { _, wake in
                     UIApplication.shared.isIdleTimerDisabled = wake

@@ -264,6 +264,7 @@ extension LibraryBackup {
         var fontName: String?
         var keepScreenOn: Bool?
         var tapToTurnPage: Bool?
+        var swipeToGoBack: Bool?
         var librarySort: String?
         var groupBySource: Bool?
         var onlyWithNewChapters: Bool?
@@ -286,6 +287,7 @@ extension LibraryBackup {
             fontName = targets.reader.fontName
             keepScreenOn = targets.reader.keepScreenOn
             tapToTurnPage = targets.reader.tapToTurnPage
+            swipeToGoBack = targets.reader.swipeToGoBack
             librarySort = targets.library.sort.rawValue
             groupBySource = targets.library.groupBySource
             onlyWithNewChapters = targets.library.onlyWithNewChapters
@@ -322,6 +324,7 @@ extension LibraryBackup {
             targets.reader.fontName = fontName
             if let keepScreenOn { targets.reader.keepScreenOn = keepScreenOn }
             if let tapToTurnPage { targets.reader.tapToTurnPage = tapToTurnPage }
+            if let swipeToGoBack { targets.reader.swipeToGoBack = swipeToGoBack }
             if let value = librarySort.flatMap(LibrarySort.init(rawValue:)) {
                 targets.library.sort = value
             }

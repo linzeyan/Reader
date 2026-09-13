@@ -134,6 +134,11 @@ struct PaginatedChapterView: View {
     /// precision — see `ChapterPaginator.offset(at:onPage:)` for why the scrolling
     /// renderer can only mark a paragraph whole.
     let highlights: [TextHighlight]
+    /// Whether a stroke from the leading edge belongs to iOS rather than to this book —
+    /// see `ReaderSettings.swipeToGoBack` and `isLeavingTheBook(_:)`. A flag rather than
+    /// the settings object, for `palette`'s reason: this view is told things, not asked to
+    /// go and find them.
+    let edgeGoesBack: Bool
     /// Where the page begins, and how much of the chapter it ends on — the second is
     /// handed over rather than recomputed by the caller because only this view knows
     /// where its pages break. See `report(page:)`.
@@ -280,9 +285,13 @@ struct PaginatedChapterView: View {
         // gesture on the page view underneath.
         .gesture(
             DragGesture(minimumDistance: 12)
-                .onChanged { dragOffset = $0.translation.width }
+                .onChanged { value in
+                    guard !isLeavingTheBook(value) else { return }
+                    dragOffset = value.translation.width
+                }
                 .onEnded { value in
                     dragOffset = 0
+                    guard !isLeavingTheBook(value) else { return }
                     guard abs(value.translation.width) > 40 else { return }
                     turn(value.translation.width < 0 ? 1 : -1)
                 },
@@ -563,6 +572,26 @@ struct PaginatedChapterView: View {
     }
 
     // MARK: - Paging
+
+    /// Whether a drag belongs to iOS rather than to the book: one begun against the
+    /// leading edge, while the reader has asked to leave books that way.
+    ///
+    /// The two gestures are otherwise the same stroke — right across the page is "the
+    /// previous page" here and "go back" to UIKit — so the narrow band the system claims
+    /// is given up rather than fought over. It costs a page turn that can still be made by
+    /// tapping the left quarter, or by starting the same swipe a thumb's width further in;
+    /// contested, it would cost the reader a page *and* their place in the book.
+    ///
+    /// Only when the setting is on. With the control bar's button there instead, nothing
+    /// is listening at that edge and a strip of the page would stop working for nothing.
+    private func isLeavingTheBook(_ drag: DragGesture.Value) -> Bool {
+        edgeGoesBack && drag.startLocation.x < Self.systemEdge && drag.translation.width > 0
+    }
+
+    /// Wider than the ~20pt UIKit watches, because the cost of the two guesses is not
+    /// symmetric: a page that refuses to turn is tried again, a book that closes has to be
+    /// found again.
+    private static let systemEdge: CGFloat = 28
 
     private func turn(_ delta: Int) {
         guard let paginator else { return }

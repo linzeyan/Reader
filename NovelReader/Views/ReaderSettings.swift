@@ -137,6 +137,22 @@ final class ReaderSettings {
             defaults.set(tapToTurnPage, forKey: Keys.tapToTurnPage)
         }
     }
+    /// Leaves a book by the system's edge swipe instead of by a button on the control bar.
+    ///
+    /// One switch for both, because they are one decision: the swipe is what iOS hands
+    /// every pushed screen, and a reader who has it does not need a sixth of the control
+    /// bar spent on saying the same thing. Turning this on hides that button.
+    ///
+    /// Off to start with, and not because the button is better. The gesture costs
+    /// something in the paginated reader — a strip of the leading edge stops turning pages,
+    /// because that stroke is now how the book is closed — and a reader who never wanted
+    /// the trade should not be given it by an update. Both readers honour it; it is about
+    /// leaving a book, and every shelf has books to leave.
+    var swipeToGoBack: Bool {
+        didSet {
+            defaults.set(swipeToGoBack, forKey: Keys.swipeToGoBack)
+        }
+    }
 
     // MARK: - Writing one book's own layer
     //
@@ -182,6 +198,7 @@ final class ReaderSettings {
         static let chineseTarget = "reader.chinese.target"
         static let keepScreenOn = "reader.keepScreenOn"
         static let tapToTurnPage = "reader.tapToTurnPage"
+        static let swipeToGoBack = "reader.swipeToGoBack"
     }
 
     private let defaults: UserDefaults
@@ -234,6 +251,10 @@ final class ReaderSettings {
         // which is the only way a UI walk can turn the zones on without persisting the
         // choice into the simulator for every test that runs after it.
         tapToTurnPage = defaults.bool(forKey: Keys.tapToTurnPage)
+        // The same reading, for the same two reasons: false is this flag's default, and a
+        // walk has to be able to turn it on from the launch arguments — the gesture it
+        // governs is one only a running app can be asked about.
+        swipeToGoBack = defaults.bool(forKey: Keys.swipeToGoBack)
         // `didSet` does not run for the value an initializer assigns, and the dictionaries
         // are wanted before the first chapter is composed rather than during it.
         ChineseText.prewarm(chineseScript)
