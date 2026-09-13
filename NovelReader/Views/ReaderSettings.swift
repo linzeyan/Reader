@@ -52,45 +52,6 @@ final class ReaderSettings {
         }
     }
 
-    /// The reading appearance that one book, or one whole medium, may answer differently.
-    ///
-    /// Three settings rather than all of them, and the three are not arbitrary: they are
-    /// the ones whose right answer is a property of *what is being read*. How the text is
-    /// turned, how big it is, and what it sits on all change with the shape of the thing —
-    /// an illustrated article and a nine-hundred-chapter serial genuinely want different
-    /// answers. The face, the spacing and the script conversion are about the reader's eyes
-    /// and their language, and those do not change from book to book.
-    ///
-    /// Nil per field, so a book can disagree about one of them and inherit the rest.
-    struct Overrides: Codable, Equatable {
-        /// Raw values rather than the enums, for `LibraryBackup.Settings`' reason: this
-        /// travels in a backup file, and a case some later build renames has to degrade to
-        /// "no answer here" rather than fail to decode the file it sits in.
-        private var modeRaw: String?
-        private var themeRaw: String?
-        var fontSize: Double?
-
-        var mode: Mode? {
-            get { modeRaw.flatMap(Mode.init(rawValue:)) }
-            set { modeRaw = newValue?.rawValue }
-        }
-
-        var theme: Theme? {
-            get { themeRaw.flatMap(Theme.init(rawValue:)) }
-            set { themeRaw = newValue?.rawValue }
-        }
-
-        /// Whether this layer says anything at all. What "follows in every respect" looks
-        /// like, and what an entry is dropped for rather than stored empty.
-        var isEmpty: Bool { modeRaw == nil && themeRaw == nil && fontSize == nil }
-
-        init(mode: Mode? = nil, fontSize: Double? = nil, theme: Theme? = nil) {
-            self.modeRaw = mode?.rawValue
-            self.themeRaw = theme?.rawValue
-            self.fontSize = fontSize
-        }
-    }
-
     static let shared = ReaderSettings()
 
     /// How text is turned, in every book that has not been given an answer of its own and
@@ -177,56 +138,17 @@ final class ReaderSettings {
         }
     }
 
-    // MARK: - What one book, or one medium, is read with
+    // MARK: - Writing one book's own layer
+    //
+    // Here rather than with the rest of the layering in `ReadingOverrides`, because these
+    // two are the only writers of `overridesByBook` and its setter is private to this
+    // file. The rule that an empty layer is stored as no entry at all has to live where it
+    // cannot be gone around.
 
-    /// How this book is read: its own answer where it has one, its medium's otherwise.
-    ///
-    /// The resolution in the order a reader would say it out loud — this book, then this
-    /// kind of reading, then what I usually do. The two below take the same walk down the
-    /// same two layers; only the field and the answer at the bottom differ.
-    func resolvedMode(forBook bookId: String, kind: SiteRule.Kind) -> Mode {
-        overrides(forBook: bookId).mode ?? defaultMode(for: kind)
-    }
-
-    func resolvedFontSize(forBook bookId: String, kind: SiteRule.Kind) -> Double {
-        overrides(forBook: bookId).fontSize ?? defaultFontSize(for: kind)
-    }
-
-    func resolvedTheme(forBook bookId: String, kind: SiteRule.Kind) -> Theme {
-        overrides(forBook: bookId).theme ?? defaultTheme(for: kind)
-    }
-
-    /// What a medium is read with before any book of it disagrees — and what the reader's
-    /// own panel names as the thing a book is following.
-    ///
-    /// Comics are answered too, out of the general defaults, which is neither wrong nor
-    /// ever used: nothing draws a comic through these settings. A `switch` that refused
-    /// them would be a crash waiting for the day one does.
-    func defaultMode(for kind: SiteRule.Kind) -> Mode {
-        mediumOverrides(for: kind).mode ?? mode
-    }
-
-    func defaultFontSize(for kind: SiteRule.Kind) -> Double {
-        mediumOverrides(for: kind).fontSize ?? fontSize
-    }
-
-    func defaultTheme(for kind: SiteRule.Kind) -> Theme {
-        mediumOverrides(for: kind).theme ?? theme
-    }
-
-    /// What this book was explicitly given and nothing more — the layer the reader's own
-    /// panel edits. Empty for a book that follows in every respect, which is most of them.
-    ///
-    /// The overrides rather than the resolved values, because a resolved value cannot say
-    /// "following", and following is a state the panel has to show and to return to.
-    func overrides(forBook bookId: String) -> Overrides {
-        overridesByBook[bookId] ?? Overrides()
-    }
-
-    /// A layer that says nothing is stored as no entry at all: a book given an answer and
-    /// then put back to following must not leave a row behind, or the defaults accumulate
-    /// one per book ever opened. This is about the layer being *empty*, not about a field
-    /// agreeing with what it would inherit — see `overridesByBook` for why those differ.
+    /// A book given an answer and then put back to following must not leave a row behind,
+    /// or the defaults accumulate one entry per book ever opened. This is about the layer
+    /// being *empty*, not about a field agreeing with what it would inherit — see
+    /// `overridesByBook` for why those two are different things.
     func setOverrides(_ overrides: Overrides, forBook bookId: String) {
         overridesByBook[bookId] = overrides.isEmpty ? nil : overrides
     }
@@ -238,25 +160,9 @@ final class ReaderSettings {
         overridesByBook[bookId] = nil
     }
 
-    private func mediumOverrides(for kind: SiteRule.Kind) -> Overrides {
-        kind == .feed ? feedOverrides : Overrides()
-    }
-
-    /// What a book's text is laid out with: its resolved size, and the four settings that
-    /// do not vary from book to book.
-    func metrics(forBook bookId: String, kind: SiteRule.Kind) -> ReadingMetrics {
-        ReadingMetrics(
-            fontName: fontName,
-            fontSize: resolvedFontSize(forBook: bookId, kind: kind),
-            lineSpacing: lineSpacing,
-            paragraphSpacing: paragraphSpacing,
-            script: chineseScript
-        )
-    }
-
     /// JSON rather than a plist dictionary: `Overrides` is a record, and `UserDefaults`
     /// holds property-list types only. A value that will not encode is dropped rather than
-    /// trapped — which for three optional scalars it cannot be.
+    /// trapped — which for a handful of optional scalars it cannot be.
     private func write(_ value: some Encodable, forKey key: String) {
         guard let data = try? JSONEncoder().encode(value) else { return }
         defaults.set(data, forKey: key)

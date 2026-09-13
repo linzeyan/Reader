@@ -6208,6 +6208,30 @@
         }
       }
     },
+    "reader.settings.theme.custom.shared" : {
+      "comment" : "Warns that the custom palette itself is one shared thing, even though which books use it is set per book.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There is one set of custom colours. Editing them changes every book set to Custom."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定配色只有一组。编辑它会影响所有选用自定的书。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂配色只有一組。編輯它會影響所有選用自訂的書。"
+          }
+        }
+      }
+    },
     "reader.theme.addStop" : {
       "comment" : "Adds another colour to the background gradient.",
       "extractionState" : "manual",

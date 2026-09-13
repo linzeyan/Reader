@@ -62,9 +62,9 @@ struct ReaderView: View {
         settings.palette(theme: theme, systemIsDark: systemColorScheme == .dark)
     }
 
-    /// The three settings this book may answer for itself, resolved in the one view that
-    /// knows which book is on screen. Everything below is handed the answers rather than
-    /// the settings object — see `ReadingMetrics`.
+    /// The settings this book may answer for itself, resolved in the one view that knows
+    /// which book is on screen. Everything below is handed the answers rather than the
+    /// settings object — see `ReadingMetrics`.
     private var theme: ReaderSettings.Theme {
         settings.resolvedTheme(forBook: book.id, kind: book.kind)
     }

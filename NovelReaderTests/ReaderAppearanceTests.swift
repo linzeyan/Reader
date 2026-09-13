@@ -255,18 +255,49 @@ final class ReaderAppearanceTests: XCTestCase {
         XCTAssertEqual(settings.resolvedTheme(forBook: "site|tired-eyes", kind: .novel), .dark)
     }
 
-    /// What the renderers are handed: one book's own size, and the four settings that are
-    /// about the reader's eyes rather than about the book.
-    func testTheMetricsHandedToTheRenderersCarryTheBooksOwnSize() {
+    /// What the renderers are handed, and the whole reason they stopped holding
+    /// `ReaderSettings`: everything about the layout is resolved for one book before it
+    /// gets there, and the script — which is about the reader, not the book — is not.
+    func testTheMetricsHandedToTheRenderersAreResolvedForOneBook() {
         let settings = ReaderSettings(defaults: defaults)
         settings.fontSize = 19
         settings.lineSpacing = 7
-        settings.setOverrides(.init(fontSize: 28), forBook: "site|serial")
+        settings.paragraphSpacing = 8
+        settings.chineseScript = ChineseScript(depth: .phrases, target: .traditional)
+        settings.setOverrides(
+            .init(fontName: "Kaiti TC", fontSize: 28, lineSpacing: 12), forBook: "site|serial"
+        )
 
         let own = settings.metrics(forBook: "site|serial", kind: .novel)
+        XCTAssertEqual(own.fontName, "Kaiti TC")
         XCTAssertEqual(own.fontSize, 28)
-        XCTAssertEqual(own.lineSpacing, 7, "line spacing is not a book's to answer")
-        XCTAssertEqual(settings.metrics(forBook: "site|other", kind: .novel).fontSize, 19)
+        XCTAssertEqual(own.lineSpacing, 12)
+        XCTAssertEqual(own.paragraphSpacing, 8, "the one it was not given still follows")
+        XCTAssertEqual(own.script, settings.chineseScript, "the script is not a book's to hold")
+
+        let other = settings.metrics(forBook: "site|other", kind: .novel)
+        XCTAssertEqual(other.fontSize, 19)
+        XCTAssertEqual(other.lineSpacing, 7)
+    }
+
+    /// The face needs a sentinel that the numbers beside it do not: nil already means "the
+    /// system face", so it cannot also mean "no answer here". A reader who deliberately
+    /// took one book off the Song face must not find it back there.
+    func testOneBookCanBeSetToTheSystemFaceWhileTheRestKeepTheirs() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.fontName = "Songti TC"
+
+        settings.setOverrides(.init(fontName: ""), forBook: "site|plain")
+
+        XCTAssertNil(
+            settings.resolvedFontName(forBook: "site|plain", kind: .novel),
+            "the empty string is the system face, chosen"
+        )
+        XCTAssertEqual(settings.resolvedFontName(forBook: "site|other", kind: .novel), "Songti TC")
+        XCTAssertFalse(
+            settings.overrides(forBook: "site|plain").isEmpty,
+            "a book set to the system face has been answered, and must not read as following"
+        )
     }
 
     /// The claim the storage rule exists for: choosing an answer is not the same as

@@ -42,16 +42,6 @@ struct ReadingAppearanceSections: View {
         }
     }
 
-    /// The mode in force where these controls are.
-    ///
-    /// What the sections that belong to one renderer key off, rather than `settings.mode`.
-    /// Read off the general default, the reader's own sheet would offer the scrolling
-    /// reader's tap zones while they are looking at pages.
-    private var effectiveMode: ReaderSettings.Mode {
-        guard let book else { return settings.mode }
-        return settings.resolvedMode(forBook: book.id, kind: book.kind)
-    }
-
     var body: some View {
         Group {
             if book != nil {
@@ -201,23 +191,19 @@ struct ReadingAppearanceSections: View {
             .accessibilityIdentifier("reader.settings.customTheme")
         }
 
-        // In a book, only where it can do anything: paginated reading turns pages by
-        // tapping already and cannot be talked out of it, so offering the switch there
-        // would be offering to turn off something that is not on.
-        //
-        // In Settings it always stands. There is no single mode in force to hide it
-        // against — the reader is setting up two — and a switch that disappeared
-        // because the general default moved to pages would take the subscriptions'
-        // zones with it, silently, from a screen that never mentioned subscriptions.
-        if book == nil || effectiveMode == .scroll {
-            Section {
-                Toggle("reader.settings.tapToTurn", isOn: $settings.tapToTurnPage)
-                    .accessibilityIdentifier("reader.settings.tapToTurn")
-            } footer: {
-                // Which part of the screen does what, said once, here. A reader who
-                // has to find the zones by tapping finds the wrong one first.
-                Text("reader.settings.tapToTurn.footer")
-            }
+        // Always, even where the reader is looking at pages and it can do nothing for
+        // them. It used to hide itself behind the mode in force, which stopped making
+        // sense the moment one book could hold its own: these are the defaults, there
+        // are now three modes that could be in force behind them, and a global switch
+        // that vanishes because *this* book was pinned to pages is a setting the reader
+        // cannot find from the book they are in.
+        Section {
+            Toggle("reader.settings.tapToTurn", isOn: $settings.tapToTurnPage)
+                .accessibilityIdentifier("reader.settings.tapToTurn")
+        } footer: {
+            // Which part of the screen does what, said once, here. A reader who
+            // has to find the zones by tapping finds the wrong one first.
+            Text("reader.settings.tapToTurn.footer")
         }
 
         Section {
@@ -228,12 +214,13 @@ struct ReadingAppearanceSections: View {
         }
     }
 
-    /// The three settings this book can answer for itself, each over a line naming what it
-    /// would read with if it had not.
+    /// How this book is laid out, where it does not want what everything else gets. Each
+    /// control sits over a line naming what it would read with if it had not been asked.
     ///
-    /// Only three, and the others are not hidden here — they are not a book's to hold; see
-    /// `ReaderSettings.Overrides`. A panel that offered the font picker under 這本書 and
-    /// then changed every book would be lying about its own heading.
+    /// The same controls as the defaults, minus the ones that are not a book's to hold —
+    /// the script conversion, the tap zones, the screen — see `ReaderSettings.Overrides`.
+    /// A panel that offered those under 這本書 and then changed every book would be lying
+    /// about its own heading.
     @ViewBuilder
     private func bookSections(_ book: Book) -> some View {
         let overrides = settings.overrides(forBook: book.id)
@@ -256,6 +243,21 @@ struct ReadingAppearanceSections: View {
         }
 
         Section("reader.settings.text") {
+            Picker("reader.settings.font", selection: bookFontName(book)) {
+                Text("reader.settings.font.system").tag(String?.none)
+                ForEach(FontCatalog.chinese) { entry in
+                    Text(entry.displayName)
+                        .font(.custom(entry.fontName, fixedSize: 17))
+                        .tag(String?.some(entry.fontName))
+                }
+            }
+            .accessibilityIdentifier("reader.settings.font")
+
+            followLine(
+                faceName(settings.defaultFontName(for: book.kind)),
+                revert: overrides.fontName == nil ? nil : { follow(\.fontName, for: book) }
+            )
+
             LabeledContent("reader.settings.fontSize") {
                 Text("\(Int(settings.resolvedFontSize(forBook: book.id, kind: book.kind)))")
             }
@@ -275,15 +277,51 @@ struct ReadingAppearanceSections: View {
                 "\(Int(settings.defaultFontSize(for: book.kind)))",
                 revert: overrides.fontSize == nil ? nil : { follow(\.fontSize, for: book) }
             )
+
+            LabeledContent("reader.settings.lineSpacing") {
+                Text("\(Int(settings.resolvedLineSpacing(forBook: book.id, kind: book.kind)))")
+            }
+            Slider(value: bookLineSpacing(book), in: 0...20, step: 1)
+
+            followLine(
+                "\(Int(settings.defaultLineSpacing(for: book.kind)))",
+                revert: overrides.lineSpacing == nil ? nil : { follow(\.lineSpacing, for: book) }
+            )
+
+            LabeledContent("reader.settings.paragraphSpacing") {
+                Text(
+                    "\(Int(settings.resolvedParagraphSpacing(forBook: book.id, kind: book.kind)))"
+                )
+            }
+            Slider(value: bookParagraphSpacing(book), in: 0...32, step: 2)
+
+            followLine(
+                "\(Int(settings.defaultParagraphSpacing(for: book.kind)))",
+                revert: overrides.paragraphSpacing == nil
+                    ? nil
+                    : { follow(\.paragraphSpacing, for: book) }
+            )
         }
 
-        Section("reader.settings.theme") {
+        Section {
             ThemePicker(settings: settings, selection: bookTheme(book))
+            // Reachable from here too, because a book can be set to the custom palette
+            // from the row above and would otherwise be pinned to colours it has no way
+            // to see, let alone change. What it opens is the one shared palette, which is
+            // what the footer is for.
+            NavigationLink("reader.theme.custom.edit") {
+                ReaderThemeEditor(settings: settings)
+            }
+            .accessibilityIdentifier("reader.settings.customTheme")
 
             followLine(
                 String(localized: settings.defaultTheme(for: book.kind).nameKey),
                 revert: overrides.theme == nil ? nil : { follow(\.theme, for: book) }
             )
+        } header: {
+            Text("reader.settings.theme")
+        } footer: {
+            Text("reader.settings.theme.custom.shared")
         }
     }
 
@@ -294,6 +332,14 @@ struct ReadingAppearanceSections: View {
     private func followRow(_ inherited: ReaderSettings.Mode) -> some View {
         Text("reader.settings.followDefault \(String(localized: inherited.nameKey))")
             .tag(ReaderSettings.Mode?.none)
+    }
+
+    /// A face as the picker names it: the family a reader would recognise, or the system
+    /// row's own label, so that "follow the default (系統字體)" reads like the row above it
+    /// rather than like a PostScript name.
+    private func faceName(_ fontName: String?) -> String {
+        guard let fontName else { return String(localized: "reader.settings.font.system") }
+        return FontCatalog.chinese.first { $0.fontName == fontName }?.displayName ?? fontName
     }
 
     /// The line under one of this book's controls, naming what it would read with
@@ -338,10 +384,33 @@ struct ReadingAppearanceSections: View {
         )
     }
 
+    /// The face, where nil is the system one — a real choice rather than an absence, which
+    /// is why it is written down as the empty string. See `ReaderSettings.Overrides`.
+    private func bookFontName(_ book: Book) -> Binding<String?> {
+        Binding(
+            get: { settings.resolvedFontName(forBook: book.id, kind: book.kind) },
+            set: { write(\.fontName, $0 ?? "", for: book) }
+        )
+    }
+
     private func bookFontSize(_ book: Book) -> Binding<Double> {
         Binding(
             get: { settings.resolvedFontSize(forBook: book.id, kind: book.kind) },
             set: { write(\.fontSize, $0, for: book) }
+        )
+    }
+
+    private func bookLineSpacing(_ book: Book) -> Binding<Double> {
+        Binding(
+            get: { settings.resolvedLineSpacing(forBook: book.id, kind: book.kind) },
+            set: { write(\.lineSpacing, $0, for: book) }
+        )
+    }
+
+    private func bookParagraphSpacing(_ book: Book) -> Binding<Double> {
+        Binding(
+            get: { settings.resolvedParagraphSpacing(forBook: book.id, kind: book.kind) },
+            set: { write(\.paragraphSpacing, $0, for: book) }
         )
     }
 
