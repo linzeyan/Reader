@@ -181,6 +181,75 @@ final class SmokeTests: XCTestCase {
         )
     }
 
+    /// The scope switch, and the one rule in this panel that is not about scope: a comic
+    /// shelf is offered the page turning and nothing else, because the rest of these
+    /// controls describe text and a comic has none.
+    func testTheComicShelfScopeOffersPageTurningAlone() {
+        settingsTab.tap()
+        let appearance = app.buttons["settings.appearance"]
+        app.reveal(appearance)
+        XCTAssertTrue(appearance.waitForExistence(timeout: 5))
+        appearance.tap()
+
+        let scope = app.segmentedControls["reader.settings.scope"]
+        XCTAssertTrue(scope.waitForExistence(timeout: 5), "Settings should offer the scopes")
+        // 預設, then the shelves in the order the medium is declared in — novel, comic,
+        // feed. By position because the segment labels are localized, and a walk that
+        // spells 「漫畫」 only runs in one of the three languages the app ships.
+        scope.buttons.element(boundBy: 2).tap()
+
+        XCTAssertTrue(
+            app.segmentedControls["reader.settings.pageTurn"].waitForExistence(timeout: 5),
+            "a comic is turned like everything else"
+        )
+        XCTAssertFalse(
+            app.buttons["reader.settings.font"].exists,
+            "and has no type to set: the pages are pictures"
+        )
+    }
+
+    /// The comic reader's own way into that setting. It is the only reading setting a
+    /// comic has, and until now the comic reader had no way to reach any of them.
+    func testTheComicReaderOpensThePageTurnSetting() {
+        app.terminate()
+        app.launchArguments = ["-NovelReaderDemoSeed"]
+        app.launch()
+
+        app.openLibraryTab()
+        let comics = app.buttons["library.mode.comic"]
+        XCTAssertTrue(comics.waitForExistence(timeout: 20))
+        comics.tap()
+        // By name: this walk has no network, and 霜降之城 is the one seeded comic whose
+        // pages are on the device — see `DemoSeed`.
+        let comic = app.descendants(matching: .any).matching(identifier: "library.book")
+            .containing(.staticText, identifier: "霜降之城").firstMatch
+        XCTAssertTrue(comic.waitForExistence(timeout: 20), "The demo comics should be seeded")
+        comic.tap()
+        let read = app.descendants(matching: .any).matching(identifier: "book.read").firstMatch
+        XCTAssertTrue(read.waitForExistence(timeout: 20))
+        read.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(identifier: "comic.page")
+                .firstMatch.waitForExistence(timeout: 20),
+            "The downloaded chapter should lay its pages out"
+        )
+
+        // The middle band brings the controls up, in this reader as in the other one.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let settings = app.buttons["comic.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "the control bar should offer it")
+        settings.tap()
+
+        XCTAssertTrue(
+            app.segmentedControls["reader.settings.pageTurn"].waitForExistence(timeout: 5),
+            "the panel a comic gets is the page turning"
+        )
+        XCTAssertTrue(
+            app.segmentedControls["reader.settings.scope"].exists,
+            "at whichever of the three layers the reader means it"
+        )
+    }
+
     func testAddBookSheetOffersEverySource() {
         libraryTab.tap()
         let add = app.buttons["library.add"]

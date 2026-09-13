@@ -1,12 +1,12 @@
 import Foundation
 
-/// What one book, or one whole medium, may be read differently from everything else.
+/// What one book, or one whole shelf, may be read differently from everything else.
 ///
 /// Split out of `ReaderSettings` because it is a different question. That type is the
 /// reader's answers; this is the rule for whose answer wins — a book's own, then its
-/// medium's, then the general one.
+/// shelf's, then the general one.
 extension ReaderSettings {
-    /// The reading appearance that one book, or one whole medium, may answer differently.
+    /// The reading appearance that one book, or one whole shelf, may answer differently.
     ///
     /// Everything about how the text is laid out and turned: the mode, the page turning,
     /// the face, the size, the two spacings, the surface. What stays out is what is not
@@ -73,44 +73,123 @@ extension ReaderSettings {
         }
     }
 
-    // MARK: - What one book is read with
+    // MARK: - Whose answer is being asked for
 
-    /// How this book is read: its own answer where it has one, its medium's otherwise.
+    /// Which set of answers a question is being put to.
     ///
-    /// The resolution in the order a reader would say it out loud — this book, then this
-    /// kind of reading, then what I usually do. The rest take the same walk down the same
-    /// two layers; only the field and the answer at the bottom differ.
-    func resolvedMode(forBook bookId: String, kind: SiteRule.Kind) -> Mode {
-        overrides(forBook: bookId).mode ?? defaultMode(for: kind)
+    /// The layering as a value, so that the walk down it exists once. The panel now edits
+    /// all three, and each control asks three things of its layer — what does it show, what
+    /// would it show if it followed, is it following — which written out field by field and
+    /// layer by layer is one rule copied twenty-one times.
+    enum Layer: Hashable {
+        case general
+        case shelf(SiteRule.Kind)
+        case book(id: String, kind: SiteRule.Kind)
+
+        /// The layer this one follows where it says nothing. The general answers follow
+        /// nobody, which is what makes them the general answers.
+        var above: Layer {
+            switch self {
+            case .general, .shelf: return .general
+            case .book(_, let kind): return .shelf(kind)
+            }
+        }
+
+        /// What is being read, where that is known. Nil for the general answers, which are
+        /// about the reader rather than about any one thing they read.
+        var kind: SiteRule.Kind? {
+            switch self {
+            case .general: return nil
+            case .shelf(let kind), .book(_, let kind): return kind
+            }
+        }
     }
 
-    /// The one that cannot be written as a `??` chain, because nil is an answer here and
-    /// not only an absence — see `Overrides.fontName`.
-    func resolvedFontName(forBook bookId: String, kind: SiteRule.Kind) -> String? {
-        guard let own = overrides(forBook: bookId).fontName else {
-            return defaultFontName(for: kind)
+    /// What a layer is read with: its own answer where it has one, otherwise the answer of
+    /// the nearest layer above it that does.
+    ///
+    /// Generic over the field, which is the point — this is the resolution order, and it is
+    /// the same order for every setting here. `general` names the same field where it is no
+    /// longer optional, and being no longer optional is what makes it the bottom.
+    func value<V>(
+        _ field: KeyPath<Overrides, V?>,
+        of layer: Layer,
+        general: KeyPath<ReaderSettings, V>
+    ) -> V {
+        guard case .general = layer else {
+            return overrides(of: layer)[keyPath: field]
+                ?? value(field, of: layer.above, general: general)
         }
-        return Self.face(own)
+        return self[keyPath: general]
+    }
+
+    /// The face, which cannot go through `value`: nil is an answer here rather than an
+    /// absence — see `Overrides.fontName`.
+    func fontName(of layer: Layer) -> String? {
+        guard case .general = layer else {
+            guard let own = overrides(of: layer).fontName else { return fontName(of: layer.above) }
+            return Self.face(own)
+        }
+        return fontName
+    }
+
+    /// What this layer was explicitly given and nothing more — the layer a panel edits.
+    /// Empty for one that follows in every respect, which is most of them.
+    ///
+    /// The overrides rather than the resolved values, because a resolved value cannot say
+    /// "following", and following is a state the panel has to show and to return to. The
+    /// general answers are empty here too: they are the bottom of the chain, not a layer
+    /// sitting on it.
+    func overrides(of layer: Layer) -> Overrides {
+        switch layer {
+        case .general: return Overrides()
+        case .shelf(let kind): return overrides(forKind: kind)
+        case .book(let id, _): return overrides(forBook: id)
+        }
+    }
+
+    func setOverrides(_ overrides: Overrides, of layer: Layer) {
+        switch layer {
+        case .general:
+            // A panel editing the general answers writes the properties directly. Arriving
+            // here means a control was pointed at the wrong layer, and the write would go
+            // nowhere at all.
+            assertionFailure("the general answers are not overrides of anything")
+        case .shelf(let kind): setOverrides(overrides, forKind: kind)
+        case .book(let id, _): setOverrides(overrides, forBook: id)
+        }
+    }
+
+    // MARK: - What one book is read with
+
+    /// How this book is read: its own answer where it has one, its shelf's otherwise, and
+    /// the general one under that. The names the renderers ask by.
+    func resolvedMode(forBook bookId: String, kind: SiteRule.Kind) -> Mode {
+        value(\.mode, of: .book(id: bookId, kind: kind), general: \.mode)
+    }
+
+    func resolvedFontName(forBook bookId: String, kind: SiteRule.Kind) -> String? {
+        fontName(of: .book(id: bookId, kind: kind))
     }
 
     func resolvedFontSize(forBook bookId: String, kind: SiteRule.Kind) -> Double {
-        overrides(forBook: bookId).fontSize ?? defaultFontSize(for: kind)
+        value(\.fontSize, of: .book(id: bookId, kind: kind), general: \.fontSize)
     }
 
     func resolvedLineSpacing(forBook bookId: String, kind: SiteRule.Kind) -> Double {
-        overrides(forBook: bookId).lineSpacing ?? defaultLineSpacing(for: kind)
+        value(\.lineSpacing, of: .book(id: bookId, kind: kind), general: \.lineSpacing)
     }
 
     func resolvedParagraphSpacing(forBook bookId: String, kind: SiteRule.Kind) -> Double {
-        overrides(forBook: bookId).paragraphSpacing ?? defaultParagraphSpacing(for: kind)
+        value(\.paragraphSpacing, of: .book(id: bookId, kind: kind), general: \.paragraphSpacing)
     }
 
     func resolvedPageTurn(forBook bookId: String, kind: SiteRule.Kind) -> PageTurn {
-        overrides(forBook: bookId).pageTurn ?? defaultPageTurn(for: kind)
+        value(\.pageTurn, of: .book(id: bookId, kind: kind), general: \.pageTurn)
     }
 
     func resolvedTheme(forBook bookId: String, kind: SiteRule.Kind) -> Theme {
-        overrides(forBook: bookId).theme ?? defaultTheme(for: kind)
+        value(\.theme, of: .book(id: bookId, kind: kind), general: \.theme)
     }
 
     /// What a book's text is laid out with, resolved once so that the renderers never have
@@ -125,63 +204,55 @@ extension ReaderSettings {
         )
     }
 
-    // MARK: - What a medium is read with
+    // MARK: - What a shelf is read with
 
-    /// What a medium is read with before any book of it disagrees — and what the reader's
-    /// own panel names as the thing a book is following.
+    /// What a shelf is read with before any book on it disagrees — and what a book's own
+    /// controls name as the thing they are following.
     ///
-    /// Comics are answered too, out of the general defaults, which is neither wrong nor
-    /// ever used: nothing draws a comic through these settings. A `switch` that refused
-    /// them would be a crash waiting for the day one does.
+    /// Comics are answered for every field, which is neither wrong nor mostly used: nothing
+    /// draws a comic through the type settings. A `switch` that refused them would be a
+    /// crash waiting for the day one does.
     func defaultMode(for kind: SiteRule.Kind) -> Mode {
-        mediumOverrides(for: kind).mode ?? mode
+        value(\.mode, of: .shelf(kind), general: \.mode)
     }
 
     func defaultFontName(for kind: SiteRule.Kind) -> String? {
-        guard let own = mediumOverrides(for: kind).fontName else { return fontName }
-        return Self.face(own)
+        fontName(of: .shelf(kind))
     }
 
     func defaultFontSize(for kind: SiteRule.Kind) -> Double {
-        mediumOverrides(for: kind).fontSize ?? fontSize
+        value(\.fontSize, of: .shelf(kind), general: \.fontSize)
     }
 
     func defaultLineSpacing(for kind: SiteRule.Kind) -> Double {
-        mediumOverrides(for: kind).lineSpacing ?? lineSpacing
+        value(\.lineSpacing, of: .shelf(kind), general: \.lineSpacing)
     }
 
     func defaultParagraphSpacing(for kind: SiteRule.Kind) -> Double {
-        mediumOverrides(for: kind).paragraphSpacing ?? paragraphSpacing
+        value(\.paragraphSpacing, of: .shelf(kind), general: \.paragraphSpacing)
     }
 
     func defaultPageTurn(for kind: SiteRule.Kind) -> PageTurn {
-        mediumOverrides(for: kind).pageTurn ?? pageTurn
+        value(\.pageTurn, of: .shelf(kind), general: \.pageTurn)
     }
 
     func defaultTheme(for kind: SiteRule.Kind) -> Theme {
-        mediumOverrides(for: kind).theme ?? theme
+        value(\.theme, of: .shelf(kind), general: \.theme)
     }
 
-    // MARK: - Reading and writing a layer
+    // MARK: - Reading and writing one stored layer
 
-    /// What this book was explicitly given and nothing more — the layer the reader's own
-    /// panel edits. Empty for a book that follows in every respect, which is most of them.
-    ///
-    /// The overrides rather than the resolved values, because a resolved value cannot say
-    /// "following", and following is a state the panel has to show and to return to.
+    /// What this book was explicitly given, and nothing more.
     func overrides(forBook bookId: String) -> Overrides {
         overridesByBook[bookId] ?? Overrides()
     }
 
-    /// What a whole shelf is read with. Every shelf has one now, where only subscriptions
-    /// used to: a shelf is the unit a reader thinks in — "articles in pages, comics tapped"
-    /// — and singling one medium out was an accident of which one needed it first.
+    /// What a whole shelf was explicitly given. Every shelf has a layer now, where only
+    /// subscriptions used to: a shelf is the unit a reader thinks in — "articles in pages,
+    /// comics tapped" — and singling one medium out was an accident of which one needed it
+    /// first.
     func overrides(forKind kind: SiteRule.Kind) -> Overrides {
         overridesByKind[kind.rawValue] ?? Overrides()
-    }
-
-    private func mediumOverrides(for kind: SiteRule.Kind) -> Overrides {
-        overrides(forKind: kind)
     }
 
     /// A stored face read back out: the empty string is the system face.

@@ -5704,8 +5704,8 @@
         }
       }
     },
-    "reader.settings.followDefault %@" : {
-      "comment" : "Names what a setting falls back to where it has not been answered: a picker row for a book or a medium that follows, and the line under each of one book's own controls. The placeholder is that default's current value — the mode, the size, the colours — so a reader can see what they are following.",
+    "reader.settings.follow.defaults %@" : {
+      "comment" : "The line under one shelf's control, naming the general answer it falls back to where this shelf has not been given one. The placeholder is that answer's current value — the mode, the size, the colours — so a reader can see what they are following.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -5724,6 +5724,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跟隨預設（%@）"
+          }
+        }
+      }
+    },
+    "reader.settings.follow.shelf %@" : {
+      "comment" : "The line under one book's control, naming what its shelf is read with where this book has not been given its own answer. The placeholder is that value.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow the shelf (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随书柜设定（%@）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟隨書櫃設定（%@）"
           }
         }
       }
@@ -5868,30 +5892,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "閱讀方式"
-          }
-        }
-      }
-    },
-    "reader.settings.mode.feed" : {
-      "comment" : "Picker label in Settings: how a subscription's articles are turned, which the reader can set apart from everything else.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Subscriptions"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "订阅文章"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "訂閱文章"
           }
         }
       }
@@ -6167,19 +6167,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Only this book changes. Everything else keeps following the defaults."
+            "value" : "Only this book changes. Everything else keeps following its shelf."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只有这本书会变，其他书仍跟随默认。"
+            "value" : "只有这本书会变，其他书仍跟着书柜走。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只有這本書會變，其他書仍跟隨預設。"
+            "value" : "只有這本書會變，其他書仍跟著書櫃走。"
           }
         }
       }
@@ -6215,19 +6215,67 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Every book changes, except those you have set separately."
+            "value" : "Every book changes, except shelves and books you have set separately."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "所有书都会变，个别设定过的除外。"
+            "value" : "所有书都会变，书柜或个别书设定过的除外。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "所有書都會變，個別設定過的除外。"
+            "value" : "所有書都會變，書櫃或個別書設定過的除外。"
+          }
+        }
+      }
+    },
+    "reader.settings.scope.shelf" : {
+      "comment" : "Scope switch segment inside a book: the shelf this book is on.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This shelf"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个书柜"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個書櫃"
+          }
+        }
+      }
+    },
+    "reader.settings.scope.shelf.footer" : {
+      "comment" : "How far a change made under the shelf scope reaches.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every book on this shelf changes, except the ones you have set separately."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个书柜里的书都会变，个别设定过的那几本除外。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個書櫃裡的書都會變，個別設定過的那幾本除外。"
           }
         }
       }

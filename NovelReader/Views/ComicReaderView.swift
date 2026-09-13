@@ -24,6 +24,7 @@ struct ComicReaderView: View {
     @State private var model: ComicReaderModel?
     @State private var showControls = false
     @State private var showCatalog = false
+    @State private var showSettings = false
     /// Nothing in here is a type setting — a comic has no type — but how a book is left
     /// and how its pages are turned are the same acts on every shelf, so they are answered
     /// once, in one place, for all three.
@@ -68,12 +69,20 @@ struct ComicReaderView: View {
                 ComicControlBar(
                     model: model,
                     onBack: settings.swipeToGoBack ? nil : { dismiss() },
-                    showCatalog: $showCatalog
+                    showCatalog: $showCatalog,
+                    showSettings: $showSettings
                 )
             }
         }
         .animation(.snappy(duration: 0.2), value: showControls)
         .sheet(isPresented: $showCatalog) { catalogSheet }
+        .sheet(isPresented: $showSettings) {
+            // The text reader's panel, which reduces itself to the one question a comic
+            // answers — see `ReadingOverrideSections`. Half height for that reader's
+            // reason: every control in it changes the screen behind it.
+            ReaderSettingsSheet(settings: settings, book: book)
+                .presentationDetents([.medium])
+        }
         .task {
             guard model == nil else { return }
             let created = ComicReaderModel(book: book, env: env)
@@ -238,16 +247,17 @@ private struct ComicTitleCapsule: View {
 
 /// The comic reader's bottom controls.
 ///
-/// Four buttons where the text reader has six. The two that are missing are missing on
-/// purpose: a bookmark is a text anchor, and the type settings are about fonts. Zoom,
-/// which is what a comic wants in their place, is a pinch and a double tap rather than a
-/// button — see `ComicScrollView`. Reading direction is not in this version.
+/// Five buttons where the text reader has six. The one that is missing is missing on
+/// purpose: a bookmark is a text anchor. Zoom, which is what a comic wants in its place,
+/// is a pinch and a double tap rather than a button — see `ComicScrollView`. Reading
+/// direction is not in this version.
 private struct ComicControlBar: View {
     let model: ComicReaderModel
     /// Nil when the edge swipe leaves the book instead — see
     /// `ReaderSettings.swipeToGoBack`, and the text reader's bar, which does the same.
     let onBack: (() -> Void)?
     @Binding var showCatalog: Bool
+    @Binding var showSettings: Bool
 
     var body: some View {
         HStack(spacing: 0) {
@@ -265,6 +275,10 @@ private struct ComicControlBar: View {
             }
             .disabled(model.currentChapterIndex >= model.chapters.count - 1)
             .accessibilityIdentifier("comic.nextChapter")
+            // A hand rather than the text reader's `textformat.size`: what this opens for a
+            // comic is how the pages are turned, and nothing about type.
+            control("hand.tap", label: "reader.settings.pageTurn") { showSettings = true }
+                .accessibilityIdentifier("comic.settings")
         }
         .padding(.vertical, 10)
         .background(.bar)

@@ -252,6 +252,58 @@ final class ReaderAppearanceTests: XCTestCase {
         )
     }
 
+    /// What each layer follows, which is what the panel's follow lines name.
+    ///
+    /// A book follows its *shelf*, not the general answers. A line under one book's slider
+    /// reading 「跟隨預設（17）」 while its shelf says 22 names something the reader would
+    /// then go and fail to find.
+    func testABookFollowsItsShelfAndAShelfFollowsTheGeneralAnswer() {
+        let settings = ReaderSettings(defaults: defaults)
+        settings.fontSize = 17
+        settings.setOverrides(.init(fontSize: 22), forKind: .feed)
+
+        let article = ReaderSettings.Layer.book(id: "feed|blog", kind: .feed)
+        XCTAssertEqual(settings.value(\.fontSize, of: article, general: \.fontSize), 22)
+        XCTAssertEqual(settings.value(\.fontSize, of: article.above, general: \.fontSize), 22)
+
+        settings.setOverrides(.init(fontSize: 30), forBook: "feed|blog")
+
+        XCTAssertEqual(settings.value(\.fontSize, of: article, general: \.fontSize), 30)
+        XCTAssertEqual(
+            settings.value(\.fontSize, of: article.above, general: \.fontSize), 22,
+            "and the line under the control still names the shelf it has stopped following"
+        )
+        XCTAssertEqual(
+            settings.value(\.fontSize, of: ReaderSettings.Layer.shelf(.feed).above, general: \.fontSize),
+            17,
+            "which in turn follows the general answer"
+        )
+    }
+
+    /// A write goes to the layer the panel is scoped to and nowhere else. The scope switch
+    /// is the whole promise of that panel: a reader who narrows it to one shelf and then
+    /// finds every book changed has been lied to by the control they used to say so.
+    func testWritingThroughALayerLandsInThatLayerAlone() {
+        let settings = ReaderSettings(defaults: defaults)
+
+        settings.setOverrides(.init(pageTurn: .swipe), of: .shelf(.comic))
+
+        XCTAssertEqual(settings.resolvedPageTurn(forBook: "comics|a", kind: .comic), .swipe)
+        XCTAssertEqual(
+            settings.resolvedPageTurn(forBook: "site|novel", kind: .novel), .tap,
+            "one shelf's answer must not reach another"
+        )
+
+        settings.setOverrides(.init(pageTurn: .both), of: .book(id: "comics|a", kind: .comic))
+
+        XCTAssertEqual(settings.overrides(forBook: "comics|a").pageTurn, .both)
+        XCTAssertEqual(
+            settings.overrides(forKind: .comic).pageTurn, .swipe,
+            "the shelf keeps its own answer for every other comic on it"
+        )
+        XCTAssertEqual(settings.resolvedPageTurn(forBook: "comics|b", kind: .comic), .swipe)
+    }
+
     // MARK: - One book's own page turning, size and colours
 
     /// The default answers for every book that has not been given one, which is all of

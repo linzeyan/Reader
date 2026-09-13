@@ -10,185 +10,195 @@ struct ReadingAppearanceSections: View {
     @Bindable var settings: ReaderSettings
     /// The book these controls are being shown inside, or nil in Settings.
     ///
-    /// The only difference between the two places this view appears, and what the scope
-    /// switch needs to exist: three of these settings can be answered by one book
-    /// differently from the rest, and only a panel opened inside a book has a book to
-    /// answer for. Settings has no second layer to offer and shows the defaults alone.
+    /// What the scope switch offers differs between the two places: inside a book there is
+    /// a "this book" to point at and exactly one shelf worth naming, while Settings has no
+    /// book and so names every shelf.
     ///
-    /// The whole book rather than its id, because resolving those settings takes both
-    /// halves of what a book is: which one it is, and what kind of reading it is.
+    /// The whole book rather than its id, because a layer takes both halves of what a book
+    /// is: which one it is, and what kind of reading it is.
     var book: Book?
 
     /// Which layer the controls below are writing to.
     ///
-    /// Starts on the defaults in every book, every time the panel opens. That is what this
-    /// panel has always done, and a reader who opens it to make the text bigger everywhere
-    /// must not have to notice a switch to get what they have always got. Taking one book
-    /// off the defaults is the deliberate act, so it is the one that costs a tap.
-    @State private var scope = Scope.defaults
-
-    /// The two layers a reader can edit from inside a book — see `ReaderSettings.Overrides`
-    /// for why there is no third one here for the medium.
-    enum Scope: String, CaseIterable, Identifiable {
-        case defaults, book
-
-        var id: String { rawValue }
-
-        var nameKey: LocalizedStringResource {
-            switch self {
-            case .defaults: return "reader.settings.scope.defaults"
-            case .book: return "reader.settings.scope.book"
-            }
-        }
-    }
+    /// Starts on the general answers everywhere, every time the panel opens. That is what
+    /// this panel has always done, and a reader who opens it to make the text bigger
+    /// everywhere must not have to notice a switch to get what they have always got.
+    /// Narrowing to a shelf or a book is the deliberate act, so it is the one that costs a
+    /// tap.
+    @State private var scope = ReaderSettings.Layer.general
 
     var body: some View {
         Group {
-            if book != nil {
-                Section {
-                    Picker("reader.settings.scope", selection: $scope) {
-                        ForEach(Scope.allCases) { scope in
-                            Text(scope.nameKey).tag(scope)
-                        }
+            Section {
+                Picker("reader.settings.scope", selection: $scope) {
+                    ForEach(scopes, id: \.self) { layer in
+                        Text(name(of: layer)).tag(layer)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .accessibilityIdentifier("reader.settings.scope")
-                } footer: {
-                    // How far a change below will reach, said before it is made rather than
-                    // found out afterwards, in a different book, by a reader who has
-                    // forgotten they were ever offered a choice about it.
-                    Text(
-                        scope == .book
-                            ? "reader.settings.scope.book.footer"
-                            : "reader.settings.scope.defaults.footer"
-                    )
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityIdentifier("reader.settings.scope")
+            } footer: {
+                // How far a change below will reach, said before it is made rather than
+                // found out afterwards, in a different book, by a reader who has forgotten
+                // they were ever offered a choice about it.
+                Text(scopeFooter)
             }
 
-            if let book, scope == .book {
-                bookSections(book)
+            if case .general = scope {
+                generalSections
             } else {
-                defaultSections
+                ReadingOverrideSections(settings: settings, layer: scope)
             }
         }
     }
+
+    // MARK: - The scope switch
+
+    /// The layers this panel can write to, widest first.
+    ///
+    /// Three inside a book — everything, this shelf, this book — and in Settings the
+    /// shelves by name, because there is no "this" there to point at.
+    private var scopes: [ReaderSettings.Layer] {
+        guard let book else { return [.general] + MediaMode.allCases.map { .shelf($0) } }
+        return [.general, .shelf(book.kind), .book(id: book.id, kind: book.kind)]
+    }
+
+    private func name(of layer: ReaderSettings.Layer) -> LocalizedStringKey {
+        switch layer {
+        case .general: return "reader.settings.scope.defaults"
+        // Named in Settings, pointed at in a book. Four segments where none of them is the
+        // shelf you are standing on can only be told apart by name; inside a book there is
+        // one shelf in question, and naming it would leave the reader working out whether
+        // 小說 is the shelf this book is on.
+        case .shelf(let kind): return book == nil ? kind.nameKey : "reader.settings.scope.shelf"
+        case .book: return "reader.settings.scope.book"
+        }
+    }
+
+    private var scopeFooter: LocalizedStringKey {
+        switch scope {
+        case .general: return "reader.settings.scope.defaults.footer"
+        case .shelf: return "reader.settings.scope.shelf.footer"
+        case .book: return "reader.settings.scope.book.footer"
+        }
+    }
+
+    /// What this panel is about, where that is one medium: the book it was opened in, or
+    /// the shelf the scope names. Nil in Settings on the widest scope, which is about
+    /// everything at once.
+    private var subject: SiteRule.Kind? { book?.kind ?? scope.kind }
+
+    // MARK: - The general answers
 
     /// The reader's usual answers, which nearly every book is read with — so this is the
     /// side the panel opens on, in Settings and in a book alike.
     @ViewBuilder
-    private var defaultSections: some View {
-        Section {
-            // First: it is the one setting here that changes how the page behaves
-            // rather than how it looks, and the rest of this form reads differently
-            // depending on which side it is on.
-            Picker("reader.settings.mode", selection: $settings.mode) {
-                ForEach(ReaderSettings.Mode.allCases) { mode in
-                    Text(mode.nameKey).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("reader.settings.mode")
-
-            // Subscriptions, which are the one medium whose content is a different shape
-            // rather than a different taste — see `ReaderSettings.Overrides`. A row among
-            // the defaults rather than a third scope at the top: it *is* a default, and a
-            // reader who wants every article turned the same way should not have to open
-            // an article to say so.
-            Picker("reader.settings.mode.feed", selection: feedMode) {
-                followRow(settings.mode)
-                ForEach(ReaderSettings.Mode.allCases) { mode in
-                    Text(mode.nameKey).tag(ReaderSettings.Mode?.some(mode))
-                }
-            }
-            .accessibilityIdentifier("reader.settings.mode.feed")
-        } footer: {
-            // The one place the asymmetry between the two renderers can be stated
-            // where it is actionable. Both modes make marks and both show them; how
-            // finely they can aim differs, because only the paginated renderer knows
-            // where each character sits — and the moment a reader picks a mode is the
-            // moment that difference is worth knowing, rather than after they press a
-            // paragraph and get more of it than they meant.
-            Text("reader.settings.mode.footer")
-        }
-
-        Section("reader.settings.text") {
-            Picker("reader.settings.font", selection: $settings.fontName) {
-                Text("reader.settings.font.system").tag(String?.none)
-                ForEach(FontCatalog.chinese) { entry in
-                    // Each name is drawn in its own face: the sample is the
-                    // only thing that actually tells you what you are picking.
-                    Text(entry.displayName)
-                        .font(.custom(entry.fontName, fixedSize: 17))
-                        .tag(String?.some(entry.fontName))
-                }
-            }
-            .accessibilityIdentifier("reader.settings.font")
-
-            LabeledContent("reader.settings.fontSize") {
-                Text("\(Int(settings.fontSize))")
-            }
-            Slider(
-                value: $settings.fontSize,
-                in: ReaderSettings.fontSizeRange,
-                step: 1
-            ) {
-                Text("reader.settings.fontSize")
-            } minimumValueLabel: {
-                Image(systemName: "textformat.size.smaller")
-            } maximumValueLabel: {
-                Image(systemName: "textformat.size.larger")
-            }
-
-            LabeledContent("reader.settings.lineSpacing") {
-                Text("\(Int(settings.lineSpacing))")
-            }
-            Slider(value: $settings.lineSpacing, in: 0...20, step: 1)
-
-            LabeledContent("reader.settings.paragraphSpacing") {
-                Text("\(Int(settings.paragraphSpacing))")
-            }
-            Slider(value: $settings.paragraphSpacing, in: 0...32, step: 2)
-        }
-
-        Section {
-            Picker("reader.settings.chinese", selection: $settings.chineseScript.depth) {
-                ForEach(ChineseScript.Depth.allCases) { depth in
-                    Text(depth.nameKey).tag(depth)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("reader.settings.chinese.depth")
-
-            // Only where it means something. A direction to convert *to* is not a
-            // choice a reader who is not converting has, and showing it greyed out
-            // would just be a second thing to read past.
-            if settings.chineseScript.depth != .off {
-                Picker(
-                    "reader.settings.chinese.target",
-                    selection: $settings.chineseScript.target
-                ) {
-                    ForEach(ChineseScript.Target.allCases) { target in
-                        Text(target.nameKey).tag(target)
+    private var generalSections: some View {
+        // Everything about type, skipped where the panel was opened on comics. The pages
+        // are pictures: a face and a line spacing have nothing to apply to, and a panel
+        // that offers them is one a reader adjusts and then goes looking for the effect of.
+        // See `ReadingOverrideSections`, which draws the same line for a shelf and a book.
+        if subject != .comic {
+            Section {
+                // First: it is the one setting here that changes how the page behaves
+                // rather than how it looks, and the rest of this form reads differently
+                // depending on which side it is on.
+                Picker("reader.settings.mode", selection: $settings.mode) {
+                    ForEach(ReaderSettings.Mode.allCases) { mode in
+                        Text(mode.nameKey).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
-                .accessibilityIdentifier("reader.settings.chinese.target")
+                .accessibilityIdentifier("reader.settings.mode")
+            } footer: {
+                // The one place the asymmetry between the two renderers can be stated
+                // where it is actionable. Both modes make marks and both show them; how
+                // finely they can aim differs, because only the paginated renderer knows
+                // where each character sits — and the moment a reader picks a mode is the
+                // moment that difference is worth knowing, rather than after they press a
+                // paragraph and get more of it than they meant.
+                Text("reader.settings.mode.footer")
             }
-        } header: {
-            Text("reader.settings.chinese")
-        } footer: {
-            // The difference between the two tiers is one example long, and the
-            // example is the only form of it anybody can act on.
-            Text("reader.settings.chinese.footer")
-        }
 
-        Section("reader.settings.theme") {
-            ThemePicker(settings: settings, selection: $settings.theme)
-            NavigationLink("reader.theme.custom.edit") {
-                ReaderThemeEditor(settings: settings)
+            Section("reader.settings.text") {
+                Picker("reader.settings.font", selection: $settings.fontName) {
+                    Text("reader.settings.font.system").tag(String?.none)
+                    ForEach(FontCatalog.chinese) { entry in
+                        // Each name is drawn in its own face: the sample is the
+                        // only thing that actually tells you what you are picking.
+                        Text(entry.displayName)
+                            .font(.custom(entry.fontName, fixedSize: 17))
+                            .tag(String?.some(entry.fontName))
+                    }
+                }
+                .accessibilityIdentifier("reader.settings.font")
+
+                LabeledContent("reader.settings.fontSize") {
+                    Text("\(Int(settings.fontSize))")
+                }
+                Slider(
+                    value: $settings.fontSize,
+                    in: ReaderSettings.fontSizeRange,
+                    step: 1
+                ) {
+                    Text("reader.settings.fontSize")
+                } minimumValueLabel: {
+                    Image(systemName: "textformat.size.smaller")
+                } maximumValueLabel: {
+                    Image(systemName: "textformat.size.larger")
+                }
+
+                LabeledContent("reader.settings.lineSpacing") {
+                    Text("\(Int(settings.lineSpacing))")
+                }
+                Slider(value: $settings.lineSpacing, in: 0...20, step: 1)
+
+                LabeledContent("reader.settings.paragraphSpacing") {
+                    Text("\(Int(settings.paragraphSpacing))")
+                }
+                Slider(value: $settings.paragraphSpacing, in: 0...32, step: 2)
             }
-            .accessibilityIdentifier("reader.settings.customTheme")
+
+            Section {
+                Picker("reader.settings.chinese", selection: $settings.chineseScript.depth) {
+                    ForEach(ChineseScript.Depth.allCases) { depth in
+                        Text(depth.nameKey).tag(depth)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("reader.settings.chinese.depth")
+
+                // Only where it means something. A direction to convert *to* is not a
+                // choice a reader who is not converting has, and showing it greyed out
+                // would just be a second thing to read past.
+                if settings.chineseScript.depth != .off {
+                    Picker(
+                        "reader.settings.chinese.target",
+                        selection: $settings.chineseScript.target
+                    ) {
+                        ForEach(ChineseScript.Target.allCases) { target in
+                            Text(target.nameKey).tag(target)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("reader.settings.chinese.target")
+                }
+            } header: {
+                Text("reader.settings.chinese")
+            } footer: {
+                // The difference between the two tiers is one example long, and the
+                // example is the only form of it anybody can act on.
+                Text("reader.settings.chinese.footer")
+            }
+
+            Section("reader.settings.theme") {
+                ThemePicker(settings: settings, selection: $settings.theme)
+                NavigationLink("reader.theme.custom.edit") {
+                    ReaderThemeEditor(settings: settings)
+                }
+                .accessibilityIdentifier("reader.settings.customTheme")
+            }
         }
 
         Section {
@@ -223,260 +233,6 @@ struct ReadingAppearanceSections: View {
                     UIApplication.shared.isIdleTimerDisabled = wake
                 }
         }
-    }
-
-    /// How this book is laid out, where it does not want what everything else gets. Each
-    /// control sits over a line naming what it would read with if it had not been asked.
-    ///
-    /// The same controls as the defaults, minus the ones that are not a book's to hold —
-    /// the script conversion, the way out of a book, the screen — see
-    /// `ReaderSettings.Overrides`. A panel that offered those under 這本書 and then changed
-    /// every book would be lying about its own heading.
-    @ViewBuilder
-    private func bookSections(_ book: Book) -> some View {
-        let overrides = settings.overrides(forBook: book.id)
-
-        Section {
-            Picker("reader.settings.mode", selection: bookMode(book)) {
-                ForEach(ReaderSettings.Mode.allCases) { mode in
-                    Text(mode.nameKey).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("reader.settings.mode")
-
-            followLine(
-                String(localized: settings.defaultMode(for: book.kind).nameKey),
-                revert: overrides.mode == nil ? nil : { follow(\.mode, for: book) }
-            )
-        } footer: {
-            Text("reader.settings.mode.footer")
-        }
-
-        Section("reader.settings.text") {
-            Picker("reader.settings.font", selection: bookFontName(book)) {
-                Text("reader.settings.font.system").tag(String?.none)
-                ForEach(FontCatalog.chinese) { entry in
-                    Text(entry.displayName)
-                        .font(.custom(entry.fontName, fixedSize: 17))
-                        .tag(String?.some(entry.fontName))
-                }
-            }
-            .accessibilityIdentifier("reader.settings.font")
-
-            followLine(
-                faceName(settings.defaultFontName(for: book.kind)),
-                revert: overrides.fontName == nil ? nil : { follow(\.fontName, for: book) }
-            )
-
-            LabeledContent("reader.settings.fontSize") {
-                Text("\(Int(settings.resolvedFontSize(forBook: book.id, kind: book.kind)))")
-            }
-            Slider(
-                value: bookFontSize(book),
-                in: ReaderSettings.fontSizeRange,
-                step: 1
-            ) {
-                Text("reader.settings.fontSize")
-            } minimumValueLabel: {
-                Image(systemName: "textformat.size.smaller")
-            } maximumValueLabel: {
-                Image(systemName: "textformat.size.larger")
-            }
-
-            followLine(
-                "\(Int(settings.defaultFontSize(for: book.kind)))",
-                revert: overrides.fontSize == nil ? nil : { follow(\.fontSize, for: book) }
-            )
-
-            LabeledContent("reader.settings.lineSpacing") {
-                Text("\(Int(settings.resolvedLineSpacing(forBook: book.id, kind: book.kind)))")
-            }
-            Slider(value: bookLineSpacing(book), in: 0...20, step: 1)
-
-            followLine(
-                "\(Int(settings.defaultLineSpacing(for: book.kind)))",
-                revert: overrides.lineSpacing == nil ? nil : { follow(\.lineSpacing, for: book) }
-            )
-
-            LabeledContent("reader.settings.paragraphSpacing") {
-                Text(
-                    "\(Int(settings.resolvedParagraphSpacing(forBook: book.id, kind: book.kind)))"
-                )
-            }
-            Slider(value: bookParagraphSpacing(book), in: 0...32, step: 2)
-
-            followLine(
-                "\(Int(settings.defaultParagraphSpacing(for: book.kind)))",
-                revert: overrides.paragraphSpacing == nil
-                    ? nil
-                    : { follow(\.paragraphSpacing, for: book) }
-            )
-        }
-
-        Section {
-            ThemePicker(settings: settings, selection: bookTheme(book))
-            // Reachable from here too, because a book can be set to the custom palette
-            // from the row above and would otherwise be pinned to colours it has no way
-            // to see, let alone change. What it opens is the one shared palette, which is
-            // what the footer is for.
-            NavigationLink("reader.theme.custom.edit") {
-                ReaderThemeEditor(settings: settings)
-            }
-            .accessibilityIdentifier("reader.settings.customTheme")
-
-            followLine(
-                String(localized: settings.defaultTheme(for: book.kind).nameKey),
-                revert: overrides.theme == nil ? nil : { follow(\.theme, for: book) }
-            )
-        } header: {
-            Text("reader.settings.theme")
-        } footer: {
-            Text("reader.settings.theme.custom.shared")
-        }
-
-        Section {
-            Picker("reader.settings.pageTurn", selection: bookPageTurn(book)) {
-                ForEach(ReaderSettings.PageTurn.allCases) { turn in
-                    Text(turn.nameKey).tag(turn)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("reader.settings.pageTurn")
-
-            followLine(
-                String(localized: settings.defaultPageTurn(for: book.kind).nameKey),
-                revert: overrides.pageTurn == nil ? nil : { follow(\.pageTurn, for: book) }
-            )
-        } footer: {
-            Text("reader.settings.pageTurn.footer")
-        }
-    }
-
-    /// The "follow" row of an inheriting picker, naming what it would inherit.
-    ///
-    /// Spelled out rather than left as the word "default": a reader deciding whether to
-    /// override something has to see what they would be overriding.
-    private func followRow(_ inherited: ReaderSettings.Mode) -> some View {
-        Text("reader.settings.followDefault \(String(localized: inherited.nameKey))")
-            .tag(ReaderSettings.Mode?.none)
-    }
-
-    /// A face as the picker names it: the family a reader would recognise, or the system
-    /// row's own label, so that "follow the default (系統字體)" reads like the row above it
-    /// rather than like a PostScript name.
-    private func faceName(_ fontName: String?) -> String {
-        guard let fontName else { return String(localized: "reader.settings.font.system") }
-        return FontCatalog.chinese.first { $0.fontName == fontName }?.displayName ?? fontName
-    }
-
-    /// The line under one of this book's controls, naming what it would read with
-    /// otherwise — and, once the book has been given its own answer, the way back.
-    ///
-    /// There in both states, because a control showing an inherited value looks exactly
-    /// like one showing a chosen value. The line names the default either way; that it
-    /// becomes tappable is what says this book has stopped following it.
-    @ViewBuilder
-    private func followLine(_ inherited: String, revert: (() -> Void)?) -> some View {
-        let label = Text("reader.settings.followDefault \(inherited)")
-        if let revert {
-            Button(action: revert) {
-                Label { label } icon: { Image(systemName: "arrow.uturn.backward") }
-            }
-            .font(.footnote)
-        } else {
-            label
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    /// What this whole medium is turned like, with nil meaning "follow the general answer"
-    /// in both directions: it is what the picker shows for a medium that has never been
-    /// given one, and what it writes back when the reader picks that row again.
-    private var feedMode: Binding<ReaderSettings.Mode?> {
-        Binding(
-            get: { settings.overrides(forKind: .feed).mode },
-            set: {
-                var overrides = settings.overrides(forKind: .feed)
-                overrides.mode = $0
-                settings.setOverrides(overrides, forKind: .feed)
-            }
-        )
-    }
-
-    /// This book's own answers. Each reads the *resolved* value — a control has to show
-    /// something, and what the book is being read with right now is the only honest
-    /// answer — and writes an override, because moving one of these is exactly what taking
-    /// this book off the default means.
-    private func bookMode(_ book: Book) -> Binding<ReaderSettings.Mode> {
-        Binding(
-            get: { settings.resolvedMode(forBook: book.id, kind: book.kind) },
-            set: { write(\.mode, $0, for: book) }
-        )
-    }
-
-    /// The face, where nil is the system one — a real choice rather than an absence, which
-    /// is why it is written down as the empty string. See `ReaderSettings.Overrides`.
-    private func bookFontName(_ book: Book) -> Binding<String?> {
-        Binding(
-            get: { settings.resolvedFontName(forBook: book.id, kind: book.kind) },
-            set: { write(\.fontName, $0 ?? "", for: book) }
-        )
-    }
-
-    private func bookFontSize(_ book: Book) -> Binding<Double> {
-        Binding(
-            get: { settings.resolvedFontSize(forBook: book.id, kind: book.kind) },
-            set: { write(\.fontSize, $0, for: book) }
-        )
-    }
-
-    private func bookLineSpacing(_ book: Book) -> Binding<Double> {
-        Binding(
-            get: { settings.resolvedLineSpacing(forBook: book.id, kind: book.kind) },
-            set: { write(\.lineSpacing, $0, for: book) }
-        )
-    }
-
-    private func bookParagraphSpacing(_ book: Book) -> Binding<Double> {
-        Binding(
-            get: { settings.resolvedParagraphSpacing(forBook: book.id, kind: book.kind) },
-            set: { write(\.paragraphSpacing, $0, for: book) }
-        )
-    }
-
-    private func bookPageTurn(_ book: Book) -> Binding<ReaderSettings.PageTurn> {
-        Binding(
-            get: { settings.resolvedPageTurn(forBook: book.id, kind: book.kind) },
-            set: { write(\.pageTurn, $0, for: book) }
-        )
-    }
-
-    private func bookTheme(_ book: Book) -> Binding<ReaderSettings.Theme> {
-        Binding(
-            get: { settings.resolvedTheme(forBook: book.id, kind: book.kind) },
-            set: { write(\.theme, $0, for: book) }
-        )
-    }
-
-    private func write<Value>(
-        _ field: WritableKeyPath<ReaderSettings.Overrides, Value?>,
-        _ value: Value?,
-        for book: Book
-    ) {
-        var overrides = settings.overrides(forBook: book.id)
-        overrides[keyPath: field] = value
-        settings.setOverrides(overrides, forBook: book.id)
-    }
-
-    /// Puts one field back to following — `write(field, nil,)` by another name, because
-    /// "follow" is what the reader asked for and nil is only how it is stored.
-    private func follow<Value>(
-        _ field: WritableKeyPath<ReaderSettings.Overrides, Value?>,
-        for book: Book
-    ) {
-        write(field, nil, for: book)
     }
 }
 
