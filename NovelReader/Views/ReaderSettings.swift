@@ -32,6 +32,41 @@ final class ReaderSettings {
         }
     }
 
+    /// What a reader does to get to the next page.
+    ///
+    /// One answer for all three renderers, which is new: they each arrived at their own.
+    /// The scrolling reader treated a tap as "show me the controls" unless asked
+    /// otherwise; the paginated one turned on both and could be talked out of neither;
+    /// the comic reader turned on every tap and had no setting at all. Nothing about a
+    /// comic makes tapping more right there than in a novel — the three disagreed because
+    /// they were written at different times, not because they were decided.
+    ///
+    /// Scrolling is the one thing this cannot take away. In the scrolling renderers the
+    /// page moves because a `UIScrollView` moves, and `turnPage` can legitimately find
+    /// nowhere to go — a chapter still being laid out, the end of what is loaded — so a
+    /// reader whose scrolling had been switched off would simply be stuck. There, `tap`
+    /// means "taps turn pages too" and reads the same as `both`; the setting's footer is
+    /// where that is said out loud rather than left to be discovered.
+    enum PageTurn: String, CaseIterable, Identifiable {
+        case swipe, tap, both
+
+        var id: String { rawValue }
+
+        /// Whichever way a page is turned, the middle of the screen is the controls: it is
+        /// the only way to reach them, and a reader who cannot reach them is stuck with
+        /// whatever this setting happens to say.
+        var turnsOnTap: Bool { self != .swipe }
+        var turnsOnSwipe: Bool { self != .tap }
+
+        var nameKey: LocalizedStringResource {
+            switch self {
+            case .swipe: return "reader.settings.pageTurn.swipe"
+            case .tap: return "reader.settings.pageTurn.tap"
+            case .both: return "reader.settings.pageTurn.both"
+            }
+        }
+    }
+
     /// How the text moves under the reader.
     ///
     /// Two renderers rather than one engine with a flag: a continuous column across
@@ -57,20 +92,18 @@ final class ReaderSettings {
     /// How text is turned, in every book that has not been given an answer of its own and
     /// in every medium that has not either.
     var mode: Mode { didSet { defaults.set(mode.rawValue, forKey: Keys.mode) } }
-    /// What subscriptions are read with, where the reader wants an answer of their own.
-    /// Every field nil is "the same as everything else", which is where each device starts.
+    /// What a whole shelf is read with, by `SiteRule.Kind`. No entry is "the same as
+    /// everything else", which is where each device starts.
     ///
-    /// The one medium with its own layer, because it is the one whose content is a
-    /// different shape rather than a different taste. An article is a few screens long, it
-    /// carries pictures and headings, and it *ends* — pages cut a five-minute read at
-    /// boundaries it did not ask for, while a novel is the thing pages were invented for.
-    /// A reader who wants that distinction should not have to make it forty times, once
-    /// per subscription, and then again for every feed they add afterwards.
+    /// A layer between the general answer and one book, because a shelf is the unit a
+    /// reader actually thinks in: articles are a few screens long and end, novels are the
+    /// thing pages were invented for, comics are pictures. Saying so once per shelf has to
+    /// cover the subscriptions added next month, and the reader who says it should not
+    /// have to say it forty times.
     ///
-    /// Comics have no such layer to inherit: they are drawn by a renderer of their own that
-    /// never reads this type.
-    var feedOverrides: Overrides {
-        didSet { write(feedOverrides, forKey: Keys.feedOverrides) }
+    /// `private(set)` for `overridesByBook`'s reason — an empty layer must not be stored.
+    private(set) var overridesByKind: [String: Overrides] {
+        didSet { write(overridesByKind, forKey: Keys.overridesByKind) }
     }
     /// The books read with an answer of their own, by book id.
     ///
@@ -126,16 +159,10 @@ final class ReaderSettings {
             defaults.set(keepScreenOn, forKey: Keys.keepScreenOn)
         }
     }
-    /// Turns the scrolling reader's screen into tap zones — see `ReaderTapZone`.
-    ///
-    /// Off by default, and deliberately not "on for everyone": a tap in the scrolling
-    /// reader has always meant "show me the controls", and quietly turning most of the
-    /// screen into a page turn would move the text under readers who tapped for the
-    /// controls. Paginated reading has its own zones and ignores this.
-    var tapToTurnPage: Bool {
-        didSet {
-            defaults.set(tapToTurnPage, forKey: Keys.tapToTurnPage)
-        }
+    /// What moves the reader through a book, where every renderer has an opinion and they
+    /// all used to hold a different one — see `PageTurn`.
+    var pageTurn: PageTurn {
+        didSet { defaults.set(pageTurn.rawValue, forKey: Keys.pageTurn) }
     }
     /// Leaves a book by the system's edge swipe instead of by a button on the control bar.
     ///
@@ -169,6 +196,10 @@ final class ReaderSettings {
         overridesByBook[bookId] = overrides.isEmpty ? nil : overrides
     }
 
+    func setOverrides(_ overrides: Overrides, forKind kind: SiteRule.Kind) {
+        overridesByKind[kind.rawValue] = overrides.isEmpty ? nil : overrides
+    }
+
     /// Dropped along with the book — `LibrarySettings.forgetCatalogOrder`'s reason: a book
     /// removed and added again would otherwise come back reading in a way the reader never
     /// chose for it.
@@ -186,7 +217,7 @@ final class ReaderSettings {
 
     private enum Keys {
         static let mode = "reader.mode"
-        static let feedOverrides = "reader.feedOverrides"
+        static let overridesByKind = "reader.overridesByKind"
         static let overridesByBook = "reader.overridesByBook"
         static let fontSize = "reader.fontSize"
         static let lineSpacing = "reader.lineSpacing"
@@ -197,7 +228,7 @@ final class ReaderSettings {
         static let chineseDepth = "reader.chinese.depth"
         static let chineseTarget = "reader.chinese.target"
         static let keepScreenOn = "reader.keepScreenOn"
-        static let tapToTurnPage = "reader.tapToTurnPage"
+        static let pageTurn = "reader.pageTurn"
         static let swipeToGoBack = "reader.swipeToGoBack"
     }
 
@@ -209,8 +240,8 @@ final class ReaderSettings {
         // Decoded here rather than through `write`'s counterpart, because an instance
         // method cannot be called until every stored property has a value — the same
         // reason `customPalette` below is decoded inline.
-        feedOverrides = defaults.data(forKey: Keys.feedOverrides)
-            .flatMap { try? JSONDecoder().decode(Overrides.self, from: $0) } ?? Overrides()
+        overridesByKind = defaults.data(forKey: Keys.overridesByKind)
+            .flatMap { try? JSONDecoder().decode([String: Overrides].self, from: $0) } ?? [:]
         overridesByBook = defaults.data(forKey: Keys.overridesByBook)
             .flatMap { try? JSONDecoder().decode([String: Overrides].self, from: $0) } ?? [:]
         fontSize = defaults.object(forKey: Keys.fontSize) as? Double ?? 19
@@ -250,10 +281,16 @@ final class ReaderSettings {
         // anyway, and unlike the cast it also reads the value out of a launch argument —
         // which is the only way a UI walk can turn the zones on without persisting the
         // choice into the simulator for every test that runs after it.
-        tapToTurnPage = defaults.bool(forKey: Keys.tapToTurnPage)
-        // The same reading, for the same two reasons: false is this flag's default, and a
-        // walk has to be able to turn it on from the launch arguments — the gesture it
-        // governs is one only a running app can be asked about.
+        // Tapping, for a device that has never said otherwise. It is what two of the
+        // three renderers already did, and the third is the odd one out rather than the
+        // rule — see `PageTurn`.
+        pageTurn = (defaults.string(forKey: Keys.pageTurn).flatMap(PageTurn.init(rawValue:)))
+            ?? .tap
+        // `bool(forKey:)` rather than the `object(forKey:) as? Bool` the settings above
+        // use: it answers false for a key nobody has set, which is this flag's default
+        // anyway, and unlike the cast it also reads the value out of a launch argument —
+        // the only way a walk can ask about a gesture without persisting the choice into
+        // the simulator for every test that runs after it.
         swipeToGoBack = defaults.bool(forKey: Keys.swipeToGoBack)
         // `didSet` does not run for the value an initializer assigns, and the dictionaries
         // are wanted before the first chapter is composed rather than during it.

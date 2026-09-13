@@ -235,23 +235,28 @@ final class LibraryBackupTests: XCTestCase {
         XCTAssertEqual(restored.targets.feeds.keep, .fifty)
     }
 
-    /// Subscriptions can be turned in a mode of their own. It is a default rather than a
-    /// per-book answer, so it travels with the other defaults — unlike a book's own
-    /// override, which is about books this device has and stays out of a settings file.
-    func testTheSubscriptionModeComesBack() throws {
+    /// Each shelf can be read in a way of its own. Those are defaults rather than per-book
+    /// answers, so they travel with the other defaults — unlike a book's own override,
+    /// which is about books this device has and stays out of a settings file.
+    ///
+    /// Two shelves, because one would pass on a file that only ever carried the shelf the
+    /// setting started life on.
+    func testWhatEachShelfIsReadWithComesBack() throws {
         let source = try makeLibrary("source")
         source.targets.reader.mode = .paginated
-        source.targets.reader.feedOverrides.mode = .scroll
+        source.targets.reader.setOverrides(.init(mode: .scroll), forKind: .feed)
+        source.targets.reader.setOverrides(.init(pageTurn: .swipe), forKind: .novel)
 
         let restored = try makeLibrary("restored")
         try restore(capture(source), into: restored)
 
         XCTAssertEqual(restored.targets.reader.mode, .paginated)
-        XCTAssertEqual(restored.targets.reader.feedOverrides.mode, .scroll)
+        XCTAssertEqual(restored.targets.reader.overrides(forKind: .feed).mode, .scroll)
+        XCTAssertEqual(restored.targets.reader.overrides(forKind: .novel).pageTurn, .swipe)
     }
 
-    /// How a reader gets out of a book travels with the rest of the reading defaults —
-    /// `tapToTurnPage`'s reason: a new phone restored from a backup should be the phone
+    /// How a reader gets out of a book travels with the rest of the reading defaults, for
+    /// the reason all of them do: a new phone restored from a backup should be the phone
     /// they had, and this one is visible the first time they open anything.
     func testTheWayOutOfABookComesBack() throws {
         let source = try makeLibrary("source")
@@ -270,23 +275,23 @@ final class LibraryBackupTests: XCTestCase {
     /// written before the setting existed says nothing at all, and must leave it alone.
     /// Collapsed into one state, the older file would quietly clear a choice it had never
     /// heard of.
-    func testAnAbsentSubscriptionModeIsToldApartFromOneThatFollows() throws {
+    func testAnAbsentShelfAnswerIsToldApartFromOneThatFollows() throws {
         let library = try makeLibrary("target")
-        library.targets.reader.feedOverrides.mode = .paginated
+        library.targets.reader.setOverrides(.init(mode: .paginated), forKind: .feed)
 
         var settings = LibraryBackup.Settings(capturing: library.targets)
         // A file from before the setting existed.
-        settings.readerFeedOverrides = nil
+        settings.readerOverridesByKind = nil
         settings.apply(to: library.targets)
         XCTAssertEqual(
-            library.targets.reader.feedOverrides.mode, .paginated,
+            library.targets.reader.overrides(forKind: .feed).mode, .paginated,
             "an older file says nothing about this and must not clear it"
         )
 
         // A file from a reader who left subscriptions following the general mode.
-        settings.readerFeedOverrides = ReaderSettings.Overrides()
+        settings.readerOverridesByKind = [:]
         settings.apply(to: library.targets)
-        XCTAssertNil(library.targets.reader.feedOverrides.mode)
+        XCTAssertNil(library.targets.reader.overrides(forKind: .feed).mode)
     }
 
     // MARK: - Restoring onto a library that is not empty

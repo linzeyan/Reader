@@ -250,7 +250,7 @@ extension LibraryBackup {
         /// Only the defaults travel. A book's own overrides are not here for
         /// `LibrarySettings.catalogDescending`'s reason — per-book answers are about books
         /// this device has, and a settings file is not where they belong.
-        var readerFeedOverrides: ReaderSettings.Overrides?
+        var readerOverridesByKind: [String: ReaderSettings.Overrides]?
         var fontSize: Double?
         var lineSpacing: Double?
         var paragraphSpacing: Double?
@@ -263,7 +263,7 @@ extension LibraryBackup {
         var customPalette: ReaderPalette?
         var fontName: String?
         var keepScreenOn: Bool?
-        var tapToTurnPage: Bool?
+        var pageTurn: String?
         var swipeToGoBack: Bool?
         var librarySort: String?
         var groupBySource: Bool?
@@ -278,7 +278,7 @@ extension LibraryBackup {
 
         init(capturing targets: Targets) {
             readerMode = targets.reader.mode.rawValue
-            readerFeedOverrides = targets.reader.feedOverrides
+            readerOverridesByKind = targets.reader.overridesByKind
             fontSize = targets.reader.fontSize
             lineSpacing = targets.reader.lineSpacing
             paragraphSpacing = targets.reader.paragraphSpacing
@@ -286,7 +286,7 @@ extension LibraryBackup {
             customPalette = targets.reader.customPalette
             fontName = targets.reader.fontName
             keepScreenOn = targets.reader.keepScreenOn
-            tapToTurnPage = targets.reader.tapToTurnPage
+            pageTurn = targets.reader.pageTurn.rawValue
             swipeToGoBack = targets.reader.swipeToGoBack
             librarySort = targets.library.sort.rawValue
             groupBySource = targets.library.groupBySource
@@ -304,12 +304,15 @@ extension LibraryBackup {
             if let value = readerMode.flatMap(ReaderSettings.Mode.init(rawValue:)) {
                 targets.reader.mode = value
             }
-            // An empty record restores as empty — a reader who left subscriptions
-            // following, and a device that had set one has to come back to following too.
-            // The `if` is what keeps a file written before this setting from saying
-            // anything at all.
-            if let readerFeedOverrides {
-                targets.reader.feedOverrides = readerFeedOverrides
+            // An empty set restores as empty — a reader who left every shelf following,
+            // and a device that had set one has to come back to following too. The `if` is
+            // what keeps a file written before this setting from saying anything at all.
+            if let readerOverridesByKind {
+                for kind in SiteRule.Kind.allCases {
+                    targets.reader.setOverrides(
+                        readerOverridesByKind[kind.rawValue] ?? .init(), forKind: kind
+                    )
+                }
             }
             if let fontSize { targets.reader.fontSize = fontSize }
             if let lineSpacing { targets.reader.lineSpacing = lineSpacing }
@@ -323,7 +326,9 @@ extension LibraryBackup {
             // with no chosen font unable to put a device back the way it was.
             targets.reader.fontName = fontName
             if let keepScreenOn { targets.reader.keepScreenOn = keepScreenOn }
-            if let tapToTurnPage { targets.reader.tapToTurnPage = tapToTurnPage }
+            if let value = pageTurn.flatMap(ReaderSettings.PageTurn.init(rawValue:)) {
+                targets.reader.pageTurn = value
+            }
             if let swipeToGoBack { targets.reader.swipeToGoBack = swipeToGoBack }
             if let value = librarySort.flatMap(LibrarySort.init(rawValue:)) {
                 targets.library.sort = value

@@ -8,11 +8,11 @@ import Foundation
 extension ReaderSettings {
     /// The reading appearance that one book, or one whole medium, may answer differently.
     ///
-    /// Everything about how the text is laid out and turned: the mode, the face, the size,
-    /// the two spacings, the surface. What stays out is what is not about a book at all —
-    /// which script the reader reads Chinese in, whether a tap turns the page, whether the
-    /// screen is kept awake. Those are about the person and the device, and no book has an
-    /// opinion on them.
+    /// Everything about how the text is laid out and turned: the mode, the page turning,
+    /// the face, the size, the two spacings, the surface. What stays out is what is not
+    /// about a book at all — which script the reader reads Chinese in, how a book is left,
+    /// whether the screen is kept awake. Those are about the person and the device, and no
+    /// book has an opinion on them.
     ///
     /// Nil per field, so a book can disagree about one of them and inherit the rest. A
     /// reader who made one book bigger has not thereby decided anything about its colours.
@@ -21,6 +21,7 @@ extension ReaderSettings {
         /// travels in a backup file, and a case some later build renames has to degrade to
         /// "no answer here" rather than fail to decode the file it sits in.
         private var modeRaw: String?
+        private var pageTurnRaw: String?
         private var themeRaw: String?
         /// Nil is "follows"; the empty string is the system face, *chosen*. The same
         /// sentinel `ReaderSettings.fontName` is written to disk with, for the same reason:
@@ -36,6 +37,11 @@ extension ReaderSettings {
             set { modeRaw = newValue?.rawValue }
         }
 
+        var pageTurn: PageTurn? {
+            get { pageTurnRaw.flatMap(PageTurn.init(rawValue:)) }
+            set { pageTurnRaw = newValue?.rawValue }
+        }
+
         var theme: Theme? {
             get { themeRaw.flatMap(Theme.init(rawValue:)) }
             set { themeRaw = newValue?.rawValue }
@@ -44,12 +50,13 @@ extension ReaderSettings {
         /// Whether this layer says anything at all. What "follows in every respect" looks
         /// like, and what an entry is dropped for rather than stored empty.
         var isEmpty: Bool {
-            modeRaw == nil && themeRaw == nil && fontName == nil
+            modeRaw == nil && pageTurnRaw == nil && themeRaw == nil && fontName == nil
                 && fontSize == nil && lineSpacing == nil && paragraphSpacing == nil
         }
 
         init(
             mode: Mode? = nil,
+            pageTurn: PageTurn? = nil,
             fontName: String? = nil,
             fontSize: Double? = nil,
             lineSpacing: Double? = nil,
@@ -57,6 +64,7 @@ extension ReaderSettings {
             theme: Theme? = nil
         ) {
             self.modeRaw = mode?.rawValue
+            self.pageTurnRaw = pageTurn?.rawValue
             self.themeRaw = theme?.rawValue
             self.fontName = fontName
             self.fontSize = fontSize
@@ -95,6 +103,10 @@ extension ReaderSettings {
 
     func resolvedParagraphSpacing(forBook bookId: String, kind: SiteRule.Kind) -> Double {
         overrides(forBook: bookId).paragraphSpacing ?? defaultParagraphSpacing(for: kind)
+    }
+
+    func resolvedPageTurn(forBook bookId: String, kind: SiteRule.Kind) -> PageTurn {
+        overrides(forBook: bookId).pageTurn ?? defaultPageTurn(for: kind)
     }
 
     func resolvedTheme(forBook bookId: String, kind: SiteRule.Kind) -> Theme {
@@ -142,6 +154,10 @@ extension ReaderSettings {
         mediumOverrides(for: kind).paragraphSpacing ?? paragraphSpacing
     }
 
+    func defaultPageTurn(for kind: SiteRule.Kind) -> PageTurn {
+        mediumOverrides(for: kind).pageTurn ?? pageTurn
+    }
+
     func defaultTheme(for kind: SiteRule.Kind) -> Theme {
         mediumOverrides(for: kind).theme ?? theme
     }
@@ -157,8 +173,15 @@ extension ReaderSettings {
         overridesByBook[bookId] ?? Overrides()
     }
 
+    /// What a whole shelf is read with. Every shelf has one now, where only subscriptions
+    /// used to: a shelf is the unit a reader thinks in — "articles in pages, comics tapped"
+    /// — and singling one medium out was an accident of which one needed it first.
+    func overrides(forKind kind: SiteRule.Kind) -> Overrides {
+        overridesByKind[kind.rawValue] ?? Overrides()
+    }
+
     private func mediumOverrides(for kind: SiteRule.Kind) -> Overrides {
-        kind == .feed ? feedOverrides : Overrides()
+        overrides(forKind: kind)
     }
 
     /// A stored face read back out: the empty string is the system face.

@@ -44,14 +44,27 @@ final class ReaderChromeGestureTests: XCTestCase {
         // tapping one of those makes XCUITest scroll it into view, which moves the very
         // text this test is watching. The margin keeps the tap out from under the
         // capsule and the control bar, which appear over the page after the first tap.
+        //
+        // And its middle has to be in the band that shows the controls. A tap used to do
+        // that wherever it landed; now that all three renderers answer one page-turn
+        // setting, and it defaults to tapping, only the middle of the page asks for the
+        // chrome and everywhere else turns — `ReaderTapZone.bandStart`/`bandEnd`, which is
+        // 0.3 to 0.7 in both directions. This walk asks for a narrower slice of that,
+        // because the band is measured against the renderer and this is measured against
+        // the window, and the two differ by whatever the safe areas are.
         let paragraphs = app.descendants(matching: .any).matching(identifier: "reader.paragraph")
         XCTAssertTrue(paragraphs.firstMatch.waitForExistence(timeout: 20))
-        let reachable = app.windows.firstMatch.frame.insetBy(dx: 0, dy: 120)
+        let window = app.windows.firstMatch.frame
+        let reachable = window.insetBy(dx: 0, dy: 120)
+        let band = window.insetBy(dx: window.width * 0.4, dy: window.height * 0.4)
         let paragraph = try XCTUnwrap(
             (0..<paragraphs.count)
                 .map { paragraphs.element(boundBy: $0) }
-                .first { reachable.contains($0.frame) },
-            "the reader should have a paragraph fully on screen to watch"
+                .first {
+                    reachable.contains($0.frame)
+                        && band.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY))
+                },
+            "the reader should have a paragraph on screen under the control band"
         )
         let before = paragraph.frame
 

@@ -16,15 +16,13 @@ final class ReaderPageTurnGestureTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        // The renderer and the tap-to-turn setting both come from launch arguments rather
-        // than from tapping them in Settings: tapping would persist the choice into this
+        // The renderer and the page turning both come from launch arguments rather than
+        // from tapping them in Settings: tapping would persist the choice into this
         // simulator and decide what every later test gets. See `ScrollHighlightGestureTests`.
-        // `1` rather than `YES`: the argument domain hands `YES` over as a string, and the
-        // setting is read as `object(forKey:) as? Bool`, which a string fails. A launch
-        // argument that quietly does nothing would leave this walk tapping the chrome and
-        // reporting green — see the guard the first turn makes.
+        // A launch argument that quietly did nothing would leave this walk tapping the
+        // chrome and reporting green — see the guard the first turn makes.
         app.launchArguments = [
-            "-NovelReaderDemoSeed", "-reader.mode", "scroll", "-reader.tapToTurnPage", "1",
+            "-NovelReaderDemoSeed", "-reader.mode", "scroll", "-reader.pageTurn", "tap",
         ]
         app.launch()
     }

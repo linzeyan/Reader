@@ -170,6 +170,40 @@ final class ReaderAppearanceTests: XCTestCase {
         )
     }
 
+    /// Tapping, on every shelf, until a reader says otherwise.
+    ///
+    /// One answer rather than three is the point: the three renderers each arrived at
+    /// their own, so a reader who set this in a novel found comics unchanged. The shelves
+    /// are checked one by one because a default that only reached novels would look right
+    /// from wherever the setting was last edited.
+    func testPagesAreTurnedByTappingUntilAskedOtherwise() {
+        XCTAssertEqual(ReaderSettings(defaults: defaults).pageTurn, .tap)
+        for kind in SiteRule.Kind.allCases {
+            XCTAssertEqual(
+                ReaderSettings(defaults: defaults).resolvedPageTurn(forBook: "book", kind: kind),
+                .tap,
+                "every shelf starts on the same answer"
+            )
+        }
+
+        let settings = ReaderSettings(defaults: defaults)
+        settings.pageTurn = .swipe
+        XCTAssertEqual(
+            ReaderSettings(defaults: defaults).pageTurn, .swipe, "and it survives a launch"
+        )
+    }
+
+    /// What each case means to a renderer, spelled out — the whole of the contract all
+    /// three of them answer, and two booleans that are one `!` away from being backwards.
+    func testEachWayOfTurningSwitchesOffTheOtherAndBothKeepsBoth() {
+        XCTAssertFalse(ReaderSettings.PageTurn.swipe.turnsOnTap)
+        XCTAssertTrue(ReaderSettings.PageTurn.swipe.turnsOnSwipe)
+        XCTAssertTrue(ReaderSettings.PageTurn.tap.turnsOnTap)
+        XCTAssertFalse(ReaderSettings.PageTurn.tap.turnsOnSwipe)
+        XCTAssertTrue(ReaderSettings.PageTurn.both.turnsOnTap)
+        XCTAssertTrue(ReaderSettings.PageTurn.both.turnsOnSwipe)
+    }
+
     // MARK: - What each medium is read in
 
     /// Nothing changes for a reader who never opens this: subscriptions are turned the way
@@ -178,13 +212,13 @@ final class ReaderAppearanceTests: XCTestCase {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .paginated
 
-        XCTAssertNil(settings.feedOverrides.mode)
+        XCTAssertNil(settings.overrides(forKind: .feed).mode)
         XCTAssertEqual(settings.defaultMode(for: .feed), .paginated)
 
-        settings.feedOverrides.mode = .scroll
+        settings.setOverrides(.init(mode: .scroll), forKind: .feed)
         XCTAssertEqual(settings.defaultMode(for: .feed), .scroll)
         XCTAssertEqual(
-            ReaderSettings(defaults: defaults).feedOverrides.mode, .scroll,
+            ReaderSettings(defaults: defaults).overrides(forKind: .feed).mode, .scroll,
             "and it survives a launch"
         )
     }
@@ -196,7 +230,7 @@ final class ReaderAppearanceTests: XCTestCase {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .paginated
 
-        settings.feedOverrides.mode = .scroll
+        settings.setOverrides(.init(mode: .scroll), forKind: .feed)
 
         XCTAssertEqual(settings.resolvedMode(forBook: "feed|blog", kind: .feed), .scroll)
         XCTAssertEqual(settings.resolvedMode(forBook: "site|novel", kind: .novel), .paginated)
@@ -207,7 +241,7 @@ final class ReaderAppearanceTests: XCTestCase {
     func testABooksOwnAnswerOutranksItsMediums() {
         let settings = ReaderSettings(defaults: defaults)
         settings.mode = .paginated
-        settings.feedOverrides.mode = .scroll
+        settings.setOverrides(.init(mode: .scroll), forKind: .feed)
 
         settings.setOverrides(.init(mode: .paginated), forBook: "feed|longform")
 

@@ -24,9 +24,14 @@ struct ComicReaderView: View {
     @State private var model: ComicReaderModel?
     @State private var showControls = false
     @State private var showCatalog = false
-    /// Only for `swipeToGoBack`. Nothing else in here is a type setting — a comic has no
-    /// type — but leaving a book is the same act on every shelf, so it is answered once.
+    /// Nothing in here is a type setting — a comic has no type — but how a book is left
+    /// and how its pages are turned are the same acts on every shelf, so they are answered
+    /// once, in one place, for all three.
     @State private var settings = ReaderSettings.shared
+
+    private var pageTurn: ReaderSettings.PageTurn {
+        settings.resolvedPageTurn(forBook: book.id, kind: book.kind)
+    }
 
     var body: some View {
         ZStack {
@@ -107,14 +112,15 @@ struct ComicReaderView: View {
                 onNeedsPrevious: { Task { await model.loadPrevious() } },
                 onTouch: { model.touch(down: $0) },
                 onTap: { zone in
-                    // A tap on the middle band is the controls, in both readers. The
-                    // return value is what says whether the renderer should also turn.
-                    guard zone == .controls else {
-                        if showControls { showControls = false }
-                        return true
+                    // A tap on the middle band is the controls, in both readers — and so
+                    // is a tap anywhere, for a reader who moves by scrolling. The return
+                    // value is what says whether the renderer should also turn.
+                    guard pageTurn.turnsOnTap, zone != .controls else {
+                        showControls.toggle()
+                        return false
                     }
-                    showControls.toggle()
-                    return false
+                    if showControls { showControls = false }
+                    return true
                 },
                 onTargetReached: { model.clearScrollTarget() }
             )

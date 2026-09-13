@@ -139,6 +139,10 @@ struct PaginatedChapterView: View {
     /// the settings object, for `palette`'s reason: this view is told things, not asked to
     /// go and find them.
     let edgeGoesBack: Bool
+    /// What moves the reader to the next page here — see `ReaderSettings.PageTurn`. This
+    /// is the one renderer where all three answers are real: it is the only one whose
+    /// swiping *is* the page turn rather than the scrolling underneath it.
+    let pageTurn: ReaderSettings.PageTurn
     /// Where the page begins, and how much of the chapter it ends on — the second is
     /// handed over rather than recomputed by the caller because only this view knows
     /// where its pages break. See `report(page:)`.
@@ -295,7 +299,9 @@ struct PaginatedChapterView: View {
                     guard abs(value.translation.width) > 40 else { return }
                     turn(value.translation.width < 0 ? 1 : -1)
                 },
-            including: isSelectingText ? .subviews : .all
+            // Off entirely for a reader who turns pages by tapping: not merely inert, so
+            // that the page does not follow a finger it is going to ignore.
+            including: gestureMask(whenTurning: pageTurn.turnsOnSwipe)
         )
         // Simultaneous, so the tap targets keep working while a drag is possible.
         // The edges turn pages and the middle shows the controls: the same tap that
@@ -311,11 +317,14 @@ struct PaginatedChapterView: View {
                     // decides its own — highlight, then edges, then the middle. A link
                     // takes its place in that order.
                     openURL(url)
-                } else if value.location.x < size.width * 0.25 {
+                } else if pageTurn.turnsOnTap, value.location.x < size.width * 0.25 {
                     turn(-1)
-                } else if value.location.x > size.width * 0.75 {
+                } else if pageTurn.turnsOnTap, value.location.x > size.width * 0.75 {
                     turn(1)
                 } else {
+                    // Every band, for a reader who turns pages by swiping. The control bar
+                    // has to be reachable by tapping *something*, and the middle third of
+                    // a phone is not where a thumb lands.
                     onTapCenter()
                 }
             },
@@ -572,6 +581,13 @@ struct PaginatedChapterView: View {
     }
 
     // MARK: - Paging
+
+    /// Masks a gesture out entirely rather than letting it fire and do nothing, and keeps
+    /// the text-selection rule that applies either way.
+    private func gestureMask(whenTurning turns: Bool) -> GestureMask {
+        guard turns else { return .subviews }
+        return isSelectingText ? .subviews : .all
+    }
 
     /// Whether a drag belongs to iOS rather than to the book: one begun against the
     /// leading edge, while the reader has asked to leave books that way.

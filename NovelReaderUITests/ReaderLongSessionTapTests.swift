@@ -154,11 +154,10 @@ final class ReaderLongSessionTapTests: XCTestCase {
 
     private func launch(preloadChapters: Int, probe: Bool = false) {
         // Renderer and tap zones from launch arguments, not Settings taps, so nothing
-        // persists into the simulator for later tests — see ReaderPageTurnGestureTests
-        // for why the flag is `1` and not `YES`.
+        // persists into the simulator for later tests — see ReaderPageTurnGestureTests.
         app.launchArguments = [
             "-NovelReaderDemoSeed", "-NovelReaderDemoStress",
-            "-reader.mode", "scroll", "-reader.tapToTurnPage", "1",
+            "-reader.mode", "scroll", "-reader.pageTurn", "tap",
             "-reader.stressPreload", String(preloadChapters),
         ]
         if probe { app.launchArguments += ["-reader.probe", "1"] }

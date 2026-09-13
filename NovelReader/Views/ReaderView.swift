@@ -73,6 +73,10 @@ struct ReaderView: View {
         settings.metrics(forBook: book.id, kind: book.kind)
     }
 
+    private var pageTurn: ReaderSettings.PageTurn {
+        settings.resolvedPageTurn(forBook: book.id, kind: book.kind)
+    }
+
     var body: some View {
         #if DEBUG
         // Counted, not printed: this runs at frame rate whenever something in here
@@ -372,7 +376,10 @@ struct ReaderView: View {
             openURL(link)
             return false
         }
-        guard settings.tapToTurnPage, tap.zone != .controls else {
+        // The middle band is the controls however pages are turned, and so is every other
+        // band for a reader who turns them by swiping: a tap has to reach the control bar
+        // from somewhere, and this renderer's somewhere used to be anywhere.
+        guard pageTurn.turnsOnTap, tap.zone != .controls else {
             showControls.toggle()
             return false
         }
@@ -401,6 +408,7 @@ struct ReaderView: View {
                 palette: palette,
                 highlights: model.highlights(inChapter: current.chapter.siteChapterId),
                 edgeGoesBack: settings.swipeToGoBack,
+                pageTurn: pageTurn,
                 onAnchorChange: { anchor, fraction in
                     openAtLastPage = nil
                     // Any page that does turn answers the question the notice asked.

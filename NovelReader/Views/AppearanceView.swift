@@ -191,19 +191,20 @@ struct ReadingAppearanceSections: View {
             .accessibilityIdentifier("reader.settings.customTheme")
         }
 
-        // Always, even where the reader is looking at pages and it can do nothing for
-        // them. It used to hide itself behind the mode in force, which stopped making
-        // sense the moment one book could hold its own: these are the defaults, there
-        // are now three modes that could be in force behind them, and a global switch
-        // that vanishes because *this* book was pinned to pages is a setting the reader
-        // cannot find from the book they are in.
         Section {
-            Toggle("reader.settings.tapToTurn", isOn: $settings.tapToTurnPage)
-                .accessibilityIdentifier("reader.settings.tapToTurn")
+            Picker("reader.settings.pageTurn", selection: $settings.pageTurn) {
+                ForEach(ReaderSettings.PageTurn.allCases) { turn in
+                    Text(turn.nameKey).tag(turn)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("reader.settings.pageTurn")
         } footer: {
-            // Which part of the screen does what, said once, here. A reader who
-            // has to find the zones by tapping finds the wrong one first.
-            Text("reader.settings.tapToTurn.footer")
+            // Which part of the screen does what, and the one thing this cannot promise:
+            // scrolling stays. A reader who has to find the zones by tapping finds the
+            // wrong one first, and one who picks 點擊 expecting the page to stop moving
+            // under their thumb has been told something untrue.
+            Text("reader.settings.pageTurn.footer")
         }
 
         Section {
@@ -228,9 +229,9 @@ struct ReadingAppearanceSections: View {
     /// control sits over a line naming what it would read with if it had not been asked.
     ///
     /// The same controls as the defaults, minus the ones that are not a book's to hold —
-    /// the script conversion, the tap zones, the screen — see `ReaderSettings.Overrides`.
-    /// A panel that offered those under 這本書 and then changed every book would be lying
-    /// about its own heading.
+    /// the script conversion, the way out of a book, the screen — see
+    /// `ReaderSettings.Overrides`. A panel that offered those under 這本書 and then changed
+    /// every book would be lying about its own heading.
     @ViewBuilder
     private func bookSections(_ book: Book) -> some View {
         let overrides = settings.overrides(forBook: book.id)
@@ -333,6 +334,23 @@ struct ReadingAppearanceSections: View {
         } footer: {
             Text("reader.settings.theme.custom.shared")
         }
+
+        Section {
+            Picker("reader.settings.pageTurn", selection: bookPageTurn(book)) {
+                ForEach(ReaderSettings.PageTurn.allCases) { turn in
+                    Text(turn.nameKey).tag(turn)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("reader.settings.pageTurn")
+
+            followLine(
+                String(localized: settings.defaultPageTurn(for: book.kind).nameKey),
+                revert: overrides.pageTurn == nil ? nil : { follow(\.pageTurn, for: book) }
+            )
+        } footer: {
+            Text("reader.settings.pageTurn.footer")
+        }
     }
 
     /// The "follow" row of an inheriting picker, naming what it would inherit.
@@ -378,8 +396,12 @@ struct ReadingAppearanceSections: View {
     /// given one, and what it writes back when the reader picks that row again.
     private var feedMode: Binding<ReaderSettings.Mode?> {
         Binding(
-            get: { settings.feedOverrides.mode },
-            set: { settings.feedOverrides.mode = $0 }
+            get: { settings.overrides(forKind: .feed).mode },
+            set: {
+                var overrides = settings.overrides(forKind: .feed)
+                overrides.mode = $0
+                settings.setOverrides(overrides, forKind: .feed)
+            }
         )
     }
 
@@ -421,6 +443,13 @@ struct ReadingAppearanceSections: View {
         Binding(
             get: { settings.resolvedParagraphSpacing(forBook: book.id, kind: book.kind) },
             set: { write(\.paragraphSpacing, $0, for: book) }
+        )
+    }
+
+    private func bookPageTurn(_ book: Book) -> Binding<ReaderSettings.PageTurn> {
+        Binding(
+            get: { settings.resolvedPageTurn(forBook: book.id, kind: book.kind) },
+            set: { write(\.pageTurn, $0, for: book) }
         )
     }
 

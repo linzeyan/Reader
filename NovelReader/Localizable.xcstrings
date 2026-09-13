@@ -5849,25 +5849,25 @@
       }
     },
     "reader.settings.mode" : {
-      "comment" : "Picker label for how the reader turns text: one continuous scroll, or fixed pages.",
+      "comment" : "Picker label for how text is laid out: one continuous scroll, or fixed pages. Distinct from reader.settings.pageTurn, which is the gesture that moves you.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Page turning"
+            "value" : "Reading style"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "翻页方式"
+            "value" : "阅读方式"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "翻頁方式"
+            "value" : "閱讀方式"
           }
         }
       }
@@ -5964,6 +5964,126 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "捲動"
+          }
+        }
+      }
+    },
+    "reader.settings.pageTurn" : {
+      "comment" : "Picker label for the gesture that moves you through a book. Distinct from reader.settings.mode, which is how the text is laid out.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page turning"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "翻页方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "翻頁方式"
+          }
+        }
+      }
+    },
+    "reader.settings.pageTurn.both" : {
+      "comment" : "Page turning: both a swipe and a tap turn the page.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Both"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "两者"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兩者"
+          }
+        }
+      }
+    },
+    "reader.settings.pageTurn.footer" : {
+      "comment" : "Explains the tap zones, and that scrolling is never taken away.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Where a tap turns pages, the middle of the screen shows the controls, the right side and the bottom go on, and the left side and the top go back. Scrolling still moves you either way."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点击翻页时，画面中央呼出工具栏，右侧与下方往后翻页，左侧与上方往前翻页。无论选哪一种，滚动阅读都还能滚动。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點擊翻頁時，畫面中央叫出工具列，右側與下方往後翻頁，左側與上方往前翻頁。無論選哪一種，捲動閱讀都還能捲動。"
+          }
+        }
+      }
+    },
+    "reader.settings.pageTurn.swipe" : {
+      "comment" : "Page turning: only a swipe turns the page.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipe"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑動"
+          }
+        }
+      }
+    },
+    "reader.settings.pageTurn.tap" : {
+      "comment" : "Page turning: only a tap turns the page.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点击"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點擊"
           }
         }
       }
@@ -6156,54 +6276,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "從畫面左緣往右滑，回到目錄或書櫃，跟 iOS 其他地方一樣。工具列不再顯示返回鍵；分頁模式下，左緣那一條不再往前翻頁。"
-          }
-        }
-      }
-    },
-    "reader.settings.tapToTurn" : {
-      "comment" : "Toggle: turn pages by tapping while scrolling.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tap to Turn Pages"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "点击翻页"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "點擊翻頁"
-          }
-        }
-      }
-    },
-    "reader.settings.tapToTurn.footer" : {
-      "comment" : "Explains the tap zones the toggle switches on.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The middle of the screen shows the controls. The right side and the bottom go on; the left side and the top go back."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "屏幕中央呼出工具栏，右侧与下方往后翻页，左侧与上方往前翻页。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "畫面中央叫出工具列，右側與下方往後翻頁，左側與上方往前翻頁。"
           }
         }
       }
