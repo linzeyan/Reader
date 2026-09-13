@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shufang 書房 — Offline novel, comic &amp; RSS reader for iOS</title>
+<meta name="description" content="A reader where you choose the sources: paste a URL and a novel, comic or feed becomes a book on your shelf, downloaded for offline reading. No account, no ads.">
+<link rel="canonical" href="https://shufang-reader.pages.dev/en/">
+<link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/">
+<link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/">
+<link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/">
+<link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/">
+<meta name="apple-itunes-app" content="app-id=6798525550">
+<meta name="theme-color" content="#6E4C3A">
+<link rel="icon" href="/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="stylesheet" href="/style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="書房 Shufang — a novel &amp; comic reader where you choose the sources">
+<meta property="og:description" content="Paste a URL and a novel, comic or feed becomes a book on your shelf, downloaded for offline reading. TXT and EPUB too. No account, no ads, no data collected.">
+<meta property="og:url" content="https://shufang-reader.pages.dev/en/">
+<meta property="og:image" content="https://shufang-reader.pages.dev/icon.png">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary">
+<!-- The FAQ entries must stay word-for-word identical to the visible #faq section:
+     search engines drop FAQ rich results whose markup and page text disagree. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "書房",
+      "alternateName": "Shufang",
+      "operatingSystem": "iOS 17.0 or later",
+      "applicationCategory": "EntertainmentApplication",
+      "softwareVersion": "1.6.2",
+      "dateModified": "2026-09-13",
+      "description": "A reader where you choose the sources: paste a URL and a novel, comic or feed becomes a book on your shelf, downloaded for offline reading. TXT and EPUB too. No account, no ads, no data collected.",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "installUrl": "https://apps.apple.com/app/id6798525550",
+      "author": { "@type": "Person", "name": "Ze-Yan Lin" },
+      "inLanguage": ["zh-Hant", "zh-Hans", "en"],
+      "image": "https://shufang-reader.pages.dev/icon.png",
+      "screenshot": "https://shufang-reader.pages.dev/img/en/reader.webp"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Does 書房 come with novel or comic sites built in?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. 書房 does not ship with, recommend, or link to any content site; on first launch both the library and the source list are empty. It understands a site only once you paste one of its pages — the same way a browser does." }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I add a source?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Go to Settings → Sources → + → Create from a URL, paste the URL of any book page on the site, and tap Analyse. 書房 opens that page, derives the book, contents and chapter URL patterns, and shows you the title, the chapter count and the opening of chapter one to confirm; the source is saved only after you confirm. A rule file someone else shared can be added with Import from URL or Import file." }
+        },
+        {
+          "@type": "Question",
+          "name": "Which file formats are supported?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Novels: TXT (encoding detected automatically — UTF-8, Big5, GB18030 — and split into chapters by their headings) and EPUB import, with export to TXT or EPUB. Comics: ZIP import and export, laid out as title / chapter / pages. Feeds: RSS, Atom and JSON Feed, with OPML import for a whole list." }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need an account? Does it cost anything?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No account, and nothing to pay: there are no in-app purchases. 書房 is free, with no ads, no analytics and no third-party SDK." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does my reading position sync between iPhone and iPad?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. Bookmarks, custom titles and reading progress sync through your own iCloud account, which the developer cannot reach. Chapter text and the list of downloads stay on each device and are never uploaded." }
+        },
+        {
+          "@type": "Question",
+          "name": "What happens when a site shows a human-verification challenge?",
+          "acceptedAnswer": { "@type": "Answer", "text": "書房 pauses the download and hands the page to you to complete the check yourself, then carries on. It never attempts to bypass any such mechanism." }
+        },
+        {
+          "@type": "Question",
+          "name": "Which devices and languages are supported?",
+          "acceptedAnswer": { "@type": "Answer", "text": "iPhone and iPad on iOS 17 or later. The interface is available in Traditional Chinese, Simplified Chinese and English." }
+        }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <a class="brand" href="/en/"><img src="/icon.png" alt="" width="44" height="44">書房</a>
+    <nav class="langs" aria-label="Language"><a href="/" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a><a href="/zh-Hans/" lang="zh-Hans" hreflang="zh-Hans">简体中文</a></nav>
+    <a class="btn btn-sm" href="https://apps.apple.com/app/id6798525550">App Store</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">iPhone · iPad</p>
+        <h1>A novel &amp; comic reader where you choose the sources</h1>
+        <div class="reading">
+          <p>Novels, comics and web feeds on one shelf. 書房 ships with no sites built in — it understands whatever page you paste, and nothing else.</p>
+          <p>Paste the URL of a book page and it works the site out, turns the book into one on your shelf, and downloads it for offline reading. Your own TXT and EPUB files go on the same shelf.</p>
+        </div>
+        <p class="cta">
+          <a class="badge" href="https://apps.apple.com/app/id6798525550"><picture>
+            <source srcset="/img/badge-en-white.svg" media="(prefers-color-scheme: dark)">
+            <img src="/img/badge-en.svg" alt="Download on the App Store" width="120" height="40">
+          </picture></a>
+          <span class="meta">Free · No ads · iOS 17 or later</span>
+        </p>
+      </div>
+      <figure class="shot">
+        <img src="/img/en/reader.webp" alt="The reader: a Chinese novel set with generous text size and line spacing" width="720" height="1565" fetchpriority="high">
+      </figure>
+    </section>
+
+    <section class="ch">
+      <div>
+        <h2>Paste one link and it works the site out</h2>
+        <p>Paste the URL of a book page. 書房 opens that page, derives the book / contents / chapter URL patterns, and shows you the title, the chapter count and the opening of chapter one to confirm — only then is the source saved. Every other book on that site is then one paste away, and feeds are added the same way.</p>
+      </div>
+      <figure class="derive" aria-label="What the app shows before saving a source">
+        <span class="url">Book page URL</span>
+        <code>https://example.com/book/42</code>
+        <hr>
+        <dl>
+          <dt>Title</dt><dd>星河渡口</dd>
+          <dt>Contents</dt><dd>128 chapters</dd>
+          <dt>Chapter 1</dt><dd>夜渡 <span class="ok">text found</span></dd>
+        </dl>
+      </figure>
+    </section>
+
+    <section class="ch flip">
+      <div>
+        <h2>Download whole books, read offline</h2>
+        <p>Take the whole novel, or tick just the arc you are reading; comics store their images episode by episode. Read in flight mode, in the basement, in dead zones.</p>
+        <p>Deleting has four levels — one chapter, one book, one source, everything — so freeing space never means starting over.</p>
+      </div>
+      <figure class="shot">
+        <img src="/img/en/book.webp" alt="A book page: contents of 128 chapters, downloaded ones marked" width="720" height="1565" loading="lazy">
+      </figure>
+    </section>
+
+    <section class="ch">
+      <div>
+        <h2>Built for long reading sessions</h2>
+        <p>Scrolling or paged, and you can highlight in either. Any Chinese typeface on the device; text size, line spacing and paragraph spacing set independently; a background of your own — a colour, a gradient, or a photograph.</p>
+        <p>A book from a simplified source reads in traditional, and the other way round. Your position is remembered down to the paragraph, not just the chapter.</p>
+      </div>
+      <figure class="shot">
+        <img src="/img/en/settings.webp" alt="Appearance settings: scrolling or paged, typeface, text size, line and paragraph spacing, script conversion" width="720" height="1565" loading="lazy">
+      </figure>
+    </section>
+
+    <section class="ch flip">
+      <div>
+        <h2>Comics take the same road</h2>
+        <p>Paste a URL, let the app build the source, download an episode at a time — comics use the very same flow, on a second shelf. Vertical continuous scrolling, with the episode title and page number always in reach.</p>
+        <p>A whole comic can be exported to ZIP and imported back.</p>
+      </div>
+      <figure class="shot">
+        <img src="/img/en/comic.webp" alt="The comic reader: vertical continuous scrolling with the episode and page number shown at the top" width="720" height="1565" loading="lazy">
+      </figure>
+    </section>
+
+    <section class="ch">
+      <div>
+        <h2>Feeds, and files of your own</h2>
+        <p>RSS, Atom and JSON Feed, with OPML import for a whole list. Articles are downloaded for offline reading and sit in the same recent list as novels and comics.</p>
+        <p>TXT files are decoded automatically (UTF-8, Big5, GB18030) and split into chapters by their headings; EPUB opens as is. A finished book can be exported as TXT or EPUB.</p>
+      </div>
+      <figure class="shot">
+        <img src="/img/en/recent.webp" alt="Recent reading: a comic and two novels in one list, each showing the chapter reached" width="720" height="1565" loading="lazy">
+      </figure>
+    </section>
+
+    <section class="ch">
+      <div>
+        <h2>Collects nothing</h2>
+        <p>No account, no sign-up, no analytics, no ads, no third-party SDK. Bookmarks and progress sync through your own iCloud; chapter text stays on the device. The developer runs no server, so there is nowhere to see what you read.</p>
+        <p><a href="/en/privacy/">Privacy policy</a></p>
+        <p class="cta">
+          <a class="badge" href="https://apps.apple.com/app/id6798525550"><picture>
+            <source srcset="/img/badge-en-white.svg" media="(prefers-color-scheme: dark)">
+            <img src="/img/badge-en.svg" alt="Download on the App Store" width="120" height="40">
+          </picture></a>
+          <span class="meta">Free · No ads · iOS 17 or later</span>
+        </p>
+      </div>
+    </section>
+
+    <section class="ch" id="faq">
+      <div>
+        <h2>Frequently asked questions</h2>
+        <h3>Does 書房 come with novel or comic sites built in?</h3>
+        <p>No. 書房 does not ship with, recommend, or link to any content site; on first launch both the library and the source list are empty. It understands a site only once you paste one of its pages — the same way a browser does.</p>
+        <h3>How do I add a source?</h3>
+        <p>Go to Settings → Sources → + → Create from a URL, paste the URL of any book page on the site, and tap Analyse. 書房 opens that page, derives the book, contents and chapter URL patterns, and shows you the title, the chapter count and the opening of chapter one to confirm; the source is saved only after you confirm. A rule file someone else shared can be added with Import from URL or Import file.</p>
+        <h3>Which file formats are supported?</h3>
+        <p>Novels: TXT (encoding detected automatically — UTF-8, Big5, GB18030 — and split into chapters by their headings) and EPUB import, with export to TXT or EPUB. Comics: ZIP import and export, laid out as title / chapter / pages. Feeds: RSS, Atom and JSON Feed, with OPML import for a whole list.</p>
+        <h3>Do I need an account? Does it cost anything?</h3>
+        <p>No account, and nothing to pay: there are no in-app purchases. 書房 is free, with no ads, no analytics and no third-party SDK.</p>
+        <h3>Does my reading position sync between iPhone and iPad?</h3>
+        <p>Yes. Bookmarks, custom titles and reading progress sync through your own iCloud account, which the developer cannot reach. Chapter text and the list of downloads stay on each device and are never uploaded.</p>
+        <h3>What happens when a site shows a human-verification challenge?</h3>
+        <p>書房 pauses the download and hands the page to you to complete the check yourself, then carries on. It never attempts to bypass any such mechanism.</p>
+        <h3>Which devices and languages are supported?</h3>
+        <p>iPhone and iPad on iOS 17 or later. The interface is available in Traditional Chinese, Simplified Chinese and English.</p>
+      </div>
+    </section>
+
+    <section class="ch">
+      <p class="note">書房 does not provide, host, or index any content. Everything comes from URLs you enter yourself, the same way a browser does. Please make sure the sites you visit comply with your local laws and with those sites' own terms of use.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>© 2026 Ze-Yan Lin</span>
+    <span>Version 1.6.2 · Updated <time datetime="2026-09-13">2026-09-13</time></span>
+    <a href="/en/privacy/">Privacy policy</a>
+    <a href="https://github.com/linzeyan/Reader">Source &amp; issues</a>
+    <a href="/" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a>
+    <a href="/zh-Hans/" lang="zh-Hans" hreflang="zh-Hans">简体中文</a>
+  </footer>
+</div>
+</body>
+</html>

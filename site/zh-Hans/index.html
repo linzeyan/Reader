@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>书房 — 小说、漫画、RSS 离线阅读器｜iPhone、iPad</title>
+<meta name="description" content="来源由你决定的 iOS 阅读器：粘贴网址，小说、漫画或订阅就变成书架上的一本，下载后离线读，也读 TXT 与 EPUB。没有账号、没有广告、不收集数据。">
+<link rel="canonical" href="https://shufang-reader.pages.dev/zh-Hans/">
+<link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/">
+<link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/">
+<link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/">
+<link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/">
+<meta name="apple-itunes-app" content="app-id=6798525550">
+<meta name="theme-color" content="#6E4C3A">
+<link rel="icon" href="/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="stylesheet" href="/style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="书房 — 来源由你决定的小说与漫画阅读器">
+<meta property="og:description" content="粘贴网址，小说、漫画或订阅就变成书架上的一本。下载后离线读，也读 TXT 与 EPUB。没有账号、没有广告、不收集数据。">
+<meta property="og:url" content="https://shufang-reader.pages.dev/zh-Hans/">
+<meta property="og:image" content="https://shufang-reader.pages.dev/icon.png">
+<meta property="og:locale" content="zh_CN">
+<meta name="twitter:card" content="summary">
+<!-- The FAQ entries must stay word-for-word identical to the visible #faq section:
+     search engines drop FAQ rich results whose markup and page text disagree. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "书房",
+      "operatingSystem": "iOS 17.0 或以上",
+      "applicationCategory": "EntertainmentApplication",
+      "softwareVersion": "1.6.2",
+      "dateModified": "2026-09-13",
+      "description": "来源由你决定的阅读器：粘贴网址，小说、漫画或订阅就变成书架上的一本，下载后离线读，也读 TXT 与 EPUB。没有账号、没有广告、不收集数据。",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+      "installUrl": "https://apps.apple.com/app/id6798525550",
+      "author": { "@type": "Person", "name": "Ze-Yan Lin" },
+      "inLanguage": ["zh-Hant", "zh-Hans", "en"],
+      "image": "https://shufang-reader.pages.dev/icon.png",
+      "screenshot": "https://shufang-reader.pages.dev/img/zh-Hans/reader.webp"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "书房有内置小说或漫画网站吗？",
+          "acceptedAnswer": { "@type": "Answer", "text": "没有。书房不内置、不推荐、也不链接任何内容网站，第一次打开时书架与来源列表都是空的。你粘贴哪个网页的网址，它才认得那个网站，就像浏览器一样。" }
+        },
+        {
+          "@type": "Question",
+          "name": "怎么新增一个来源？",
+          "acceptedAnswer": { "@type": "Answer", "text": "到「设置 → 来源 → ＋ → 自动创建来源」，粘贴任何一本书的书籍页网址，点「分析」。书房会实际打开那一页，推导出书籍页、目录与章节页的规则，把书名、章数与第一章开头抓给你确认，确认后才保存。也可以用「从网址导入规则」或「文件导入」加入别人分享的规则文件。" }
+        },
+        {
+          "@type": "Question",
+          "name": "支持哪些文件格式？",
+          "acceptedAnswer": { "@type": "Answer", "text": "小说：TXT（自动判断 UTF-8、Big5、GB18030 编码并按章名分章）与 EPUB 导入，也能导出为 TXT 或 EPUB。漫画：ZIP 导入与导出，文件夹结构为「书名／章节／页面」。订阅：RSS、Atom、JSON Feed，列表可用 OPML 整批导入。" }
+        },
+        {
+          "@type": "Question",
+          "name": "需要账号吗？要付费吗？",
+          "acceptedAnswer": { "@type": "Answer", "text": "不需要账号，也没有任何收费项目或 App 内购买。书房免费，没有广告、没有分析追踪、没有第三方 SDK。" }
+        },
+        {
+          "@type": "Question",
+          "name": "阅读进度会在 iPhone 与 iPad 之间同步吗？",
+          "acceptedAnswer": { "@type": "Answer", "text": "会。书签、自定义书名与阅读进度通过你自己的 iCloud 账号同步，开发者无法访问。章节正文与下载列表留在各设备上，不上传。" }
+        },
+        {
+          "@type": "Question",
+          "name": "网站弹出人机验证怎么办？",
+          "acceptedAnswer": { "@type": "Answer", "text": "书房会暂停下载，把网页交给你自己完成验证，通过后再继续。它不会尝试绕过任何验证机制。" }
+        },
+        {
+          "@type": "Question",
+          "name": "支持哪些设备与语言？",
+          "acceptedAnswer": { "@type": "Answer", "text": "iPhone 与 iPad，iOS 17 以上。界面有简体中文、繁体中文与英文。" }
+        }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <a class="brand" href="/zh-Hans/"><img src="/icon.png" alt="" width="44" height="44">书房</a>
+    <nav class="langs" aria-label="语言"><a href="/" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a><a href="/en/" lang="en" hreflang="en">English</a></nav>
+    <a class="btn btn-sm" href="https://apps.apple.com/app/id6798525550">App Store</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">iPhone・iPad</p>
+        <h1>来源由你决定的<span class="nb">小说与漫画阅读器</span></h1>
+        <div class="reading">
+          <p>小说、漫画、网页订阅，同一个书架。书房不内置任何网站——你粘贴哪个网页，它才认得哪个网站。</p>
+          <p>粘贴一本书的网址，它会自己看懂那个网站的结构，把书变成书架上的一本；整本下载之后，离线也能读。你自己的 TXT 与 EPUB，一样放得进来。</p>
+        </div>
+        <p class="cta">
+          <a class="badge" href="https://apps.apple.com/app/id6798525550"><picture>
+            <source srcset="/img/badge-zh-Hans-white.svg" media="(prefers-color-scheme: dark)">
+            <img src="/img/badge-zh-Hans.svg" alt="在 App Store 下载" width="109" height="40">
+          </picture></a>
+          <span class="meta">免费・没有广告・iOS 17 以上</span>
+        </p>
+      </div>
+      <figure class="shot">
+        <img src="/img/zh-Hans/reader.webp" alt="书房的阅读界面：中文小说正文，字号与行距宽松" width="720" height="1565" fetchpriority="high">
+      </figure>
+    </section>
+
+    <section class="ch">
+      <div>
+        <h2>粘贴一个网址，它自己看懂</h2>
+        <p>粘贴一本书的页面网址，书房会实际打开那一页，推导出「书籍页／目录／章节页」的规则，先把书名、章数与第一章抓给你确认，确认过才保存。之后同一个网站的每一本书，粘贴网址就能加；订阅源也是粘贴网址就能加进来。</p>
+      </div>
+      <figure class="derive" aria-label="自动创建来源时的确认内容">
+        <span class="url">书籍页网址</span>
+        <code>https://example.com/book/42</code>
+        <hr>
+        <dl>
+          <dt>书名</dt><dd>星河渡口</dd>
+          <dt>目录</dt><dd>128 章</dd>
+          <dt>第一章</dt><dd>夜渡 <span class="ok">正文抓得到</span></dd>
+        </dl>
+      </figure>
+    </section>
+
+    <section class="ch flip">
+      <div>
+        <h2>整本下载，离线读</h2>
+        <p>整本下载，或只挑你正在读的那几十章；漫画连图片整话存在设备上。飞行模式、地下室、信号不好的地方照样读。</p>
+        <p>删除分四层：单章、单本、单一来源、全部，清空间不必整本重来。</p>
+      </div>
+      <figure class="shot">
+        <img src="/img/zh-Hans/book.webp" alt="书籍页：目录 128 章，已下载的章节有标记" width="720" height="1565" loading="lazy">
+      </figure>
+    </section>
+
+    <section class="ch">
+      <div>
+        <h2>为长时间阅读调整过</h2>
+        <p>滚动或分页，两种读法都能划线。设备上任何一款中文字体都能用，字号、行距、段距各自可调，背景可以是颜色、渐变或你自己的照片。</p>
+        <p>繁体站的书能整本读成简体，反过来也行。进度记到「读到哪一段」，不只记到哪一章。</p>
+      </div>
+      <figure class="shot">
+        <img src="/img/zh-Hans/settings.webp" alt="外观设置：滚动或分页、字体、字号、行距、段距、简繁转换" width="720" height="1565" loading="lazy">
+      </figure>
+    </section>
+
+    <section class="ch flip">
+      <div>
+        <h2>漫画走同一条路</h2>
+        <p>粘贴网址、自动创建来源、整话下载——漫画用的是同一套流程，书架里多一格。竖向连续滚动，章名与页码随手可见。</p>
+        <p>整部漫画也能导出为 ZIP 带走，或从 ZIP 导回来。</p>
+      </div>
+      <figure class="shot">
+        <img src="/img/zh-Hans/comic.webp" alt="漫画阅读界面：竖向连续滚动，上方显示第 2 话与页码" width="720" height="1565" loading="lazy">
+      </figure>
+    </section>
+
+    <section class="ch">
+      <div>
+        <h2>订阅与你自己的文件</h2>
+        <p>RSS、Atom、JSON Feed 都收，订阅列表可以用 OPML 整批导入。文章下载后离线可读，和小说、漫画排在同一份最近阅读里。</p>
+        <p>TXT 文件会自动判断编码（UTF-8、Big5、GB18030）并按章名分章，EPUB 直接打开；读完也能把整本书导出为 TXT 或 EPUB。</p>
+      </div>
+      <figure class="shot">
+        <img src="/img/zh-Hans/recent.webp" alt="最近阅读：漫画与小说在同一份列表，各自显示读到第几章" width="720" height="1565" loading="lazy">
+      </figure>
+    </section>
+
+    <section class="ch">
+      <div>
+        <h2>不收集你的数据</h2>
+        <p>没有账号、没有注册、没有分析追踪、没有广告、没有第三方 SDK。书签与阅读进度通过你自己的 iCloud 同步，章节正文留在设备上。开发者没有服务器，也就没有地方看到你读什么。</p>
+        <p><a href="/zh-Hans/privacy/">隐私政策全文</a></p>
+        <p class="cta">
+          <a class="badge" href="https://apps.apple.com/app/id6798525550"><picture>
+            <source srcset="/img/badge-zh-Hans-white.svg" media="(prefers-color-scheme: dark)">
+            <img src="/img/badge-zh-Hans.svg" alt="在 App Store 下载" width="109" height="40">
+          </picture></a>
+          <span class="meta">免费・没有广告・iOS 17 以上</span>
+        </p>
+      </div>
+    </section>
+
+    <section class="ch" id="faq">
+      <div>
+        <h2>常见问题</h2>
+        <h3>书房有内置小说或漫画网站吗？</h3>
+        <p>没有。书房不内置、不推荐、也不链接任何内容网站，第一次打开时书架与来源列表都是空的。你粘贴哪个网页的网址，它才认得那个网站，就像浏览器一样。</p>
+        <h3>怎么新增一个来源？</h3>
+        <p>到「设置 → 来源 → ＋ → 自动创建来源」，粘贴任何一本书的书籍页网址，点「分析」。书房会实际打开那一页，推导出书籍页、目录与章节页的规则，把书名、章数与第一章开头抓给你确认，确认后才保存。也可以用「从网址导入规则」或「文件导入」加入别人分享的规则文件。</p>
+        <h3>支持哪些文件格式？</h3>
+        <p>小说：TXT（自动判断 UTF-8、Big5、GB18030 编码并按章名分章）与 EPUB 导入，也能导出为 TXT 或 EPUB。漫画：ZIP 导入与导出，文件夹结构为「书名／章节／页面」。订阅：RSS、Atom、JSON Feed，列表可用 OPML 整批导入。</p>
+        <h3>需要账号吗？要付费吗？</h3>
+        <p>不需要账号，也没有任何收费项目或 App 内购买。书房免费，没有广告、没有分析追踪、没有第三方 SDK。</p>
+        <h3>阅读进度会在 iPhone 与 iPad 之间同步吗？</h3>
+        <p>会。书签、自定义书名与阅读进度通过你自己的 iCloud 账号同步，开发者无法访问。章节正文与下载列表留在各设备上，不上传。</p>
+        <h3>网站弹出人机验证怎么办？</h3>
+        <p>书房会暂停下载，把网页交给你自己完成验证，通过后再继续。它不会尝试绕过任何验证机制。</p>
+        <h3>支持哪些设备与语言？</h3>
+        <p>iPhone 与 iPad，iOS 17 以上。界面有简体中文、繁体中文与英文。</p>
+      </div>
+    </section>
+
+    <section class="ch">
+      <p class="note">书房不提供、不托管、不索引任何内容。所有内容都来自你自己输入的网址，就像浏览器一样。请自行确认你所浏览的网站符合当地法规与该网站的使用条款。</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>© 2026 Ze-Yan Lin</span>
+    <span>版本 1.6.2・<time datetime="2026-09-13">2026-09-13</time> 更新</span>
+    <a href="/zh-Hans/privacy/">隐私政策</a>
+    <a href="https://github.com/linzeyan/Reader">源代码与问题反馈</a>
+    <a href="/" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a>
+    <a href="/en/" lang="en" hreflang="en">English</a>
+  </footer>
+</div>
+</body>
+</html>

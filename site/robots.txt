@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://shufang-reader.pages.dev/sitemap.xml

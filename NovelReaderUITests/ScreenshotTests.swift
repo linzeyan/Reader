@@ -50,8 +50,12 @@ final class ScreenshotTests: XCTestCase {
             .firstMatch.waitForExistence(timeout: 20), "The demo library should be seeded")
         capture("01-library")
 
-        // 2. A book: chapter index with the downloaded ones marked.
-        app.descendants(matching: .any).matching(identifier: "library.book").firstMatch.tap()
+        // 2. A book: chapter index with the downloaded ones marked. Opened by name,
+        // not as the shelf's first row: the shelf groups by source and sorts the
+        // groups in the app's language, and pinyin puts 範例文庫 above 示範書城 while
+        // stroke order puts it below — so in zh-Hans "the first row" was a book with
+        // nothing on disk, and a run with no network shot an error page.
+        libraryRow(titled: "星河渡口").tap()
         let read = app.descendants(matching: .any).matching(identifier: "book.read").firstMatch
         XCTAssertTrue(read.waitForExistence(timeout: 20))
         capture("02-book")
@@ -117,13 +121,13 @@ final class ScreenshotTests: XCTestCase {
         let comics = app.buttons["library.mode.comic"]
         XCTAssertTrue(comics.waitForExistence(timeout: 20))
         comics.tap()
-        let comic = app.descendants(matching: .any).matching(identifier: "library.book").firstMatch
+        let comic = libraryRow(titled: "霜降之城")
         XCTAssertTrue(comic.waitForExistence(timeout: 20), "The demo comics should be seeded")
         capture("08-comic-library")
 
         // 9. The comic reader, on a chapter that is already on the device — a
-        // screenshot run has no network, and the fixture's first row is the book whose
-        // pages are seeded for exactly this reason.
+        // screenshot run has no network, and this is the one comic whose pages are
+        // seeded, which is why it is opened by name like the novel above.
         comic.tap()
         let openComic = app.descendants(matching: .any).matching(identifier: "book.read").firstMatch
         XCTAssertTrue(openComic.waitForExistence(timeout: 20))
@@ -146,6 +150,13 @@ final class ScreenshotTests: XCTestCase {
                 .firstMatch.waitForExistence(timeout: 10)
         )
         capture("09-comic-reader")
+    }
+
+    /// The shelf row for one demo book. Titles are the fixture's, so they read the
+    /// same in every language the walk runs in; the row's position does not.
+    private func libraryRow(titled title: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "library.book")
+            .containing(.staticText, identifier: title).firstMatch
     }
 
     /// Full-screen, device-resolution captures, kept in the result bundle so the

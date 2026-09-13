@@ -95,8 +95,10 @@ enum DemoSeed {
         Source(id: "manga.example.org", name: "範例畫室", kind: .comic),
     ]
 
-    /// Seeded in this order; the library sorts newest-first, so the last one
-    /// listed here is the one a screenshot walk opens.
+    /// Seeded in this order; the shelf sorts newest-first within a source. The
+    /// screenshot walk opens 星河渡口 and 霜降之城 by name — the one book on each
+    /// shelf with chapters on disk and a place kept in one of them — because the
+    /// sources' order on the shelf depends on the language the app runs in.
     ///
     /// Two of the three carry a reading position and one does not, which is what makes
     /// both of the screens that show progress worth shooting: the shelf gets a row of
@@ -111,10 +113,6 @@ enum DemoSeed {
         // The comic shelf, which is a different shelf rather than more rows on the same
         // one — so these do not disturb a single pixel of the novel screenshots. Two of
         // them, because a shelf with one book on it says nothing about being a shelf.
-        //
-        // The one with chapters on disk goes last for the reason given above: the
-        // screenshot walk opens the shelf's first row, and a screenshot run has no
-        // network, so the book it opens has to be the one that needs none.
         DemoBook(siteId: "manga.example.org", bookId: "31", title: "白鳥列車",
                  author: "岑野", chapterCount: 12, downloaded: 0, readingChapter: nil,
                  kind: .comic),

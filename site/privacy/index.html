@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>書房 隱私權政策</title>
+<meta name="description" content="書房不收集你的任何資料：沒有帳號、沒有分析追蹤、沒有廣告、沒有第三方 SDK，也沒有伺服器。這一頁說明 App 處理哪些資料、存在哪裡、會連到哪裡，以及你能怎麼清除。">
+<link rel="canonical" href="https://shufang-reader.pages.dev/privacy/">
+<link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/privacy/">
+<link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/privacy/">
+<link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/privacy/">
+<link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/privacy/">
+<meta name="theme-color" content="#6E4C3A">
+<link rel="icon" href="/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="stylesheet" href="/style.css">
+<meta property="og:type" content="article">
+<meta property="og:title" content="書房 隱私權政策">
+<meta property="og:description" content="書房不收集你的任何資料：沒有帳號、沒有分析追蹤、沒有廣告、沒有第三方 SDK，也沒有伺服器。">
+<meta property="og:url" content="https://shufang-reader.pages.dev/privacy/">
+<meta property="og:image" content="https://shufang-reader.pages.dev/icon.png">
+<meta property="og:locale" content="zh_TW">
+<meta property="article:modified_time" content="2026-09-04T00:00:00+08:00">
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <a class="brand" href="/"><img src="/icon.png" alt="" width="44" height="44">書房</a>
+    <nav class="langs" aria-label="語言"><a href="/zh-Hans/privacy/" lang="zh-Hans" hreflang="zh-Hans">简体中文</a><a href="/en/privacy/" lang="en" hreflang="en">English</a></nav>
+    <a class="btn btn-sm" href="https://apps.apple.com/app/id6798525550">App Store</a>
+  </header>
+
+  <main class="prose">
+    <h1>書房 隱私權政策</h1>
+    <p class="updated">最後更新：<time datetime="2026-09-04">2026 年 9 月 4 日</time></p>
+
+    <h2 id="簡短版">簡短版</h2>
+    <p>書房不收集你的任何資料。沒有帳號、沒有註冊、沒有分析追蹤、沒有廣告、沒有第三方 SDK。開發者看不到你讀什麼、讀到哪裡，也沒有任何伺服器可以看。</p>
+    <h2 id="app-會處理哪些資料存在哪裡">App 會處理哪些資料，存在哪裡</h2>
+    <table>
+    <thead>
+    <tr>
+    <th>資料</th>
+    <th>存在哪裡</th>
+    <th>誰看得到</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td data-l="資料">書籤、自訂書名、閱讀進度</td>
+    <td data-l="存在哪裡">裝置本機資料庫；若你開啟 iCloud 同步，另存於你自己的 iCloud 帳號</td>
+    <td data-l="誰看得到">只有你</td>
+    </tr>
+    <tr>
+    <td data-l="資料">已下載的章節內文</td>
+    <td data-l="存在哪裡">裝置本機檔案</td>
+    <td data-l="誰看得到">只有你。<strong>不會</strong>上傳 iCloud</td>
+    </tr>
+    <tr>
+    <td data-l="資料">你的訂閱清單與已抓下的文章</td>
+    <td data-l="存在哪裡">裝置本機資料庫與檔案</td>
+    <td data-l="誰看得到">只有你。<strong>不會</strong>上傳 iCloud</td>
+    </tr>
+    <tr>
+    <td data-l="資料">你新增的來源設定（規則 JSON）</td>
+    <td data-l="存在哪裡">裝置本機檔案</td>
+    <td data-l="誰看得到">只有你，除非你自己選擇分享出去</td>
+    </tr>
+    <tr>
+    <td data-l="資料">網站 Cookie 與快取</td>
+    <td data-l="存在哪裡">系統的 WebKit 資料區，與 App 一同刪除</td>
+    <td data-l="誰看得到">只有你</td>
+    </tr>
+    <tr>
+    <td data-l="資料">閱讀偏好（字級、主題等）</td>
+    <td data-l="存在哪裡">裝置本機</td>
+    <td data-l="誰看得到">只有你</td>
+    </tr>
+    </tbody>
+    </table>
+    <p>以上所有資料都<strong>不會</strong>傳送給開發者。書房沒有後端伺服器。</p>
+    <h2 id="app-會連到哪裡">App 會連到哪裡</h2>
+    <p>書房只會連向兩種地方：</p>
+    <ol type="1">
+    <li><strong>你自己輸入的網址。</strong> 你貼上哪個網站的連結、訂閱哪個網址，App 就去讀那個位址——小說與漫畫頁面用內建的網頁引擎（WKWebView），行為與你用 Safari 打開它相同；訂閱源文件、封面圖與來源規則則是一般的網路請求。兩者該網站都會看到一般瀏覽器會送出的資訊（IP 位址、User-Agent、Cookie 等）。訂閱會在你每次開啟 App 時各送出一次檢查更新的請求，沒有背景排程。這些網站有各自的隱私權政策，不在本政策涵蓋範圍內。</li>
+    <li><strong>Apple 的 iCloud</strong>（僅在你開啟同步時）。同步經由 Apple 的 <code>NSUbiquitousKeyValueStore</code>，資料存在你自己的 iCloud 帳號中，開發者無法存取。同步內容僅限書籤、自訂書名與閱讀進度；章節內文與下載清單不同步。</li>
+    </ol>
+    <p>書房<strong>不會</strong>連向開發者的伺服器，因為並不存在這樣的伺服器。</p>
+    <h2 id="兒童">兒童</h2>
+    <p>書房不針對 13 歲以下兒童設計，也不會刻意收集兒童資料（事實上不收集任何人的資料）。App 可以載入使用者自行輸入的任意網址，因此年齡分級問卷中已誠實聲明「不受限制的網頁存取」。</p>
+    <h2 id="你的控制權">你的控制權</h2>
+    <ul>
+    <li>刪除已下載內容：App 內提供四個層級——單章、單本、單一來源、全部。</li>
+    <li>移除來源：在「設定 → 來源」中刪除。</li>
+    <li>停止同步：在系統設定中關閉本 App 的 iCloud。</li>
+    <li>全部清除：刪除 App。所有本機資料、Cookie 與快取會一併移除。</li>
+    </ul>
+    <h2 id="政策變更">政策變更</h2>
+    <p>本政策若有變更，會更新頁首日期並隨新版本發布。</p>
+    <h2 id="聯絡">聯絡</h2>
+    <p><a href="mailto:zeyanlin@outlook.com">zeyanlin@outlook.com</a></p>
+  </main>
+
+  <footer class="foot">
+    <span>© 2026 Ze-Yan Lin</span>
+    <a href="/">書房產品頁</a>
+    <a href="https://github.com/linzeyan/Reader">原始碼與問題回報</a>
+    <a href="/zh-Hans/privacy/" lang="zh-Hans" hreflang="zh-Hans">简体中文</a>
+    <a href="/en/privacy/" lang="en" hreflang="en">English</a>
+  </footer>
+</div>
+</body>
+</html>

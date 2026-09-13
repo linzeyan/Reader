@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://shufang-reader.pages.dev/</loc>
+    <lastmod>2026-09-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/"/>
+  </url>
+  <url>
+    <loc>https://shufang-reader.pages.dev/zh-Hans/</loc>
+    <lastmod>2026-09-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/"/>
+  </url>
+  <url>
+    <loc>https://shufang-reader.pages.dev/en/</loc>
+    <lastmod>2026-09-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/"/>
+  </url>
+  <url>
+    <loc>https://shufang-reader.pages.dev/privacy/</loc>
+    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/privacy/"/>
+  </url>
+  <url>
+    <loc>https://shufang-reader.pages.dev/zh-Hans/privacy/</loc>
+    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/privacy/"/>
+  </url>
+  <url>
+    <loc>https://shufang-reader.pages.dev/en/privacy/</loc>
+    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://shufang-reader.pages.dev/zh-Hans/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://shufang-reader.pages.dev/en/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://shufang-reader.pages.dev/privacy/"/>
+  </url>
+</urlset>

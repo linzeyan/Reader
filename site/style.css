@@ -1,0 +1,236 @@
+:root {
+  --desk: #6E4C3A;
+  --paper: #FBF6EE;
+  --ink: #2A211B;
+  --ink-2: #6F6358;
+  --rule: #E5D8C6;
+  --accent: #A4552B;
+  --accent-ink: #FFFFFF;
+  /* Serif only where a CJK serif exists; otherwise fall through to the same sans as
+     the body, so Latin never ends up in Georgia next to Han in PingFang (iOS). */
+  --serif: "Songti TC", "Noto Serif TC", "Source Han Serif TC", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light dark;
+}
+:lang(zh-Hans) {
+  --serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+}
+:lang(en) {
+  --serif: "Iowan Old Style", "Palatino", "Songti TC", "Noto Serif", Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "PingFang TC", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --desk: #120E0B;
+    --paper: #1E1916;
+    --ink: #E8DFD4;
+    --ink-2: #A89C90;
+    --rule: #3A312A;
+    --accent: #D98F5B;
+    --accent-ink: #1E1916;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--desk);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 1.0625rem;
+  line-height: 1.8;
+  -webkit-font-smoothing: antialiased;
+  hanging-punctuation: allow-end;
+}
+a { color: var(--accent); text-underline-offset: .18em; text-decoration-thickness: 1px; }
+a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+img { display: block; max-width: 100%; height: auto; }
+h1, h2 { font-family: var(--serif); font-weight: 600; letter-spacing: .02em; }
+p { margin: 0 0 1em; }
+
+/* One sheet of paper on the desk; on phones the paper is the whole screen. */
+.page {
+  max-width: 64rem;
+  margin: 0 auto;
+  background: var(--paper);
+  padding: clamp(1.25rem, 4vw, 3rem) clamp(1.25rem, 6vw, 5rem) clamp(2rem, 5vw, 4rem);
+}
+@media (min-width: 48rem) {
+  .page { margin: 2.5rem auto; border-radius: 12px; }
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.25rem;
+  margin-bottom: clamp(2.5rem, 7vw, 5rem);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1.125rem;
+}
+.brand img { width: 44px; height: 44px; border-radius: 10px; }
+.langs { display: flex; gap: .75rem; margin-left: auto; font-size: .875rem; }
+.langs a { color: var(--ink-2); text-decoration: none; }
+.langs a:hover { text-decoration: underline; }
+
+.btn {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  line-height: 1.3;
+  padding: .75em 1.5em;
+  border-radius: .8em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.btn:hover { filter: brightness(1.07); }
+.btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.btn-sm { font-size: .9375rem; padding: .55em 1.1em; }
+/* The badge right below the fold says the same thing; a second button just crowds a phone header. */
+@media (max-width: 40rem) { .top .btn { display: none; } }
+
+/* Apple's badge, black on paper and white on the night theme, as their guidelines ask. */
+.badge { display: inline-block; line-height: 0; border-radius: 6px; }
+.badge img { height: 3.25rem; width: auto; }
+
+.hero { display: grid; gap: 2.5rem; align-items: start; }
+.eyebrow {
+  margin: 0 0 .75rem;
+  font-size: .8125rem;
+  letter-spacing: .14em;
+  color: var(--ink-2);
+}
+h1 {
+  font-size: clamp(1.75rem, 1.2rem + 2.6vw, 3rem);
+  line-height: 1.3;
+  margin: 0 0 1.25rem;
+}
+/* Han text breaks between any two characters; on a phone the title would split a word. */
+.nb { white-space: nowrap; }
+h3 {
+  font-family: var(--sans);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  margin: 1.5rem 0 .25rem;
+}
+/* Set the way the app sets a chapter: serif, double leading, a blank between paragraphs. */
+.reading {
+  font-family: var(--serif);
+  font-size: 1.1875rem;
+  line-height: 2;
+  max-width: 36rem;
+}
+.cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.25rem;
+  margin: 1.75rem 0 0;
+}
+.meta { color: var(--ink-2); font-size: .9375rem; }
+
+/* A phone screenshot wider than a phone tells nothing extra; cap it and centre it. */
+.shot { margin: 0 auto; max-width: 18rem; width: 100%; }
+.shot img {
+  border-radius: 24px;
+  border: 1px solid var(--rule);
+  background: #F2F2F7;
+}
+
+.ch {
+  display: grid;
+  gap: 1.5rem;
+  align-items: start;
+  border-top: 1px solid var(--rule);
+  padding-top: clamp(2rem, 5vw, 3rem);
+  margin-top: clamp(2rem, 5vw, 3rem);
+}
+h2 {
+  font-size: 1.625rem;
+  line-height: 1.4;
+  margin: 0 0 .75rem;
+}
+.ch p { max-width: 36rem; }
+
+@media (min-width: 52rem) {
+  .hero { grid-template-columns: minmax(0, 1fr) 17rem; gap: 4rem; }
+  .ch { grid-template-columns: minmax(0, 1fr) 17rem; gap: 4rem; }
+  .ch.flip { grid-template-columns: 17rem minmax(0, 1fr); }
+  .ch.flip .shot { order: -1; }
+}
+
+/* What the app shows before it saves a source, reduced to the three lines that matter. */
+.derive {
+  margin: 0;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  font-size: .9375rem;
+  background: color-mix(in srgb, var(--paper), var(--ink) 3%);
+}
+.derive dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: .4rem 1.25rem;
+}
+.derive dt { color: var(--ink-2); }
+.derive dd { margin: 0; }
+.derive .url { display: block; color: var(--ink-2); }
+.derive code {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .875em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.derive hr { border: 0; border-top: 1px solid var(--rule); margin: .75rem 0; }
+.derive .ok { color: var(--accent); font-weight: 600; }
+
+/* Long-form pages (privacy). */
+.prose { max-width: 40rem; }
+.prose h1 { font-size: clamp(1.75rem, 1.2rem + 2vw, 2.5rem); }
+.prose h2 { font-size: 1.375rem; margin: 2.25rem 0 .5rem; }
+.prose ol, .prose ul { padding-left: 1.25rem; margin: 0 0 1em; }
+.prose li { margin-bottom: .5rem; }
+.prose code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .875em; }
+.prose table { border-collapse: collapse; width: 100%; font-size: .9375rem; margin: 1rem 0 1.5rem; }
+.prose th, .prose td {
+  text-align: left;
+  vertical-align: top;
+  padding: .5rem .75rem .5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.prose th { color: var(--ink-2); font-weight: 600; }
+/* On a phone the three columns become one block per row, each cell labelled by its heading. */
+@media (max-width: 40rem) {
+  .prose thead { display: none; }
+  .prose tr { display: block; padding: .6rem 0; border-bottom: 1px solid var(--rule); }
+  .prose td { display: block; border: 0; padding: .1rem 0; }
+  .prose td::before { content: attr(data-l) "："; color: var(--ink-2); }
+  :lang(en) .prose td::before { content: attr(data-l) ": "; }
+}
+.updated { color: var(--ink-2); font-size: .9375rem; margin-bottom: 2rem; }
+
+.note { font-size: .9375rem; color: var(--ink-2); max-width: 36rem; }
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.5rem;
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule);
+  font-size: .875rem;
+  color: var(--ink-2);
+}
+.foot a { color: inherit; }

@@ -1,0 +1,27 @@
+# 書房（Shufang）
+
+> 來源由你決定的 iPhone／iPad 閱讀器：貼上網址，小說、漫畫或訂閱就變成書櫃裡的一本，下載後離線讀，也讀 TXT 與 EPUB。沒有帳號、沒有廣告、不收集資料。
+> An iPhone/iPad reader where you choose the sources: paste a URL and a novel, comic or feed becomes a book on your shelf, downloaded for offline reading. No account, no ads, no data collected.
+
+## 頁面 / Pages
+
+- [產品頁（繁體中文）](https://shufang-reader.pages.dev/)
+- [产品页（简体中文）](https://shufang-reader.pages.dev/zh-Hans/)
+- [Product page (English)](https://shufang-reader.pages.dev/en/)
+- [隱私權政策](https://shufang-reader.pages.dev/privacy/) · [隐私政策](https://shufang-reader.pages.dev/zh-Hans/privacy/) · [Privacy policy](https://shufang-reader.pages.dev/en/privacy/)
+- [App Store](https://apps.apple.com/app/id6798525550)
+- [原始碼與問題回報 / Source & issues](https://github.com/linzeyan/Reader)
+
+## 事實 / Facts
+
+- 平台：iPhone、iPad，iOS 17 以上。免費，沒有廣告、App 內購買或帳號。
+- 不內建任何內容網站。來源由使用者貼上書籍頁網址自動建立，或匯入規則檔（JSON）。
+- 小說：TXT（自動判斷 UTF-8、Big5、GB18030 並依章名分章）與 EPUB 匯入，可匯出成 TXT 或 EPUB。
+- 漫畫：與小說相同的來源流程；ZIP 匯入與匯出。
+- 訂閱：RSS、Atom、JSON Feed；清單可用 OPML 匯入。
+- 資料：書籤、自訂書名與閱讀進度經使用者自己的 iCloud 同步；章節內文留在裝置。開發者沒有伺服器。
+- 介面語言：正體中文、簡體中文、英文。
+- Platform: iPhone and iPad, iOS 17 or later. Free; no ads, no in-app purchases, no account.
+- Ships with no content sites. Sources are created by the user from a book-page URL, or imported as rule files (JSON).
+- Novels: TXT (UTF-8 / Big5 / GB18030 detected, split into chapters) and EPUB import; export to TXT or EPUB. Comics: ZIP import and export. Feeds: RSS, Atom, JSON Feed; OPML import.
+- Data: bookmarks, custom titles and reading progress sync through the user's own iCloud; chapter text stays on the device. The developer runs no server.
