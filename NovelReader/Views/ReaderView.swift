@@ -282,6 +282,11 @@ struct ReaderView: View {
                     guard model.canLoadPrevious, let first = model.loaded.first else { return }
                     Task { await model.loadPrevious(before: first.chapter.index) }
                 },
+                // Unguarded, unlike the two above: this one is cheap when there is
+                // nothing to do — it sets a flag and returns unless a wall is waiting —
+                // and the flag is the thing that has to be true by the time the retry it
+                // may start comes back.
+                onRanOut: { Task { await model.ranOutOfText() } },
                 onTouch: { down in
                     model.touch(down: down)
                     // A press that turned into a drag was a scroll, not a question. The
@@ -974,6 +979,20 @@ final class ReaderModel {
     private(set) var loaded: [LoadedChapter] = []
     private(set) var isLoading = false
     private(set) var error: String?
+    /// A failure the look-ahead walked into, held back rather than shown.
+    ///
+    /// The next chapter is asked for two windows before the reader reaches it, so a
+    /// failure there is about text they will not want for another minute — and the
+    /// reader is in the middle of a page, which is the worst moment this app has to
+    /// interrupt. Kept here until they run out of text, at which point it stops being
+    /// speculative and `ranOutOfText` tries again in earnest.
+    ///
+    /// Not `error`: that one is on screen, and it is also what stops the renderer
+    /// asking for the same chapter on every scrolled frame — see `canLoadNext`, which
+    /// this has to bar the door for in its place.
+    private var pendingWall: (any Error)?
+    /// Whether the reader has read to the bottom of the loaded text. See `ranOutOfText`.
+    private var ranOut = false
     /// The article the failure on screen is about, when fetching its own page could fix it.
     ///
     /// Non-nil exactly when the piece has no body *and* the publisher gave it an address.
@@ -1255,8 +1274,15 @@ final class ReaderModel {
     /// entry, so re-spawning per frame kept a failing chapter in an eternal spinner:
     /// the retry button was never on screen long enough to exist, and the reader was
     /// walled in with every tap doing nothing.
+    ///
+    /// `pendingWall` bars the same door for the failure that is deliberately *not*
+    /// showing. A look-ahead that walked into a wall says nothing, so `error` is nil —
+    /// and without this the renderer would spend a task per frame rediscovering the
+    /// same wall for the rest of the chapter.
     var canLoadNext: Bool {
-        guard error == nil, !isLoading, let last = loaded.last else { return false }
+        guard error == nil, pendingWall == nil, !isLoading, let last = loaded.last else {
+            return false
+        }
         return chapters.indices.contains(last.chapter.index + 1)
     }
 
@@ -1410,6 +1436,10 @@ final class ReaderModel {
         let mine = generation
         isLoading = true
         error = nil
+        // A fresh attempt supersedes the one that was remembered — including the one a
+        // jump is walking away from, which would otherwise bar `canLoadNext` for the rest
+        // of the book.
+        pendingWall = nil
         summaryOnlyArticle = nil
         defer { isLoading = false }
         do {
@@ -1424,27 +1454,61 @@ final class ReaderModel {
                   loaded.isEmpty || loaded.last?.chapter.index == chapter.index - 1
             else { return }
             loaded.append(content)
+            // There is text under the reader again, so the next failure is once more a
+            // failure of something they are not yet waiting on.
+            ranOut = false
             probe("append idx=\(chapter.index) rows=\(content.paragraphs.count)")
             startReadingAhead()
         } catch {
             guard mine == generation else { return }
-            // A challenge or a sign-in gate has to reach the shell so the sheet can
-            // be presented; everything else stays inline so the user keeps their
-            // scroll position.
-            if WebFetcher.needsTheUser(error) {
-                // Named, because this is the one the reader is least likely to guess:
-                // the scrolling reader has no chapter boundary to see, so crossing a
-                // seam looks like carrying on reading the same page.
-                env.report(error, doing: .chapter(book.shownName))
-            }
-            self.error = error.localizedDescription
-            // Only where there is a page to go and read instead. A feed that published no
-            // link either has left nothing to offer, and a button that could not act is
-            // what this whole screen exists to stop happening.
-            if case FeedService.FeedError.emptyArticle = error, articleLink(of: chapter) != nil {
-                summaryOnlyArticle = chapter
+            // Only said out loud when the reader has nothing left to read: either this
+            // was the chapter that was going to fill an empty screen, or they have
+            // scrolled all the way down to where it should have been. A chapter asked
+            // for two windows early is one they will not reach for another minute, and
+            // interrupting the page they are on to report it — a card over the text and
+            // a full-screen wall over that — is answering a question nobody asked yet.
+            // It is remembered instead, and `ranOutOfText` picks it up on arrival.
+            if loaded.isEmpty || ranOut {
+                surface(error, of: chapter)
+            } else {
+                pendingWall = error
             }
         }
+    }
+
+    /// Reports a failed chapter to the reader, and to the shell where it needs a human.
+    private func surface(_ error: any Error, of chapter: Chapter) {
+        // A challenge or a sign-in gate has to reach the shell so the sheet can
+        // be presented; everything else stays inline so the user keeps their
+        // scroll position.
+        if WebFetcher.needsTheUser(error) {
+            // Named, because this is the one the reader is least likely to guess:
+            // the scrolling reader has no chapter boundary to see, so crossing a
+            // seam looks like carrying on reading the same page.
+            env.report(error, doing: .chapter(book.shownName))
+        }
+        self.error = error.localizedDescription
+        // Only where there is a page to go and read instead. A feed that published no
+        // link either has left nothing to offer, and a button that could not act is
+        // what this whole screen exists to stop happening.
+        if case FeedService.FeedError.emptyArticle = error, articleLink(of: chapter) != nil {
+            summaryOnlyArticle = chapter
+        }
+    }
+
+    /// The reader has read to the bottom of what is loaded.
+    ///
+    /// Where a wall the look-ahead met quietly becomes the reader's problem — and the
+    /// first thing done about it is to try again rather than to report it. The earlier
+    /// attempt was made a minute of reading ago, against a check that may since have
+    /// cleared itself or a clearance that has since been renewed; this is the request
+    /// the reader is actually waiting on, and the one worth spending. If it fails too,
+    /// `append` says so, because by then `ranOut` is set.
+    func ranOutOfText() async {
+        ranOut = true
+        guard pendingWall != nil, !isLoading else { return }
+        pendingWall = nil
+        await loadNext()
     }
 
     /// Fetches the piece from its own page and shows it, for an article that arrived

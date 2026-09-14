@@ -92,6 +92,14 @@ struct ReaderScrollingText: UIViewRepresentable {
     let onPlaceChange: (ReaderPlace) -> Void
     let onNeedsNext: () -> Void
     let onNeedsPrevious: () -> Void
+    /// The reader has read to the bottom of what is loaded and there is nothing under
+    /// them any more.
+    ///
+    /// Distinct from `onNeedsNext`, which fires two windows early so the next chapter is
+    /// there before it is needed: a fetch made that far ahead is not one the reader is
+    /// waiting on, and a wall it walks into is not yet worth saying anything about. This
+    /// is the moment it becomes worth saying.
+    let onRanOut: () -> Void
     /// Whether a finger is on the glass, which is what holds back an insert above the
     /// reader — see `ReaderModel.showPreviousChapter` — and, going down, the one signal
     /// that tells a deliberate press apart from a thumb that rested before it dragged.
@@ -458,18 +466,30 @@ final class ReaderScrollCoordinator {
     /// twice.
     private static let leadWindows: CGFloat = 2
 
+    /// How little may remain under the reader before they count as having run out.
+    ///
+    /// Not zero: the scroll view rubber-bands past the end and the last line rarely
+    /// divides into a whole window, so "exactly nothing left" is a position the reader
+    /// passes through rather than rests at. A tenth of a screen is close enough to the
+    /// bottom that there is nothing left to read and not so close that it needs the
+    /// reader to hold still at a pixel.
+    private static let ranOutWindows: CGFloat = 0.1
+
     private func askForMoreIfNeeded() {
         guard let config, let view, !placed.isEmpty else { return }
-        let lead = view.visibleHeight * Self.leadWindows
-        if contentHeight - (view.readingOffset + view.visibleHeight) < lead {
+        let below = contentHeight - (view.readingOffset + view.visibleHeight)
+        if below < view.visibleHeight * Self.leadWindows {
             config.onNeedsNext()
+        }
+        if below < view.visibleHeight * Self.ranOutWindows {
+            config.onRanOut()
         }
         // Only when actually heading up: a landing sits at the head of its chapter,
         // which is inside any useful lead, and pulling the previous chapter in there
         // is the open that visibly runs backwards. Unlike the old renderer this cannot
         // shove the reader — the insert is exact — but it would still spend a request
         // nobody asked for.
-        if view.isMovingUp, view.readingOffset < lead {
+        if view.isMovingUp, view.readingOffset < view.visibleHeight * Self.leadWindows {
             config.onNeedsPrevious()
         }
     }

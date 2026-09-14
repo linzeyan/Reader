@@ -110,13 +110,22 @@ final class ReaderChapterAppendTests: XCTestCase {
         )
     }
 
-    /// A chapter that will not load stops being asked for.
+    /// A chapter that will not load stops being asked for — and says nothing until the
+    /// reader is actually waiting on it.
     ///
-    /// The renderer asks on every scrolled frame the reader spends inside the prefetch
-    /// lead, and `append` clears the error on entry — so an ask that ignored the failure
-    /// kept the chapter in an eternal spinner. The retry button was never on screen long
-    /// enough to exist and the reader was walled in with every tap doing nothing.
-    func testAChapterThatWillNotLoadStopsBeingAskedFor() async throws {
+    /// The renderer asks two windows early, on every scrolled frame the reader spends
+    /// inside that lead, and `append` clears the error on entry — so an ask that ignored
+    /// the failure kept the chapter in an eternal spinner. The retry button was never on
+    /// screen long enough to exist and the reader was walled in with every tap doing
+    /// nothing.
+    ///
+    /// Silent because of where the reader is when it happens: two windows of lead is a
+    /// minute of reading, and a Cloudflare wall thrown over a page somebody is 88% of the
+    /// way through is the app interrupting them about text they have not reached. It is
+    /// held until they run out — and then tried again rather than merely reported, since
+    /// by that point the earlier attempt is a minute stale and this is the request they
+    /// are genuinely waiting on.
+    func testAChapterThatWillNotLoadStopsBeingAskedForAndWaitsToSaySo() async throws {
         let model = ReaderModel(book: book, env: env)
         await model.start(at: .chapterStart("c2"))
         XCTAssertTrue(
@@ -126,12 +135,21 @@ final class ReaderChapterAppendTests: XCTestCase {
 
         await model.loadNext()
 
-        XCTAssertNotNil(
-            model.error, "the fixture has to actually fail, or this asserts nothing"
-        )
         XCTAssertFalse(
             model.canLoadNext,
-            "one failure, one visible retry — not one request per frame"
+            "one failure, one retry — not one request per frame"
+        )
+        XCTAssertNil(
+            model.error,
+            "and nothing on screen: the reader is mid-chapter and has not asked for this"
+        )
+
+        await model.ranOutOfText()
+
+        XCTAssertNotNil(
+            model.error,
+            "arriving at the seam tries again, and the second failure is theirs to see — "
+                + "a nil here would also mean the fixture never failed at all"
         )
     }
 

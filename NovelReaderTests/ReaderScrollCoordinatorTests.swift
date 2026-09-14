@@ -63,7 +63,9 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
     private func text(
         _ chapters: [ReaderModel.LoadedChapter],
         palette: ReaderPalette = .light,
-        onPlaceChange: @escaping (ReaderPlace) -> Void = { _ in }
+        onPlaceChange: @escaping (ReaderPlace) -> Void = { _ in },
+        onNeedsNext: @escaping () -> Void = {},
+        onRanOut: @escaping () -> Void = {}
     ) -> ReaderScrollingText {
         ReaderScrollingText(
             chapters: chapters,
@@ -71,7 +73,8 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             palette: palette,
             highlights: [:], marked: nil,
             target: nil, footer: .none,
-            onPlaceChange: onPlaceChange, onNeedsNext: {}, onNeedsPrevious: {},
+            onPlaceChange: onPlaceChange, onNeedsNext: onNeedsNext, onNeedsPrevious: {},
+            onRanOut: onRanOut,
             onTouch: { _ in }, onTap: { _ in false }, onMark: { _, _ in },
             onTargetReached: {}
         )
@@ -82,8 +85,14 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
     /// The wait is the contract, not a workaround: columns are laid out on a background
     /// queue and handed over, which is the only reason a whole chapter can be measured
     /// at once. Awaiting yields the main actor, which is what lets them arrive.
-    private func show(_ chapters: [ReaderModel.LoadedChapter]) async throws {
-        coordinator.update(with: text(chapters))
+    private func show(
+        _ chapters: [ReaderModel.LoadedChapter],
+        onNeedsNext: @escaping () -> Void = {},
+        onRanOut: @escaping () -> Void = {}
+    ) async throws {
+        coordinator.update(
+            with: text(chapters, onNeedsNext: onNeedsNext, onRanOut: onRanOut)
+        )
         let deadline = ContinuousClock.now.advanced(by: .seconds(10))
         while coordinator.placed.count < chapters.count {
             guard ContinuousClock.now < deadline else {
@@ -94,6 +103,39 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             }
             try await Task.sleep(for: .milliseconds(10))
         }
+    }
+
+    // MARK: - Wanting more, and running out
+
+    /// The next chapter is asked for two windows early so that it is there before the
+    /// reader arrives. Running out is a different moment entirely, and everything the
+    /// reader sees when that fetch fails turns on the two being told apart: at the first
+    /// there is a page and a half still to read and nothing worth interrupting them for,
+    /// at the second there is nothing under them at all. Reporting a failed look-ahead as
+    /// though it were the second is what put a full-screen verification wall over a
+    /// chapter somebody was 88% of the way through.
+    func testWantingTheNextChapterAndRunningOutAreDifferentMoments() async throws {
+        var wantedMore = 0
+        var ranOut = 0
+        try await show(
+            [chapter(1, paragraphs: 80)],
+            onNeedsNext: { wantedMore += 1 },
+            onRanOut: { ranOut += 1 }
+        )
+        let screen = view.visibleHeight
+        // Tall enough to have a bottom the reader can be well short of.
+        XCTAssertGreaterThan(coordinator.contentHeight, screen * 4)
+
+        // Inside the lead, a page and a half of text still below the window.
+        view.contentOffset.y = coordinator.contentHeight - screen - screen * 1.5
+        coordinator.scrolled()
+        XCTAssertGreaterThan(wantedMore, 0, "the next chapter should be fetched early")
+        XCTAssertEqual(ranOut, 0, "but there is still a page and a half to read")
+
+        // The foot of the loaded text, with nothing under them.
+        view.contentOffset.y = coordinator.contentHeight - screen
+        coordinator.scrolled()
+        XCTAssertGreaterThan(ranOut, 0, "now the reader has arrived at the seam")
     }
 
     // MARK: - The guarantee
