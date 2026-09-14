@@ -52,6 +52,19 @@ extension XCUIApplication {
         openTab(.library, timeout: timeout)
     }
 
+    /// The seeded novel that has chapters on the device, by name.
+    ///
+    /// Not the first row. Which source heads the shelf is not fixed — it follows the
+    /// reader's sort now that each heading stands for the book of its own that sorts
+    /// first, and it followed the app's language before that — so the top row is
+    /// whichever book happens to be newest, and 霧都舊事 has nothing downloaded. A walk
+    /// that opens it gets an empty reader and reports it as a renderer that failed to
+    /// come up. The screenshot walk has always named this book for the same reason.
+    func demoNovelRow() -> XCUIElement {
+        descendants(matching: .any).matching(identifier: "library.book")
+            .containing(.staticText, identifier: "星河渡口").firstMatch
+    }
+
     /// The label of the topmost paragraph with any part on screen — enough to tell whether
     /// the text moved at all, which is the one thing a tap that turned nothing looks like.
     ///

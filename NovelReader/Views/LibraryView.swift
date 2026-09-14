@@ -280,13 +280,23 @@ struct LibraryView: View {
         // from the environment.
         @Bindable var settings = env.librarySettings
         return Menu {
+            // Two unlabelled runs of checkmarks, divided by a rule. Not for want of
+            // trying: a menu draws neither an inline picker's own label nor the title of
+            // a `Section` wrapped around one — both were built and photographed, and
+            // both came out as bare rows. What keeps the second run readable is that it
+            // opens with 「不分組」, which no reader takes for a sort order.
             Picker("library.sort", selection: $settings.sort) {
                 ForEach(LibrarySort.allCases) { sort in
                     Text(sort.nameKey).tag(sort)
                 }
             }
             .pickerStyle(.inline)
-            Toggle("library.groupBySource", isOn: $settings.groupBySource)
+            Picker("library.grouping", selection: $settings.grouping) {
+                ForEach(groupings) { grouping in
+                    Text(grouping.nameKey).tag(grouping)
+                }
+            }
+            .pickerStyle(.inline)
             Toggle(
                 env.mediaMode == .feed ? "library.filter.unread" : "library.filter.newChapters",
                 isOn: $settings.onlyWithNewChapters
@@ -302,6 +312,18 @@ struct LibraryView: View {
             )
         }
         .accessibilityIdentifier("library.arrange")
+    }
+
+    /// The arrangements this shelf can actually be in.
+    ///
+    /// A subscription has no author — see `AppEnvironment.shelfGrouping` — so the two
+    /// that divide by one are left out where they would divide nothing. That resolution
+    /// is in the environment as well as here, because the choice is one setting across
+    /// all three shelves and can be made on a shelf that has authors.
+    private var groupings: [LibraryGrouping] {
+        env.mediaMode == .feed
+            ? LibraryGrouping.allCases.filter { !$0.reachesAuthors }
+            : LibraryGrouping.allCases
     }
 
     /// Determinate, because an import is long enough that a spinner alone would
@@ -442,11 +464,17 @@ struct LibraryView: View {
                 // Two branches rather than a header that conditionally draws
                 // nothing: an empty header still takes vertical space in an
                 // inset-grouped list, which would leave the flat shelf with a gap
-                // above its first book.
+                // above its first book. It is also what decides whether the section
+                // folds: one with no heading has nothing to tap and is the whole
+                // shelf besides.
                 if let name = section.name {
-                    Section(name) { rows(section.books) }
+                    Section {
+                        if !env.librarySettings.isFolded(section.id) { contents(section) }
+                    } header: {
+                        sectionHeader(name, of: section)
+                    }
                 } else {
-                    Section { rows(section.books) }
+                    Section { contents(section) }
                 }
             }
         }
@@ -465,6 +493,83 @@ struct LibraryView: View {
             }
             Button("common.cancel", role: .cancel) { confirmingLocalDelete = nil }
         }
+    }
+
+    /// A heading that folds the whole section shut.
+    ///
+    /// Hand-built out of a button, rather than the `Section(_:isExpanded:)` the SDK grew
+    /// for exactly this. That initializer was tried first and measured to do nothing under
+    /// `.insetGrouped`: no triangle, and the header does not take a tap. Apple documents it
+    /// against the sidebar style, and a shelf is not one.
+    ///
+    /// No font or colour is set, so the heading keeps the styling the list gives a section
+    /// header — the point is to add a triangle to the heading the shelf already had, not
+    /// to draw a new kind of row.
+    private func sectionHeader(_ name: String, of section: LibrarySection) -> some View {
+        let folded = env.librarySettings.isFolded(section.id)
+        return Button {
+            withAnimation(.snappy(duration: 0.2)) {
+                env.librarySettings.setFolded(!folded, id: section.id)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(name)
+                Spacer()
+                Text(verbatim: "\(section.bookCount)").monospacedDigit()
+                // Trailing, where a `DisclosureGroup` puts its own. The author level
+                // inside this section is one, and a shelf whose two foldable levels
+                // keep their triangles on opposite edges reads as two mechanisms.
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(folded ? -90 : 0))
+            }
+            // The whole width of the heading, not the few characters in it: this is the
+            // widest thing in the section and it is what the reader aims at.
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        // Not "library.source": the same heading is an author when the shelf divides by
+        // one, and what the identifier names is the level, not what happens to be on it.
+        .accessibilityIdentifier("library.section")
+    }
+
+    /// One section's rows: the authors it holds, then the books that are nobody's cohort.
+    ///
+    /// Authors above rather than interleaved with the loose books. Both orders are
+    /// defensible — interleaving would float a book read this morning above a group last
+    /// opened weeks ago — but a level that is sometimes a foldable row and sometimes a
+    /// book, reshuffling as the reader reads, is a list that never looks the same twice.
+    @ViewBuilder
+    private func contents(_ section: LibrarySection) -> some View {
+        ForEach(section.groups) { group in
+            DisclosureGroup(isExpanded: open(group.id)) {
+                rows(group.books)
+            } label: {
+                HStack {
+                    Text(group.name)
+                    Spacer()
+                    // How many are behind the triangle. A folded row that does not say
+                    // what it is holding is a row nobody opens twice.
+                    Text(verbatim: "\(group.books.count)")
+                        .font(.footnote)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("library.author")
+            }
+        }
+        rows(section.books)
+    }
+
+    /// Whether a heading is open, which is the opposite of what is stored: the shelf
+    /// remembers the folded ones, because everything starts open — see
+    /// `LibrarySettings.folded`.
+    private func open(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { !env.librarySettings.isFolded(id) },
+            set: { env.librarySettings.setFolded(!$0, id: id) }
+        )
     }
 
     @ViewBuilder

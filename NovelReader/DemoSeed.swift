@@ -37,6 +37,11 @@ enum DemoSeed {
         for rule in env.sites.rules { try? env.sites.remove(id: rule.id) }
         try? env.downloads.delete(.everything)
         for book in (try? env.repo.allBooks()) ?? [] { try? env.repo.removeBookmark(bookId: book.id) }
+        // The shelf's folded headings too, which are not in the library but are part of
+        // what it looks like. They outlive the launch that made them, so a walk that
+        // folded a source left every later one starting behind a heading it never
+        // closed — with the wrong book under the finger.
+        env.librarySettings.unfoldEverything()
 
         for source in sources { _ = try? env.sites.importRule(data: source.ruleJSON) }
         for book in books { seed(book, into: env) }
@@ -104,8 +109,11 @@ enum DemoSeed {
     /// both of the screens that show progress worth shooting: the shelf gets a row of
     /// each kind, and the reading history gets a list rather than a single entry.
     private static let books = [
+        // Shares an author with 星河渡口 below, and on the same source, so that the shelf
+        // has one author cohort to fold — the arrangement that divides by author has
+        // nothing to show on a library where everybody wrote one book.
         DemoBook(siteId: "demo.example.com", bookId: "2087", title: "山海拾遺",
-                 author: "陳知白", chapterCount: 210, downloaded: 6, readingChapter: 40),
+                 author: "沈聞舟", chapterCount: 210, downloaded: 6, readingChapter: 40),
         DemoBook(siteId: "demo.example.com", bookId: "1042", title: "星河渡口",
                  author: "沈聞舟", chapterCount: 128, downloaded: 12, readingChapter: 3),
         DemoBook(siteId: "books.example.org", bookId: "5513", title: "霧都舊事",

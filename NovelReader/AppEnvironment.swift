@@ -333,10 +333,24 @@ final class AppEnvironment {
         LibraryShelf.sections(
             from: sources(of: shelfBooks),
             sort: librarySettings.sort,
-            groupBySource: librarySettings.groupBySource,
+            grouping: shelfGrouping,
             onlyWithNewChapters: librarySettings.onlyWithNewChapters,
             newChapterCounts: newChapterCounts
         )
+    }
+
+    /// What this shelf is divided by, which is not always what the reader picked.
+    ///
+    /// A subscription has no author: `FeedService` records none, because a feed is a
+    /// site's whole output rather than one person's. So the two arrangements that divide
+    /// by author would leave every article in the undivided remainder, which looks
+    /// exactly like not having chosen them — and the shelf falls back to the half of the
+    /// choice that still means something. `LibraryView` also keeps those two out of the
+    /// menu there, so this is the answer for a choice made on another shelf.
+    var shelfGrouping: LibraryGrouping {
+        let chosen = librarySettings.grouping
+        guard mediaMode == .feed, chosen.reachesAuthors else { return chosen }
+        return chosen.keepsSources ? .source : .none
     }
 
     // MARK: - Mutations that must also reach iCloud

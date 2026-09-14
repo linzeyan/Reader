@@ -111,13 +111,16 @@ final class LibraryShelfTests: XCTestCase {
     func testFilteringKeepsEachSourceInItsOwnSection() {
         let sources = [
             LibrarySource(siteId: "alpha", name: "Alpha", books: [
-                book(id: "a1", title: "有新章"), book(id: "a2", title: "沒新章"),
+                book(id: "a1", title: "有新章", addedAt: day(6)),
+                book(id: "a2", title: "沒新章", addedAt: day(5)),
             ]),
-            LibrarySource(siteId: "beta", name: "Beta", books: [book(id: "b1", title: "也有新章")]),
+            LibrarySource(siteId: "beta", name: "Beta", books: [
+                book(id: "b1", title: "也有新章", addedAt: day(2)),
+            ]),
         ]
 
         let sections = LibraryShelf.sections(
-            from: sources, sort: .added, groupBySource: true,
+            from: sources, sort: .added, grouping: .source,
             onlyWithNewChapters: true, newChapterCounts: ["a1": 2, "b1": 5]
         )
 
@@ -134,7 +137,7 @@ final class LibraryShelfTests: XCTestCase {
         ]
 
         let sections = LibraryShelf.sections(
-            from: sources, sort: .added, groupBySource: true,
+            from: sources, sort: .added, grouping: .source,
             onlyWithNewChapters: true, newChapterCounts: ["a1": 1]
         )
 
@@ -147,7 +150,7 @@ final class LibraryShelfTests: XCTestCase {
         let sources = [LibrarySource(siteId: "alpha", name: "Alpha", books: [book(id: "a1", title: "書")])]
 
         let sections = LibraryShelf.sections(
-            from: sources, sort: .added, groupBySource: true,
+            from: sources, sort: .added, grouping: .source,
             onlyWithNewChapters: true, newChapterCounts: [:]
         )
 
@@ -172,7 +175,7 @@ final class LibraryShelfTests: XCTestCase {
         ]
 
         let sections = LibraryShelf.sections(
-            from: sources, sort: .added, groupBySource: false,
+            from: sources, sort: .added, grouping: .none,
             onlyWithNewChapters: false, newChapterCounts: [:]
         )
 
@@ -190,7 +193,7 @@ final class LibraryShelfTests: XCTestCase {
         ]
 
         let sections = LibraryShelf.sections(
-            from: sources, sort: .title, groupBySource: false,
+            from: sources, sort: .title, grouping: .none,
             onlyWithNewChapters: true, newChapterCounts: ["a1": 1]
         )
 
@@ -211,15 +214,202 @@ final class LibraryShelfTests: XCTestCase {
         ]
 
         XCTAssertEqual(settings.sort, .added)
-        XCTAssertTrue(settings.groupBySource)
+        XCTAssertEqual(settings.grouping, .source)
         XCTAssertFalse(settings.onlyWithNewChapters)
+        XCTAssertTrue(settings.folded.isEmpty, "and every heading open")
 
         let sections = LibraryShelf.sections(
-            from: sources, sort: settings.sort, groupBySource: settings.groupBySource,
+            from: sources, sort: settings.sort, grouping: settings.grouping,
             onlyWithNewChapters: settings.onlyWithNewChapters, newChapterCounts: [:]
         )
         XCTAssertEqual(sections.map(\.name), ["Alpha"])
         XCTAssertEqual(sections.first?.books.map(\.id), ["new", "old"])
+    }
+
+    // MARK: - Which heading comes first
+
+    /// The headings are in the reader's order too, which they did not used to be: they
+    /// sat in the order the settings screen lists rules in, so the sort reached the books
+    /// and stopped. With "recently read" chosen and a dozen sources folded shut, the book
+    /// read this morning could be three headings down — a shelf arranged by a rule the
+    /// reader never picked.
+    func testSourcesAreOrderedByTheBookOfTheirsThatSortsFirst() {
+        let sources = [
+            LibrarySource(siteId: "alpha", name: "Alpha", books: [
+                read(book(id: "a1", title: "A"), at: day(2)),
+            ]),
+            LibrarySource(siteId: "beta", name: "Beta", books: [
+                read(book(id: "b1", title: "B"), at: day(9)),
+                read(book(id: "b2", title: "B2"), at: day(1)),
+            ]),
+        ]
+
+        let sections = LibraryShelf.sections(
+            from: sources, sort: .recentlyRead, grouping: .source,
+            onlyWithNewChapters: false, newChapterCounts: [:]
+        )
+
+        XCTAssertEqual(
+            sections.map(\.id), ["beta", "alpha"],
+            "the source holding the most recently read book comes first"
+        )
+    }
+
+    // MARK: - Authors
+
+    /// The threshold, which is the whole of what makes this arrangement readable: a shelf
+    /// of forty books by forty people would otherwise become forty foldable rows with one
+    /// book behind each, which is a disclosure triangle in front of nothing.
+    func testOnlyAnAuthorWithMoreThanOneBookHereBecomesAGroup() {
+        let sources = [
+            LibrarySource(siteId: "alpha", name: "Alpha", books: [
+                book(id: "a1", title: "一", author: "貓膩", addedAt: day(9)),
+                book(id: "a2", title: "二", author: "貓膩", addedAt: day(8)),
+                book(id: "a3", title: "三", author: "忘語", addedAt: day(7)),
+                book(id: "a4", title: "四", author: nil, addedAt: day(6)),
+                book(id: "a5", title: "五", author: "   ", addedAt: day(5)),
+            ]),
+        ]
+
+        let sections = LibraryShelf.sections(
+            from: sources, sort: .added, grouping: .sourceThenAuthor,
+            onlyWithNewChapters: false, newChapterCounts: [:]
+        )
+
+        let section = try? XCTUnwrap(sections.first)
+        XCTAssertEqual(section?.groups.map(\.name), ["貓膩"])
+        XCTAssertEqual(section?.groups.first?.books.map(\.id), ["a1", "a2"])
+        XCTAssertEqual(
+            section?.books.map(\.id), ["a3", "a4", "a5"],
+            "one book by an author, no author at all, and a blank one are all just books"
+        )
+    }
+
+    /// What a folded heading says it is holding has to be everything under it, cohorts
+    /// included — a section that folds two authors and one loose book away and then
+    /// claims one is worse than saying nothing.
+    func testASectionCountsTheBooksAtBothOfItsLevels() {
+        let sources = [
+            LibrarySource(siteId: "alpha", name: "Alpha", books: [
+                book(id: "a1", title: "一", author: "貓膩", addedAt: day(9)),
+                book(id: "a2", title: "二", author: "貓膩", addedAt: day(8)),
+                book(id: "a3", title: "三", author: "忘語", addedAt: day(7)),
+                book(id: "a4", title: "四", author: "忘語", addedAt: day(6)),
+                book(id: "a5", title: "五", author: nil, addedAt: day(5)),
+            ]),
+        ]
+
+        let sections = LibraryShelf.sections(
+            from: sources, sort: .added, grouping: .sourceThenAuthor,
+            onlyWithNewChapters: false, newChapterCounts: [:]
+        )
+
+        XCTAssertEqual(sections.first?.groups.count, 2, "two cohorts and a book on its own")
+        XCTAssertEqual(sections.first?.books.count, 1)
+        XCTAssertEqual(sections.first?.bookCount, 5)
+    }
+
+    /// The cohorts are in the reader's order as well, for the same reason the headings
+    /// are: picking "recently read" and finding the author read this morning below two
+    /// folded ones is the sort not reaching the level the reader is looking at.
+    func testAuthorGroupsAreOrderedByTheirOwnFirstBook() {
+        let sources = [
+            LibrarySource(siteId: "alpha", name: "Alpha", books: [
+                read(book(id: "a1", title: "一", author: "貓膩"), at: day(2)),
+                read(book(id: "a2", title: "二", author: "貓膩"), at: day(1)),
+                read(book(id: "a3", title: "三", author: "忘語"), at: day(9)),
+                read(book(id: "a4", title: "四", author: "忘語"), at: day(3)),
+            ]),
+        ]
+
+        let sections = LibraryShelf.sections(
+            from: sources, sort: .recentlyRead, grouping: .sourceThenAuthor,
+            onlyWithNewChapters: false, newChapterCounts: [:]
+        )
+
+        XCTAssertEqual(sections.first?.groups.map(\.name), ["忘語", "貓膩"])
+        XCTAssertEqual(sections.first?.groups.first?.books.map(\.id), ["a3", "a4"])
+    }
+
+    /// One author read on two sites is two cohorts, and folding one has to say nothing
+    /// about the other — which is only true if the ids differ. They are what the reader's
+    /// folded/unfolded choice is remembered against.
+    func testTheSameAuthorUnderTwoSourcesIsTwoGroupsWithTwoIds() {
+        let sources = [
+            LibrarySource(siteId: "alpha", name: "Alpha", books: [
+                book(id: "a1", title: "一", author: "貓膩", siteId: "alpha", addedAt: day(9)),
+                book(id: "a2", title: "二", author: "貓膩", siteId: "alpha", addedAt: day(8)),
+            ]),
+            LibrarySource(siteId: "beta", name: "Beta", books: [
+                book(id: "b1", title: "三", author: "貓膩", siteId: "beta", addedAt: day(7)),
+                book(id: "b2", title: "四", author: "貓膩", siteId: "beta", addedAt: day(6)),
+            ]),
+        ]
+
+        let sections = LibraryShelf.sections(
+            from: sources, sort: .added, grouping: .sourceThenAuthor,
+            onlyWithNewChapters: false, newChapterCounts: [:]
+        )
+
+        let ids = sections.flatMap { $0.groups.map(\.id) }
+        XCTAssertEqual(ids.count, 2)
+        XCTAssertEqual(Set(ids).count, 2, "two cohorts the reader can fold separately")
+    }
+
+    /// Dividing by author alone puts the authors where the sources were: the top of the
+    /// shelf has to read the same way whichever of the two the reader picked, or "分組
+    /// 方式" is two features wearing one control.
+    func testDividingByAuthorAloneMakesTheAuthorsTheHeadings() {
+        let sources = [
+            LibrarySource(siteId: "alpha", name: "Alpha", books: [
+                book(id: "a1", title: "一", author: "貓膩", siteId: "alpha", addedAt: day(9)),
+                book(id: "a2", title: "二", author: nil, siteId: "alpha", addedAt: day(8)),
+            ]),
+            LibrarySource(siteId: "beta", name: "Beta", books: [
+                book(id: "b1", title: "三", author: "貓膩", siteId: "beta", addedAt: day(7)),
+            ]),
+        ]
+
+        let sections = LibraryShelf.sections(
+            from: sources, sort: .added, grouping: .author,
+            onlyWithNewChapters: false, newChapterCounts: [:]
+        )
+
+        XCTAssertEqual(
+            sections.map(\.name), ["貓膩", nil],
+            "the cohort gets a heading; what is left over gets none"
+        )
+        XCTAssertEqual(
+            sections.first?.books.map(\.id), ["a1", "b1"],
+            "an author read on two sites is one cohort once the sites stop dividing them"
+        )
+        XCTAssertEqual(sections.last?.books.map(\.id), ["a2"])
+    }
+
+    /// The filter reaches all the way in. A cohort whose every book is hidden must lose
+    /// its row for the same reason a source loses its header: a foldable row with nothing
+    /// behind it is worse than the book being missing, because it looks like a place to
+    /// look.
+    func testTheFilterEmptiesAuthorGroupsOutOfExistence() {
+        let sources = [
+            LibrarySource(siteId: "alpha", name: "Alpha", books: [
+                book(id: "a1", title: "一", author: "貓膩", addedAt: day(9)),
+                book(id: "a2", title: "二", author: "貓膩", addedAt: day(8)),
+                book(id: "a3", title: "三", author: "忘語", addedAt: day(7)),
+                book(id: "a4", title: "四", author: "忘語", addedAt: day(6)),
+            ]),
+        ]
+
+        let sections = LibraryShelf.sections(
+            from: sources, sort: .added, grouping: .sourceThenAuthor,
+            onlyWithNewChapters: true, newChapterCounts: ["a1": 1, "a3": 1]
+        )
+
+        XCTAssertEqual(
+            sections.first?.groups.map(\.name), [],
+            "one book each is no longer a cohort"
+        )
+        XCTAssertEqual(sections.first?.books.map(\.id), ["a1", "a3"])
     }
 
     // MARK: - Helpers
@@ -227,12 +417,14 @@ final class LibraryShelfTests: XCTestCase {
     private func book(
         id: String,
         title: String,
+        author: String? = nil,
+        siteId: String = "alpha",
         addedAt: Date = Date(timeIntervalSince1970: 0),
         updatedAt: Date = Date(timeIntervalSince1970: 0)
     ) -> Book {
         Book(
-            id: id, siteId: "alpha", siteBookId: id, kind: .novel, title: title,
-            displayName: nil, author: nil, coverURL: nil,
+            id: id, siteId: siteId, siteBookId: id, kind: .novel, title: title,
+            displayName: nil, author: author, coverURL: nil,
             addedAt: addedAt, updatedAt: updatedAt,
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
             lastReadCharacterOffset: nil, lastReadFraction: nil,

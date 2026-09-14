@@ -86,7 +86,7 @@ final class ReaderExitGestureTests: XCTestCase {
     /// the history offers whichever the demo seed left unfinished.
     private func openTheDemoBook() throws -> XCUIElement {
         app.openLibraryTab()
-        let book = app.descendants(matching: .any).matching(identifier: "library.book").firstMatch
+        let book = app.demoNovelRow()
         XCTAssertTrue(book.waitForExistence(timeout: 20), "the demo library should be seeded")
         book.tap()
 

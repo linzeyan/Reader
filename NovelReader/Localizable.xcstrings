@@ -4046,26 +4046,122 @@
         }
       }
     },
-    "library.groupBySource" : {
-      "comment" : "Toggle: keep the shelf split into one section per source, or show one flat list.",
+    "library.grouping" : {
+      "comment" : "Picker label: how the shelf divides its books into foldable sections.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Group by source"
+            "value" : "Group by"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按来源分组"
+            "value" : "分组方式"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "依來源分組"
+            "value" : "分組方式"
+          }
+        }
+      }
+    },
+    "library.grouping.author" : {
+      "comment" : "Shelf grouping: one foldable heading per author, for authors with more than one book here.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Author"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作者"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作者"
+          }
+        }
+      }
+    },
+    "library.grouping.none" : {
+      "comment" : "Shelf grouping: one undivided list.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不分组"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不分組"
+          }
+        }
+      }
+    },
+    "library.grouping.source" : {
+      "comment" : "Shelf grouping: one foldable heading per site the books came from.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Source"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "來源"
+          }
+        }
+      }
+    },
+    "library.grouping.sourceThenAuthor" : {
+      "comment" : "Shelf grouping: a heading per site, and inside each one a foldable row per author with more than one book there.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Source, then author"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源，再作者"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "來源，再作者"
           }
         }
       }

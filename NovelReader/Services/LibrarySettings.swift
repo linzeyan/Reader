@@ -18,11 +18,26 @@ final class LibrarySettings {
         didSet { defaults.set(sort.rawValue, forKey: Keys.sort) }
     }
 
-    /// Grouping by source, on by default — see `LibraryView` for why the shelf is
-    /// grouped at all. Off makes it one list, which is what someone who reads from
-    /// a single source wants.
-    var groupBySource: Bool {
-        didSet { defaults.set(groupBySource, forKey: Keys.groupBySource) }
+    /// How the shelf divides its books up. By source by default — see `LibraryView` for
+    /// why a library is worth dividing that way at all. `.none` makes it one list, which
+    /// is what someone who reads from a single source wants.
+    var grouping: LibraryGrouping {
+        didSet { defaults.set(grouping.rawValue, forKey: Keys.grouping) }
+    }
+
+    /// Which headings the reader has folded shut, by `LibrarySection.id` and
+    /// `LibraryGroup.id`.
+    ///
+    /// Only the folded ones are kept: everything starts open, so an empty set is the
+    /// shelf exactly as it has always been, and a source nobody has touched costs
+    /// nothing to store.
+    ///
+    /// Entries for sources and authors no longer on the shelf are left alone rather than
+    /// swept. They cost a string each, and a reader who removes a source and adds it
+    /// back has not thereby said they want it open again — unlike a per-book catalog
+    /// order, which is forgotten with its book because a re-added book is a new book.
+    private(set) var folded: Set<String> {
+        didSet { defaults.set(Array(folded), forKey: Keys.folded) }
     }
 
     /// Shows only books the source has added chapters to. Persisted like the rest,
@@ -107,6 +122,18 @@ final class LibrarySettings {
     /// thousand articles they have already seen.
     static func defaultDescending(for kind: SiteRule.Kind) -> Bool { kind == .feed }
 
+    func isFolded(_ id: String) -> Bool { folded.contains(id) }
+
+    func setFolded(_ isFolded: Bool, id: String) {
+        if isFolded { folded.insert(id) } else { folded.remove(id) }
+    }
+
+    /// Opens every heading. The demo seed's, and only the demo seed's — see `DemoSeed`,
+    /// whose promise is that a launch shows the same shelf as the last one. A fold
+    /// outlives the library it was made in, and the ids it is against are the sources
+    /// that seed is about to delete and rebuild.
+    func unfoldEverything() { folded = [] }
+
     func isCatalogDescending(bookId: String, kind: SiteRule.Kind) -> Bool {
         catalogDescending[bookId] ?? Self.defaultDescending(for: kind)
     }
@@ -127,7 +154,8 @@ final class LibrarySettings {
 
     private enum Keys {
         static let sort = "library.sort"
-        static let groupBySource = "library.groupBySource"
+        static let grouping = "library.grouping"
+        static let folded = "library.folded"
         static let onlyWithNewChapters = "library.onlyWithNewChapters"
         static let home = "library.home"
         static let defaultMediaMode = "library.defaultMediaMode"
@@ -143,7 +171,9 @@ final class LibrarySettings {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         sort = defaults.string(forKey: Keys.sort).flatMap(LibrarySort.init(rawValue:)) ?? .added
-        groupBySource = defaults.object(forKey: Keys.groupBySource) as? Bool ?? true
+        grouping =
+            defaults.string(forKey: Keys.grouping).flatMap(LibraryGrouping.init(rawValue:)) ?? .source
+        folded = Set(defaults.stringArray(forKey: Keys.folded) ?? [])
         onlyWithNewChapters = defaults.object(forKey: Keys.onlyWithNewChapters) as? Bool ?? false
         home = defaults.string(forKey: Keys.home).flatMap(HomeScreen.init(rawValue:)) ?? .automatic
         defaultMediaMode =

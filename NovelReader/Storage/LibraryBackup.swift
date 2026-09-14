@@ -266,7 +266,7 @@ extension LibraryBackup {
         var pageTurn: String?
         var swipeToGoBack: Bool?
         var librarySort: String?
-        var groupBySource: Bool?
+        var libraryGrouping: String?
         var onlyWithNewChapters: Bool?
         var home: String?
         var defaultMediaMode: String?
@@ -289,7 +289,7 @@ extension LibraryBackup {
             pageTurn = targets.reader.pageTurn.rawValue
             swipeToGoBack = targets.reader.swipeToGoBack
             librarySort = targets.library.sort.rawValue
-            groupBySource = targets.library.groupBySource
+            libraryGrouping = targets.library.grouping.rawValue
             onlyWithNewChapters = targets.library.onlyWithNewChapters
             home = targets.library.home.rawValue
             defaultMediaMode = targets.library.defaultMediaMode.rawValue
@@ -333,7 +333,9 @@ extension LibraryBackup {
             if let value = librarySort.flatMap(LibrarySort.init(rawValue:)) {
                 targets.library.sort = value
             }
-            if let groupBySource { targets.library.groupBySource = groupBySource }
+            if let value = libraryGrouping.flatMap(LibraryGrouping.init(rawValue:)) {
+                targets.library.grouping = value
+            }
             if let onlyWithNewChapters {
                 targets.library.onlyWithNewChapters = onlyWithNewChapters
             }

@@ -213,7 +213,7 @@ final class LibraryBackupTests: XCTestCase {
             background: .colors([ReaderColor(hex: 0x102030), ReaderColor(hex: 0x405060)]),
             foreground: ReaderColor(hex: 0xEEEEEE)
         )
-        source.targets.library.groupBySource = false
+        source.targets.library.grouping = .sourceThenAuthor
         source.targets.downloads.network = .wifiAndCellular
         source.targets.feeds.keep = .fifty
 
@@ -230,7 +230,7 @@ final class LibraryBackupTests: XCTestCase {
             .colors([ReaderColor(hex: 0x102030), ReaderColor(hex: 0x405060)])
         )
         XCTAssertEqual(restored.targets.reader.customPalette.foreground, ReaderColor(hex: 0xEEEEEE))
-        XCTAssertFalse(restored.targets.library.groupBySource)
+        XCTAssertEqual(restored.targets.library.grouping, .sourceThenAuthor)
         XCTAssertEqual(restored.targets.downloads.network, .wifiAndCellular)
         XCTAssertEqual(restored.targets.feeds.keep, .fifty)
     }

@@ -30,7 +30,7 @@ final class HighlightGestureTests: XCTestCase {
         // The app opens on the reading history, which the demo seed always leaves
         // something unfinished in. This walk starts from the shelf, so it asks for it.
         app.openLibraryTab()
-        let book = app.descendants(matching: .any).matching(identifier: "library.book").firstMatch
+        let book = app.demoNovelRow()
         XCTAssertTrue(book.waitForExistence(timeout: 20), "the demo library should be seeded")
         book.tap()
         let read = app.descendants(matching: .any).matching(identifier: "book.read").firstMatch
