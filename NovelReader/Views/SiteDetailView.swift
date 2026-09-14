@@ -111,7 +111,7 @@ struct SiteDetailView: View {
             derived = try await SearchDeriver(fetcher: env.fetcher)
                 .derive(for: rule, probe: probe.trimmingCharacters(in: .whitespaces))
         } catch {
-            env.report(error)
+            env.report(error, doing: .source)
             self.error = error.localizedDescription
         }
     }

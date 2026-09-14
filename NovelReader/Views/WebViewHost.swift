@@ -63,6 +63,7 @@ struct ChallengeSheet: View {
     let webView: WKWebView
     let url: URL
     var reason: ChallengeRequest.Reason = .verification
+    var doing: ChallengeRequest.Doing?
     let onDone: () -> Void
 
     /// Followed live rather than read once from `url`. This sheet is the one place
@@ -84,6 +85,18 @@ struct ChallengeSheet: View {
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal)
+                // Above the instruction rather than below it, and only when it is
+                // known: the reader's first question on being handed a wall out of
+                // nowhere is what asked for it, and the answer has to arrive before
+                // the sentence telling them what to do about it.
+                if let doing {
+                    Text(doing.activity)
+                        .font(.footnote.weight(.medium))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                        .padding(.top, 2)
+                }
                 Text(explanation)
                     .font(.footnote)
                     .foregroundStyle(.secondary)

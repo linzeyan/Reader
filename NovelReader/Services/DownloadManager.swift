@@ -287,7 +287,7 @@ final class DownloadManager {
                     // Stop dead. The chapter stays at the head of the queue, so
                     // resuming after the user clears the challenge retries it.
                     self.hold(
-                        ChallengeRequest(url: url),
+                        ChallengeRequest(url: url, doing: .download(context.book.shownName)),
                         because: WebFetcher.FetchError.challengePresented(url)
                     )
                     return
@@ -297,7 +297,9 @@ final class DownloadManager {
                     // rest of the book collecting identical failures would only
                     // bury the one message that matters.
                     self.hold(
-                        ChallengeRequest(url: url, reason: .signIn),
+                        ChallengeRequest(
+                            url: url, reason: .signIn, doing: .download(context.book.shownName)
+                        ),
                         because: WebFetcher.FetchError.signInRequired(url)
                     )
                     return

@@ -341,7 +341,7 @@ final class ComicReaderModel {
     /// Routes a failure the same way the rest of the app does.
     func report(_ error: any Error) {
         if WebFetcher.needsTheUser(error) {
-            env.report(error)
+            env.report(error, doing: .chapter(book.shownName))
             // Not also shown inline: the sheet the shell is about to present is the
             // thing to look at, and a red panel under it says the same failure twice.
             return

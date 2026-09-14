@@ -130,7 +130,7 @@ struct DeriveRuleView: View {
             // Routed through the environment as well as shown inline: a Cloudflare
             // challenge has to reach the challenge sheet, and once the user clears
             // it, tapping Analyse again just works.
-            env.report(error)
+            env.report(error, doing: .source)
             self.error = error.localizedDescription
         }
     }

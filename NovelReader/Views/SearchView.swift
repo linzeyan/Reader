@@ -168,7 +168,7 @@ struct SearchView: View {
                 )
                 env.banner = String(localized: "search.added")
             } catch {
-                env.report(error)
+                env.report(error, doing: .adding)
             }
         }
     }

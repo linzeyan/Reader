@@ -1432,7 +1432,10 @@ final class ReaderModel {
             // be presented; everything else stays inline so the user keeps their
             // scroll position.
             if WebFetcher.needsTheUser(error) {
-                env.report(error)
+                // Named, because this is the one the reader is least likely to guess:
+                // the scrolling reader has no chapter boundary to see, so crossing a
+                // seam looks like carrying on reading the same page.
+                env.report(error, doing: .chapter(book.shownName))
             }
             self.error = error.localizedDescription
             // Only where there is a page to go and read instead. A feed that published no

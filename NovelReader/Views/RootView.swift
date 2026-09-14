@@ -56,7 +56,8 @@ struct RootView: View {
         }
         .sheet(item: $env.challenge) { challenge in
             ChallengeSheet(
-                webView: env.fetcher.webView, url: challenge.url, reason: challenge.reason
+                webView: env.fetcher.webView, url: challenge.url, reason: challenge.reason,
+                doing: challenge.doing
             ) {
                 // Read before it is cleared: it is what says this challenge was the
                 // one that stopped the download queue, rather than one a page load
@@ -248,7 +249,48 @@ struct ChallengeRequest: Identifiable, Equatable {
         case signIn
     }
 
+    /// What the app was doing when the wall came down.
+    ///
+    /// Carried because the sheet arrives at a moment that need not have anything to do
+    /// with what the reader was doing: a chapter fetched by scrolling across a seam is
+    /// invisible in the scrolling reader, a catalog refreshes itself behind the book
+    /// screen once a day, and a download queue resumes on its own when the app comes
+    /// back to the foreground. All three put up the same sheet, and a reader who cannot
+    /// tell which has no way to know whether the app is asking on their behalf or on
+    /// its own.
+    enum Doing: Equatable {
+        /// The book's name, in each case that has one.
+        case chapter(String)
+        case catalog(String)
+        case download(String)
+        case adding
+        case search
+        case source
+
+        /// A whole sentence per case, rather than an activity slotted into a frame
+        /// sentence. Composing one would need "%@ 時" to sit where English wants
+        /// "While %@,", which is the kind of joint that survives two languages and
+        /// breaks on the third.
+        ///
+        /// Here rather than in the sheet because it is the vocabulary of the thing,
+        /// not of the screen — and because a case with no words for it is worth a
+        /// failing test rather than a sheet that shows a key.
+        var activity: LocalizedStringResource {
+            switch self {
+            // The interpolation is part of the key — a String Catalog files these under
+            // "challenge.doing.chapter %@", the way `library.newChapters %lld` is filed.
+            case .chapter(let book): return "challenge.doing.chapter \(book)"
+            case .catalog(let book): return "challenge.doing.catalog \(book)"
+            case .download(let book): return "challenge.doing.download \(book)"
+            case .adding: return "challenge.doing.adding"
+            case .search: return "challenge.doing.search"
+            case .source: return "challenge.doing.source"
+            }
+        }
+    }
+
     let id = UUID()
     let url: URL
     var reason: Reason = .verification
+    var doing: Doing?
 }

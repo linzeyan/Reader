@@ -201,7 +201,9 @@ final class AppEnvironment {
                 addBook: { [unowned self] address in try await self.addPastedBook(address) },
                 keep: { [unowned self] address, title in self.keepUnreadableFeed(address, title) },
                 settled: { [unowned self] in self.reloadLibrary() },
-                report: { [unowned self] error in self.report(error) }
+                // The batch outlives the sheet it was started from, so this one can
+                // surface minutes later while the reader is somewhere else entirely.
+                report: { [unowned self] error in self.report(error, doing: .adding) }
             )
         )
         reloadLibrary()
@@ -381,7 +383,7 @@ final class AppEnvironment {
         do {
             _ = try await bookService.refreshCatalog(rule: rule, book: book)
         } catch {
-            if WebFetcher.needsTheUser(error) { report(error) }
+            if WebFetcher.needsTheUser(error) { report(error, doing: .adding) }
         }
         reloadLibrary()
         return book
@@ -1009,14 +1011,18 @@ final class AppEnvironment {
 
     /// Routes a fetch failure: a challenge becomes the interactive sheet,
     /// everything else becomes a banner.
-    func report(_ error: any Error) {
+    ///
+    /// - Parameter doing: what the app was up to, for the sheet to say. Optional only
+    ///   because most callers here cannot raise a challenge at all — a file import has
+    ///   no site to be stopped by. Anything that fetches should pass one.
+    func report(_ error: any Error, doing: ChallengeRequest.Doing? = nil) {
         switch error {
         case WebFetcher.FetchError.challengePresented(let url):
-            challenge = ChallengeRequest(url: url)
+            challenge = ChallengeRequest(url: url, doing: doing)
         case WebFetcher.FetchError.signInRequired(let url):
             // Same sheet, same web view: a sign-in only helps if it happens in the
             // browser whose cookies the next fetch will carry.
-            challenge = ChallengeRequest(url: url, reason: .signIn)
+            challenge = ChallengeRequest(url: url, reason: .signIn, doing: doing)
         default:
             banner = error.localizedDescription
         }

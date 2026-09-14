@@ -1442,6 +1442,150 @@
         }
       }
     },
+    "challenge.doing.adding" : {
+      "comment" : "Names what the app was doing when a site demanded verification: adding a book.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app was adding a book."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在加入书籍。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在加入書籍。"
+          }
+        }
+      }
+    },
+    "challenge.doing.catalog %@" : {
+      "comment" : "Names what the app was doing when a site demanded verification: refreshing a book's chapter list. %@ is the book's name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app was updating the chapter list for %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在更新《%@》的目录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在更新《%@》的目錄。"
+          }
+        }
+      }
+    },
+    "challenge.doing.chapter %@" : {
+      "comment" : "Names what the app was doing when a site demanded verification: fetching a chapter to read. %@ is the book's name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app was fetching a chapter of %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在读取《%@》的章节。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在讀取《%@》的章節。"
+          }
+        }
+      }
+    },
+    "challenge.doing.download %@" : {
+      "comment" : "Names what the app was doing when a site demanded verification: running a download. %@ is the book's name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app was downloading %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在下载《%@》。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在下載《%@》。"
+          }
+        }
+      }
+    },
+    "challenge.doing.search" : {
+      "comment" : "Names what the app was doing when a site demanded verification: searching.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app was searching."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在搜寻。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在搜尋。"
+          }
+        }
+      }
+    },
+    "challenge.doing.source" : {
+      "comment" : "Names what the app was doing when a site demanded verification: examining a source's pages.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app was checking a source."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在检查来源设定。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 正在檢查來源設定。"
+          }
+        }
+      }
+    },
     "challenge.done" : {
       "comment" : "Confirms the challenge was completed.",
       "extractionState" : "manual",
