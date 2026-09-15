@@ -138,6 +138,47 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         XCTAssertGreaterThan(ranOut, 0, "now the reader has arrived at the seam")
     }
 
+    /// A stack that is still being built is not asked how far the reader has to go.
+    ///
+    /// `contentHeight` is how far the columns have landed, and a rebuild — which is what
+    /// coming back to the app after switching away turns into, once the snapshot has had
+    /// its way with the width — grows it from nothing while the scroll offset still
+    /// describes the old content. The distance below the reader then reads as a large
+    /// negative number, which is "no measurement yet" and not "nearly out of text".
+    ///
+    /// Read as the latter it says the reader is waiting, and that is what put a
+    /// full-screen verification wall over a chapter somebody was 59% of the way through:
+    /// the look-ahead's failure was supposed to be held quietly, and a spurious "they ran
+    /// out" is exactly the thing that un-holds it.
+    ///
+    /// Driven here by adding a chapter rather than by flipping the appearance, because
+    /// the half-built moment is then deterministic: the new column is laid out on another
+    /// queue, so it cannot have landed by the time `update` returns.
+    func testAHalfBuiltStackIsNotAskedHowFarTheReaderHasToGo() async throws {
+        var ranOut = 0
+        let window = [chapter(1, paragraphs: 40), chapter(2, paragraphs: 40)]
+        try await show(window, onRanOut: { ranOut += 1 })
+
+        // At the foot of what is loaded, which is where running out is honestly true.
+        view.contentOffset.y = coordinator.contentHeight - view.visibleHeight
+        coordinator.scrolled()
+        XCTAssertGreaterThan(ranOut, 0, "the reader really is at the bottom of the stack")
+
+        ranOut = 0
+        coordinator.update(
+            with: text(window + [chapter(3, paragraphs: 40)], onRanOut: { ranOut += 1 })
+        )
+        coordinator.scrolled()
+
+        XCTAssertLessThan(
+            coordinator.placed.count, 3, "the third column cannot have landed yet"
+        )
+        XCTAssertEqual(
+            ranOut, 0,
+            "a stack part way through being built has no answer about where the reader is"
+        )
+    }
+
     // MARK: - The guarantee
 
     func testAChapterArrivingAboveTheReaderDoesNotMoveTheTextTheyAreReading() async throws {

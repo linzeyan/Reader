@@ -476,7 +476,22 @@ final class ReaderScrollCoordinator {
     private static let ranOutWindows: CGFloat = 0.1
 
     private func askForMoreIfNeeded() {
-        guard let config, let view, !placed.isEmpty else { return }
+        // Only off a stack that is all there, for the same reason `reportPlace` says
+        // nothing during a rebuild: `contentHeight` is how far the columns have *landed*,
+        // not how much text is loaded, and a rebuild grows it from nothing while the
+        // reader's offset still describes the old, full-length content. The distance
+        // below them then reads as a large negative number, which is not "nearly out of
+        // text", it is "no measurement yet" — and both questions here would be answered
+        // wrongly from it. The second one especially: `onRanOut` is what tells the model
+        // the reader is waiting, and a spurious one turns a look-ahead's quiet wall into
+        // a full-screen verification sheet over a page somebody is halfway through.
+        //
+        // `placed.count == chapters.count` rather than the `restoring` flag the place
+        // report uses, because it states the thing itself. It also covers the first
+        // build, where there is no place to restore yet and so no flag to raise.
+        guard let config, let view, !placed.isEmpty,
+              placed.count == config.chapters.count
+        else { return }
         let below = contentHeight - (view.readingOffset + view.visibleHeight)
         if below < view.visibleHeight * Self.leadWindows {
             config.onNeedsNext()
