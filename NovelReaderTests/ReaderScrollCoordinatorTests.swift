@@ -60,6 +60,19 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         )
     }
 
+    /// A chapter whose paragraphs are given outright, for the shapes the generated
+    /// fixture cannot make — here, one paragraph several windows tall.
+    private func chapter(_ index: Int, paragraphs: [String]) -> ReaderModel.LoadedChapter {
+        ReaderModel.LoadedChapter(
+            chapter: Chapter(
+                id: "book|c\(index)", bookId: "book", siteChapterId: "c\(index)",
+                index: index, title: "第\(index)章　渡口", url: "https://alpha/\(index)",
+                addedAt: nil, downloadedAt: nil
+            ),
+            paragraphs: paragraphs
+        )
+    }
+
     private func text(
         _ chapters: [ReaderModel.LoadedChapter],
         palette: ReaderPalette = .light,
@@ -407,6 +420,83 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         XCTAssertGreaterThan(
             back + view.visibleHeight, view.readingOffset,
             "going back a whole window with no overlap would lose the line they were on"
+        )
+    }
+
+    /// While there is text on the other side of the window, a tap has to move it.
+    ///
+    /// Going on aims the last paragraph that starts on screen at the top of the window,
+    /// and a paragraph taller than the window is the same paragraph every time: nothing
+    /// else begins inside the window to take its place. So the first tap puts it at the
+    /// top and every tap after that names the position it is already in — off by the
+    /// fraction of a point the scroll view rounds away, which is what made it permanent
+    /// rather than one wasted tap. The reader was left tapping a page that would not
+    /// turn, having to scroll by hand to get out. Reported as page turning "sometimes"
+    /// failing inside a code block: `<pre>` is extracted whole, so a listing is one
+    /// paragraph and reliably several windows tall.
+    ///
+    /// Stated as a walk in both directions rather than as that one position, because the
+    /// position is a consequence of the geometry and the guarantee is not: whatever the
+    /// rule aims at, a reader who has text below them and taps must end up further down
+    /// it.
+    func testTappingThroughAParagraphTallerThanTheWindowIsNeverADeadEnd() async throws {
+        let sentence = "他推開門，看見渡口的燈在雪裡亮著，像一句沒有說完的話。"
+        try await show([chapter(1, paragraphs: [
+            sentence,
+            String(repeating: sentence, count: 90),
+            sentence, sentence, sentence
+        ])])
+        let tall = try XCTUnwrap(coordinator.placed.first).column.paragraphFrames[1]
+        XCTAssertGreaterThan(
+            tall.maxY - tall.minY, view.visibleHeight * 2,
+            "the fixture must hold a paragraph several windows tall, or it tests nothing"
+        )
+
+        coordinator.scroll(to: .start, inChapter: 1, animated: false)
+        let lastWindow = coordinator.contentHeight - view.visibleHeight
+        var taps = 0
+        while view.readingOffset < lastWindow - 1 {
+            taps += 1
+            // A bound rather than an assertion, because a page that will not turn is a
+            // loop that does not end: unfixed, this walked the same two points of the
+            // same paragraph twenty-three million times before the run was killed.
+            guard taps < 40 else {
+                return XCTFail("a chapter this long cannot need forty taps to walk down")
+            }
+            try tap(.next, number: taps)
+        }
+
+        while view.readingOffset > 1 {
+            taps += 1
+            guard taps < 80 else {
+                return XCTFail("nor eighty to walk it in both directions")
+            }
+            try tap(.previous, number: taps)
+        }
+    }
+
+    /// One tapped turn, asserted on what the reader is left looking at rather than on
+    /// what the rule worked out.
+    ///
+    /// The difference is the whole bug. At the top of an over-tall paragraph the rule
+    /// returns a destination a fraction of a point past where the reader is — the
+    /// paragraph's own top, which a scroll view resting on a device pixel cannot reach.
+    /// Every such turn is forward by the arithmetic and motionless on the glass, so a
+    /// test that compared the two numbers would have watched the page fail to turn and
+    /// called it a page turn. Measured: it does exactly that, for as many taps as the
+    /// loop is willing to take.
+    private func tap(_ zone: ReaderTapZone.Zone, number: Int) throws {
+        let before = view.readingOffset
+        let destination = try XCTUnwrap(
+            coordinator.pageTurnDestination(zone),
+            "tap \(number), at \(before), had text to move into and was told there was "
+                + "nowhere to go"
+        )
+        view.setReadingOffset(destination, animated: false)
+        let moved = view.readingOffset - before
+        XCTAssertGreaterThan(
+            zone == .next ? moved : -moved, 1,
+            "tap \(number), at \(before), moved the page \(moved) points"
         )
     }
 }

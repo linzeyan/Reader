@@ -582,6 +582,16 @@ final class ReaderScrollCoordinator {
         view.setReadingOffset(destination, animated: true)
     }
 
+    /// A move shorter than this is one the reader cannot see, which is the same to them
+    /// as no move at all.
+    ///
+    /// Half a point because that is the coarsest grid a scroll view here can sit on: an
+    /// offset lands on a whole device pixel, which is half a point at 2x and a third at
+    /// 3x. A destination inside that of where the reader already is cannot be travelled
+    /// to — the scroll view rounds it straight back — so this has to be a tolerance and
+    /// not an equality. The dead end below is made entirely of that rounding.
+    private static let visibleTurn: CGFloat = 0.5
+
     /// Where a page turn in this direction would land, in content coordinates.
     ///
     /// `ReaderTapZone` names a paragraph and the point of the window to line it up
@@ -589,8 +599,37 @@ final class ReaderScrollCoordinator {
     /// paragraph of height `h` in a window of height `v`, an anchor of `a` puts its top
     /// `a * (v - h)` below the top of the screen. Separate from the move so the number
     /// can be asserted without a runloop to animate through.
+    ///
+    /// The window's own height is the answer when the aim does not move.
+    ///
+    /// Going on aims the last paragraph that *starts* on screen at the top of the
+    /// window. For a paragraph taller than the window that is the same paragraph on
+    /// every tap — nothing else begins inside the window — so once it has been put at
+    /// the top the rule keeps naming the place it is already in. It does not name the
+    /// reader's exact offset, which is why this was a trap rather than one wasted tap:
+    /// the scroll view can only sit on a whole device pixel, so the paragraph's top
+    /// stays a fraction of a point out of reach and the aim is *forward*, for ever.
+    /// Measured, in a 700-point window: a 4267-point listing beginning at 117.79, a
+    /// reader parked at 117.67, and every tap from the second onwards asking to go to
+    /// 117.79 and arriving at 117.67. Reported as tapping to turn the page sometimes
+    /// doing nothing, always inside a code block — which is the one paragraph that is
+    /// reliably several windows tall, since `<pre>` is extracted whole.
+    ///
+    /// A window is not a second rule here but the first one where it still has meaning:
+    /// the reader is at the top of a paragraph that fills the screen, and the next
+    /// screenful of it is what going on has always meant.
     func pageTurnDestination(_ zone: ReaderTapZone.Zone) -> CGFloat? {
-        guard let view, let scroll = ReaderTapZone.pageScroll(
+        guard let view, let aimed = aimedTurn(zone, in: view) else { return nil }
+        guard abs(aimed - view.readingOffset) <= Self.visibleTurn else { return aimed }
+        let window = zone == .next ? view.visibleHeight : -view.visibleHeight
+        let landing = view.clamped(view.readingOffset + window)
+        return abs(landing - view.readingOffset) <= Self.visibleTurn ? nil : landing
+    }
+
+    /// The turn `ReaderTapZone`'s rule asks for: a paragraph on screen, and the point of
+    /// the window to line it up with.
+    private func aimedTurn(_ zone: ReaderTapZone.Zone, in view: ReaderTextScrollView) -> CGFloat? {
+        guard let scroll = ReaderTapZone.pageScroll(
             zone, over: visibleParagraphs(), viewport: view.visibleHeight
         ), let (chapter, frame) = paragraph(withID: scroll.id) else { return nil }
         let height = frame.maxY - frame.minY

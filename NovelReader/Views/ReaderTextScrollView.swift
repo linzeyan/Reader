@@ -125,9 +125,16 @@ final class ReaderTextScrollView: UIScrollView {
         lastOffset = contentOffset.y
     }
 
+    /// The nearest offset the content can actually be shown at. Public because the
+    /// difference between a destination and its clamp is the caller's answer to "is
+    /// there anywhere left to go": a page turn that clamps to where the reader already
+    /// is has to be told from one that moves.
+    func clamped(_ y: CGFloat) -> CGFloat {
+        min(max(y, 0), max(0, contentSize.height - bounds.height))
+    }
+
     func setReadingOffset(_ y: CGFloat, animated: Bool) {
-        let maximum = max(0, contentSize.height - bounds.height)
-        setContentOffset(CGPoint(x: 0, y: min(max(y, 0), maximum)), animated: animated)
+        setContentOffset(CGPoint(x: 0, y: clamped(y)), animated: animated)
     }
 
     func apply(palette: ReaderPalette) {
