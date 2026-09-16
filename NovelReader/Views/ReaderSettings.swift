@@ -142,6 +142,15 @@ final class ReaderSettings {
     var fontName: String? {
         didSet { defaults.set(fontName ?? "", forKey: Keys.fontName) }
     }
+    /// The faces the reader picked out of the system font panel, by PostScript name.
+    ///
+    /// Kept because nothing can ask for them back: a face the reader installed is not in
+    /// `UIFont.familyNames`, so this list is the app's only record that the panel ever
+    /// offered one — and it is what the font picker adds to what the device came with.
+    /// See `InstalledFonts`.
+    private(set) var installedFaces: [String] {
+        didSet { defaults.set(installedFaces, forKey: Keys.installedFaces) }
+    }
     /// Which Chinese script the reader sees, whatever the site served — see
     /// `ChineseScript`. Stored as two keys rather than one encoded value so that a UI
     /// walk can set either half from a launch argument.
@@ -207,6 +216,35 @@ final class ReaderSettings {
         overridesByBook[bookId] = nil
     }
 
+    // MARK: - Writing the faces the reader installed
+    //
+    // Here rather than with the rest of the font list in `FontCatalog`, for the reason the
+    // layer writers above are here: `installedFaces` is `private(set)`, and the rule that
+    // nothing enters that list unnamed by a face this process can draw has to live where it
+    // cannot be gone around.
+
+    /// Adds a face the reader picked out of the system panel.
+    ///
+    /// Refused unless this process can really draw with it: a name `UIFont(name:)` will not
+    /// answer for would sit in the picker promising a face and drawing the system one.
+    @discardableResult
+    func remember(face: String) -> Bool {
+        guard UIFont(name: face, size: 16) != nil else { return false }
+        if !installedFaces.contains(face) { installedFaces.append(face) }
+        return true
+    }
+
+    /// Drops faces that are no longer on the device — see `InstalledFonts.restore(into:)`.
+    ///
+    /// A reader left on an uninstalled face is reading in the system face already, so this
+    /// changes nothing on the page; what it changes is that the picker stops offering a row
+    /// that draws nothing, and stops showing that row as the chosen one.
+    func forget(faces removed: [String]) {
+        guard !removed.isEmpty else { return }
+        installedFaces.removeAll(where: removed.contains)
+        if let fontName, removed.contains(fontName) { self.fontName = nil }
+    }
+
     /// JSON rather than a plist dictionary: `Overrides` is a record, and `UserDefaults`
     /// holds property-list types only. A value that will not encode is dropped rather than
     /// trapped — which for a handful of optional scalars it cannot be.
@@ -225,6 +263,7 @@ final class ReaderSettings {
         static let theme = "reader.theme"
         static let customPalette = "reader.customPalette"
         static let fontName = "reader.fontName"
+        static let installedFaces = "reader.installedFaces"
         static let chineseDepth = "reader.chinese.depth"
         static let chineseTarget = "reader.chinese.target"
         static let keepScreenOn = "reader.keepScreenOn"
@@ -252,6 +291,11 @@ final class ReaderSettings {
         // shipped light one is a page anybody can read.
         customPalette = defaults.data(forKey: Keys.customPalette)
             .flatMap { try? JSONDecoder().decode(ReaderPalette.self, from: $0) } ?? .light
+        // Read into a local as well: the face check below cannot go through the property,
+        // for the reason the dictionaries above are decoded inline — no stored property can
+        // be read until every one of them has a value.
+        let installed = defaults.stringArray(forKey: Keys.installedFaces) ?? []
+        installedFaces = installed
         switch defaults.string(forKey: Keys.fontName) {
         case nil:
             let resolved = Self.defaultFontName
@@ -264,7 +308,13 @@ final class ReaderSettings {
             // A font that was uninstalled with its app would render as the system face
             // anyway, so an unknown name is simply dropped on load — as is the empty
             // string, which is how a chosen system face is written down.
-            fontName = stored.isEmpty || UIFont(name: stored, size: 16) == nil ? nil : stored
+            //
+            // Except a face the reader installed themselves, which is *always* unknown
+            // this early: access to one is granted per process and `InstalledFonts` has
+            // not been answered yet. Dropping it here would write the empty string back —
+            // "the system face, chosen" — and lose the choice for good, on every launch.
+            let unknown = !installed.contains(stored) && UIFont(name: stored, size: 16) == nil
+            fontName = stored.isEmpty || unknown ? nil : stored
         }
         // Per-character by default: it costs nothing to start, never moves a stored
         // offset, and is right far more often than it is wrong. Words are the tier a
@@ -343,67 +393,4 @@ final class ReaderSettings {
     /// starts on is exactly the entry the font picker shows selected. A device without it
     /// falls back to the system face, which is what an unknown name would draw as anyway.
     static let defaultFontName: String? = FontCatalog.songti
-}
-
-/// The fonts on this device that can actually render Chinese.
-///
-/// `UIFont.familyNames` is around eighty families, nearly all of them Latin-only:
-/// offering them would mean offering a list where most choices turn the book
-/// into blank boxes. So each family is asked for glyphs for a handful of common
-/// Han characters, and only the ones that answer are shown.
-enum FontCatalog {
-    struct Entry: Identifiable, Hashable {
-        /// Usable with `UIFont(name:size:)` and `Font.custom`.
-        let fontName: String
-        let displayName: String
-        var id: String { fontName }
-    }
-
-    /// Traditional and simplified, common and less common, plus punctuation:
-    /// a family that misses any of these is not usable as a body face here.
-    private static let probe = Array("國国說说一二三的了，。".utf16)
-
-    static let chinese: [Entry] = {
-        UIFont.familyNames
-            .sorted()
-            .compactMap { family in
-                guard let name = usableName(in: family), supportsChinese(name) else { return nil }
-                return Entry(fontName: name, displayName: family)
-            }
-    }()
-
-    /// The device's Song face, as this catalog names it.
-    ///
-    /// Traditional first, because that is the language the app is authored in; then
-    /// Simplified, the same face cut for the other script. Matched by family name against
-    /// the catalog rather than by font name against the system, so that the default
-    /// reading face and the picker's Songti row are the same string — a default nothing
-    /// in the list matches shows as a picker with no selection.
-    static var songti: String? {
-        ["Songti TC", "Songti SC"]
-            .lazy
-            .compactMap { family in chinese.first { $0.displayName == family } }
-            .first?
-            .fontName
-    }
-
-    /// The regular face of a family. `UIFont(name:)` accepts a family name for
-    /// most families but not all, so fall back to a concrete face.
-    private static func usableName(in family: String) -> String? {
-        if UIFont(name: family, size: 16) != nil { return family }
-        let names = UIFont.fontNames(forFamilyName: family)
-        // Explicitly the regular cut. `fontNames(forFamilyName:)` is in no documented
-        // order, so taking the first can hand back a light or bold face and set a whole
-        // book in it.
-        return names.first { $0.hasSuffix("-Regular") } ?? names.first
-    }
-
-    private static func supportsChinese(_ fontName: String) -> Bool {
-        guard let font = UIFont(name: fontName, size: 16) else { return false }
-        var characters = probe
-        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
-        // Returns false as soon as one character has no glyph, which is exactly
-        // the question being asked.
-        return CTFontGetGlyphsForCharacters(font as CTFont, &characters, &glyphs, characters.count)
-    }
 }

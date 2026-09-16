@@ -6,5 +6,14 @@
 	     fit comfortably inside the 1 MB KVS quota. Chapter text never syncs. -->
 	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
 	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+	<!-- "Use Installed Fonts". Without it a face the reader installed themselves is
+	     invisible to this app *and* to Apple's own font panel opened from it, which
+	     is why a phone with 宋體 installed and offered by every other app showed it
+	     in neither of this app's lists. Reading only: fonts are never installed from
+	     here, so `system-installation` is not asked for. -->
+	<key>com.apple.developer.user-fonts</key>
+	<array>
+		<string>app-usage</string>
+	</array>
 </dict>
 </plist>

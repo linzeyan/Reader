@@ -129,7 +129,7 @@ struct ReadingAppearanceSections: View {
             Section("reader.settings.text") {
                 Picker("reader.settings.font", selection: $settings.fontName) {
                     Text("reader.settings.font.system").tag(String?.none)
-                    ForEach(FontCatalog.chinese) { entry in
+                    ForEach(settings.faces) { entry in
                         // Each name is drawn in its own face: the sample is the
                         // only thing that actually tells you what you are picking.
                         Text(entry.displayName)
@@ -138,6 +138,8 @@ struct ReadingAppearanceSections: View {
                     }
                 }
                 .accessibilityIdentifier("reader.settings.font")
+
+                AddInstalledFontRow(settings: settings, selection: $settings.fontName)
 
                 LabeledContent("reader.settings.fontSize") {
                     Text("\(Int(settings.fontSize))")

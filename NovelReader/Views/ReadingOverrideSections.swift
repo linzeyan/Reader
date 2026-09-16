@@ -58,7 +58,7 @@ struct ReadingOverrideSections: View {
         Section("reader.settings.text") {
             Picker("reader.settings.font", selection: face) {
                 Text("reader.settings.font.system").tag(String?.none)
-                ForEach(FontCatalog.chinese) { entry in
+                ForEach(settings.faces) { entry in
                     // Each name is drawn in its own face: the sample is the only thing that
                     // actually tells you what you are picking.
                     Text(entry.displayName)
@@ -68,8 +68,10 @@ struct ReadingOverrideSections: View {
             }
             .accessibilityIdentifier("reader.settings.font")
 
+            AddInstalledFontRow(settings: settings, selection: face)
+
             followLine(
-                Self.faceName(settings.fontName(of: layer.above)),
+                faceName(settings.fontName(of: layer.above)),
                 revert: revert(\.fontName)
             )
 
@@ -260,8 +262,11 @@ struct ReadingOverrideSections: View {
     /// A face as the picker names it: the family a reader would recognise, or the system
     /// row's own label, so that "follow the shelf (系統字體)" reads like the row above it
     /// rather than like a PostScript name.
-    private static func faceName(_ fontName: String?) -> String {
+    ///
+    /// Over the whole offered list rather than the device's own faces, so that a shelf set
+    /// to a face the reader installed is named here the way the row above names it.
+    private func faceName(_ fontName: String?) -> String {
         guard let fontName else { return String(localized: "reader.settings.font.system") }
-        return FontCatalog.chinese.first { $0.fontName == fontName }?.displayName ?? fontName
+        return settings.faces.first { $0.fontName == fontName }?.displayName ?? fontName
     }
 }

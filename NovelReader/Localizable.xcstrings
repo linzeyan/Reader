@@ -6016,6 +6016,30 @@
         }
       }
     },
+    "reader.settings.font.installed" : {
+      "comment" : "Opens the system font panel, which lists faces this app cannot.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a font from this device…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入设备上的其他字体…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入裝置上的其他字體…"
+          }
+        }
+      }
+    },
     "reader.settings.font.system" : {
       "comment" : "Default system face.",
       "extractionState" : "manual",
