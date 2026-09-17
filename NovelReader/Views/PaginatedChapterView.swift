@@ -143,6 +143,19 @@ struct PaginatedChapterView: View {
     /// is the one renderer where all three answers are real: it is the only one whose
     /// swiping *is* the page turn rather than the scrolling underneath it.
     let pageTurn: ReaderSettings.PageTurn
+    /// How fast the reader reads, when they have asked the page to turn itself. Nil when
+    /// nobody has.
+    ///
+    /// A pace rather than a number of seconds, and the scrolling renderer's own — see
+    /// `ReadingPace.seconds(forTextHeight:lineHeight:)`. What a page waits for is how long
+    /// the text on it takes to read, which is the same question the other renderer answers
+    /// by moving.
+    let autoTurn: ReadingPace?
+    /// The sentence being read out loud, when the voice is in *this* chapter.
+    ///
+    /// The whole of what listening asks of a renderer with no scrolling to do: the page
+    /// turns to wherever the voice has reached and paints the words being said.
+    let speaking: SpokenSentence?
     /// Where the page begins, and how much of the chapter it ends on — the second is
     /// handed over rather than recomputed by the caller because only this view knows
     /// where its pages break. See `report(page:)`.
@@ -190,6 +203,13 @@ struct PaginatedChapterView: View {
     /// True while the finger is still down, which is what tells the difference between
     /// a selection being dragged and one waiting for an answer.
     @State private var isDragging = false
+    /// When the page in front of the reader arrived.
+    ///
+    /// What makes a pace changed mid-page count the time already spent on it. The wait is
+    /// restarted whenever the speed changes — the new duration is not knowable from the
+    /// old one — and without this a reader nudging the slider would push the turn a whole
+    /// page's reading away each time they touched it.
+    @State private var pageShownAt = Date.now
     /// The highlight a tap landed on, waiting to be removed or dismissed.
     @State private var picked: TextHighlight?
     /// For the links inside an article's sentences. From the environment rather than a
@@ -243,6 +263,23 @@ struct PaginatedChapterView: View {
             }
             pageLabel
         }
+        // The page that turns itself. One wait per page rather than a clock ticking
+        // through the chapter: what a page is worth depends on how much text is on it,
+        // and the reader can turn one themselves at any point — which restarts this,
+        // because the page they turned to is a page they have not read yet.
+        .task(id: autoTurnStep) { await waitAndTurn() }
+        // The page that follows a voice. Nothing to catch up with mid-page: a sentence is
+        // either on the page or it is not, which is the same band the scrolling renderer
+        // keeps the voice inside by scrolling.
+        .onChange(of: speaking) { _, sentence in
+            guard let sentence, let paginator else { return }
+            let page = paginator.pageIndex(for: sentence.anchor)
+            // Most sentences are on the page already. Turning to the page in front of the
+            // reader would still play the slide and tear down the view holding their
+            // selection, once a sentence.
+            guard page != pageIndex else { return }
+            turn(page - pageIndex)
+        }
         // Matches the scrolling reader's text inset, so switching modes does not move
         // the left margin of the book.
         .padding(.horizontal, 20)
@@ -258,6 +295,7 @@ struct PaginatedChapterView: View {
                     pageIndex: pageIndex,
                     highlights: highlights.flatMap { paginator.text.ranges(of: $0) },
                     selection: selection,
+                    spoken: speaking.flatMap { paginator.text.range(of: $0) },
                     highlightColor: UIColor(palette.highlight),
                     selectionColor: UIColor(palette.selection),
                     onSelectionDrag: { drag in select(drag, in: paginator) }
@@ -577,6 +615,10 @@ struct PaginatedChapterView: View {
     /// page displayed — a difference the shelf would show.
     private func report(page: Int) {
         guard let paginator else { return }
+        // Every way a page arrives in front of the reader passes through here — a turn, a
+        // selection dragged past the edge, a chapter rebuilt — which makes this the one
+        // place the self-turning page's clock can be started from. See `pageShownAt`.
+        pageShownAt = .now
         onAnchorChange(paginator.anchor(at: page), fraction(atPage: page))
     }
 
@@ -608,6 +650,40 @@ struct PaginatedChapterView: View {
     /// symmetric: a page that refuses to turn is tried again, a book that closes has to be
     /// found again.
     private static let systemEdge: CGFloat = 28
+
+    /// What restarts the wait before a page turns itself: a new page, a new chapter, a
+    /// changed speed, or the switch going off. Nil pace is off, and off keeps no timer.
+    private struct AutoTurnStep: Equatable {
+        let pace: Double?
+        let chapterKey: String
+        let page: Int
+    }
+
+    private var autoTurnStep: AutoTurnStep {
+        AutoTurnStep(pace: autoTurn?.linesPerMinute, chapterKey: chapterKey, page: pageIndex)
+    }
+
+    /// Gives the reader the page for as long as the text on it takes to read, then turns
+    /// it — which at the foot of a chapter is `turn(_:)`'s business and becomes the next
+    /// chapter.
+    ///
+    /// Measured one page ahead first, for `turnPastEdge`'s reason and one more: the page
+    /// in front of the reader only counts as short once there is nothing left to fill it,
+    /// and the frontier of a chapter still being laid out looks exactly like that.
+    private func waitAndTurn() async {
+        guard let pace = autoTurn, let paginator else { return }
+        paginator.paginate(through: pageIndex + 1)
+        let due = pace.seconds(
+            forTextHeight: paginator.filledHeight(ofPage: pageIndex),
+            lineHeight: metrics.lineHeight
+        )
+        let wait = due - Date.now.timeIntervalSince(pageShownAt)
+        if wait > 0 {
+            do { try await Task.sleep(for: .seconds(wait)) } catch { return }
+        }
+        guard !Task.isCancelled else { return }
+        turn(1)
+    }
 
     private func turn(_ delta: Int) {
         guard let paginator else { return }
@@ -736,6 +812,9 @@ private struct ChapterPageRenderer: UIViewRepresentable {
     /// Composed-string ranges of the stored highlights, already mapped out of anchors.
     let highlights: [NSRange]
     let selection: NSRange?
+    /// The sentence being read out loud, painted the way a selection is: both mean "this
+    /// is the passage in hand", and a reader is only ever doing one of the two.
+    let spoken: NSRange?
     let highlightColor: UIColor
     let selectionColor: UIColor
     let onSelectionDrag: (TextSelectionDrag) -> Void
@@ -756,7 +835,7 @@ private struct ChapterPageRenderer: UIViewRepresentable {
             page: pageIndex,
             from: paginator,
             highlights: highlights,
-            selection: selection,
+            picked: [selection, spoken].compactMap { $0 },
             highlightColor: highlightColor,
             selectionColor: selectionColor
         )
@@ -773,7 +852,9 @@ final class ChapterPageView: UIView {
     private var paginator: ChapterPaginator?
     private var pageIndex = 0
     private var highlights: [NSRange] = []
-    private var selection: NSRange?
+    /// What is in hand right now: the passage being selected, the sentence being read
+    /// aloud, or both — painted alike because they mean the same thing to a reader.
+    private var picked: [NSRange] = []
     private var highlightColor: UIColor = .clear
     private var selectionColor: UIColor = .clear
 
@@ -808,13 +889,13 @@ final class ChapterPageView: UIView {
         page: Int,
         from paginator: ChapterPaginator,
         highlights: [NSRange],
-        selection: NSRange?,
+        picked: [NSRange],
         highlightColor: UIColor,
         selectionColor: UIColor
     ) {
         self.paginator = paginator
         self.highlights = highlights
-        self.selection = selection
+        self.picked = picked
         self.highlightColor = highlightColor
         self.selectionColor = selectionColor
         pageIndex = page
@@ -840,7 +921,7 @@ final class ChapterPageView: UIView {
         // Behind the glyphs, in that order: a band painted over the text would wash out
         // the words it is there to point at.
         fill(highlights, with: highlightColor, from: paginator)
-        fill(selection.map { [$0] } ?? [], with: selectionColor, from: paginator)
+        fill(picked, with: selectionColor, from: paginator)
         paginator.draw(page: pageIndex, in: context, clippedTo: bounds)
     }
 

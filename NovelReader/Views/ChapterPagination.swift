@@ -617,6 +617,26 @@ extension ChapterText {
         }
     }
 
+    /// The composed range a sentence being read aloud covers.
+    ///
+    /// The voice and the page are composed from the same text — `ChineseText.rendered`
+    /// preserves UTF-16 length, so a sentence picked out of a paragraph names the same
+    /// characters here — which is what lets the band under the spoken words be stated as
+    /// an anchor and a length rather than searched for on the page.
+    ///
+    /// Nil for the chapter heading: it is read out, but it sits before the first
+    /// paragraph and no `TextAnchor` names it.
+    func range(of sentence: SpokenSentence) -> NSRange? {
+        guard !sentence.isTitle, sentence.range.length > 0,
+              paragraphRanges.indices.contains(sentence.paragraph)
+        else { return nil }
+        let paragraph = paragraphRanges[sentence.paragraph]
+        let start = paragraph.location + min(sentence.range.location, paragraph.length)
+        let end = min(start + sentence.range.length, NSMaxRange(paragraph))
+        guard end > start else { return nil }
+        return NSRange(location: start, length: end - start)
+    }
+
     /// The anchor pair and quoted text a composed range names.
     ///
     /// The quote keeps the separators the painting drops: a passage that runs from the
@@ -859,6 +879,19 @@ final class ChapterPaginator {
             if isComplete && index == pages.count - 1 { return index }
             index += 1
         }
+    }
+
+    /// How much of a page the text actually fills.
+    ///
+    /// Full by construction for every page but the last — a break is made by the first
+    /// line that did not fit — so only the tail of a chapter is ever short. What asks is
+    /// the page that turns itself: given a whole page's worth of reading time, a last
+    /// page of two lines is a reader watching nothing happen for most of a minute.
+    func filledHeight(ofPage index: Int) -> CGFloat {
+        guard pages.indices.contains(index) else { return 0 }
+        let page = pages[index]
+        guard index == pages.count - 1 else { return page.height }
+        return max(0, min(page.height, (lines.last?.bottom ?? page.top) - page.top))
     }
 
     /// The anchor for a page: its first character.

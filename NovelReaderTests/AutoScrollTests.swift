@@ -54,6 +54,40 @@ final class AutoScrollTests: XCTestCase {
         XCTAssertEqual(fast * 60 / large.lineHeight, 20, accuracy: 0.001)
     }
 
+    /// One slider, one meaning, in a renderer that has nothing to scroll.
+    ///
+    /// A page does not travel: it is held and then turned. So the same pace has to be
+    /// answerable in seconds as well as in points a second, and the two answers have to be
+    /// the same reading speed — otherwise a reader who set a comfortable pace while
+    /// scrolling and then switched to pages would have to find it again, with the slider
+    /// showing the number they already chose.
+    func testAPageIsHeldForAsLongAsScrollingPastItWouldTake() {
+        let pace = ReadingPace(linesPerMinute: 24)
+        let lineHeight = metrics(fontSize: 19).lineHeight
+        let page: CGFloat = 600
+
+        XCTAssertEqual(
+            pace.seconds(forTextHeight: page, lineHeight: lineHeight),
+            Double(page / pace.pointsPerSecond(lineHeight: lineHeight)),
+            accuracy: 0.001
+        )
+    }
+
+    /// The last page of a chapter is a few lines. Timed as a whole page it would leave the
+    /// reader watching nothing happen for most of a minute before the chapter turned.
+    func testAPageWithLessTextOnItIsHeldForLess() {
+        let pace = ReadingPace.standard
+        let lineHeight = metrics(fontSize: 19).lineHeight
+
+        let full = pace.seconds(forTextHeight: 600, lineHeight: lineHeight)
+        let short = pace.seconds(forTextHeight: 120, lineHeight: lineHeight)
+        XCTAssertEqual(full / short, 5, accuracy: 0.001)
+        XCTAssertEqual(
+            pace.seconds(forTextHeight: 0, lineHeight: lineHeight), 0,
+            "a page with nothing on it is a page to turn now"
+        )
+    }
+
     /// A `Slider` clamps a value outside its range and writes the clamp back, so a default
     /// outside the range the panel offers would be silently re-set the first time a reader
     /// opened it — changing a speed they never touched.

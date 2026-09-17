@@ -22,6 +22,22 @@ struct ReadingPace: Equatable {
     func pointsPerSecond(lineHeight: CGFloat) -> CGFloat {
         CGFloat(max(0, linesPerMinute)) * max(0, lineHeight) / 60
     }
+
+    /// How long a page holding this much text is worth — for a surface that waits and
+    /// then turns rather than travelling.
+    ///
+    /// The same speed answered in the other renderer's terms, so one slider means one
+    /// thing in both: a reader who set a pace while scrolling and then switched to pages
+    /// gets pages at the speed they were reading at, not a number that has to be found
+    /// again. Measured from the text on the page rather than from the page, because the
+    /// last page of a chapter is usually a few lines and a reader given a full page's
+    /// reading time for them is watching nothing happen.
+    ///
+    /// Zero for a page with nothing on it, which is a page to turn now.
+    func seconds(forTextHeight height: CGFloat, lineHeight: CGFloat) -> TimeInterval {
+        guard linesPerMinute > 0, lineHeight > 0, height > 0 else { return 0 }
+        return Double(height / lineHeight) / linesPerMinute * 60
+    }
 }
 
 extension ReadingMetrics {

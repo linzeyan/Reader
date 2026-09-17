@@ -129,19 +129,14 @@ struct ReaderView: View {
                     // Nil where the edge swipe does this instead: two ways out is a
                     // sixth of the bar spent saying the same thing twice.
                     onBack: settings.swipeToGoBack ? nil : { dismiss() },
-                    // Only where a page can move on its own. The paginated renderer turns
-                    // pages rather than scrolling, and a switch that did nothing there
-                    // would be a control the reader has to learn the exceptions to.
-                    autoScrolling: mode == .scroll ? $autoScrolling : nil,
-                    // Nil for the same reason, and it is the same reason: until pages turn
-                    // themselves, a voice in that renderer would read past the foot of the
-                    // page and leave the reader tapping to keep up with it.
-                    speech: mode == .scroll
-                        ? SpeechSwitch(
-                            isSpeaking: env.speech.isSpeaking,
-                            toggle: { toggleSpeech(model) }
-                        )
-                        : nil,
+                    // In both renderers, and the pace behind it means the same thing in
+                    // both: one moves the page at a reading speed, the other holds a page
+                    // for as long as the text on it takes to read.
+                    autoScrolling: $autoScrolling,
+                    speech: SpeechSwitch(
+                        isSpeaking: env.speech.isSpeaking,
+                        toggle: { toggleSpeech(model) }
+                    ),
                     showCatalog: $showCatalog, showSettings: $showSettings
                 )
             }
@@ -154,7 +149,7 @@ struct ReaderView: View {
         // `startListening` — and because two stacked sliders over the foot of the page
         // would be the chrome finally covering the book.
         .overlay(alignment: .bottom) {
-            if showControls, mode == .scroll {
+            if showControls {
                 if isListening, let model {
                     SpeechBar(
                         settings: settings,
@@ -292,12 +287,11 @@ struct ReaderView: View {
         // A question about a passage belongs to the renderer that asked it: the
         // paginated one is about to ask its own, over text it has laid out itself.
         markChoice = nil
-        // Nothing in the paginated renderer moves a page on its own, and a switch left on
-        // behind a mode change is one the reader has to find and turn off before it means
-        // anything again. The voice is worse than a switch: it would go on reading with
-        // no control on screen to stop it and no page following it.
-        autoScrolling = false
-        env.speech.stop()
+        // The voice and the self-moving page are carried across rather than switched off.
+        // Both renderers answer them now, both write the same position, and the pace is
+        // stated in the reader's own terms — so a book being read aloud goes on being read
+        // aloud from the same sentence, and a page moving on its own arrives as one that
+        // turns itself at the speed it was scrolling at.
         guard mode == .scroll else { return }
         model?.retarget()
     }
@@ -570,6 +564,15 @@ struct ReaderView: View {
                 highlights: model.highlights(inChapter: current.chapter.siteChapterId),
                 edgeGoesBack: settings.swipeToGoBack,
                 pageTurn: pageTurn,
+                autoTurn: autoScrolling ? settings.autoScrollPace : nil,
+                // Only what is being said *in this chapter*: the page draws one chapter at
+                // a time, and a voice that has read on into the next one moves this
+                // renderer by changing which chapter that is — see `ReaderModel.noteSpoken`.
+                speaking: isListening
+                    ? env.speech.current.flatMap {
+                        $0.chapterIndex == current.chapter.index ? $0 : nil
+                    }
+                    : nil,
                 onAnchorChange: { anchor, fraction in
                     openAtLastPage = nil
                     // Any page that does turn answers the question the notice asked.
@@ -627,6 +630,10 @@ struct ReaderView: View {
             // Only the end of the book is worth saying. Turning back from page one of
             // chapter one is a page that was never there, not a place to arrive at.
             reachedEndOfBook = edge == .end
+            // A page that turns itself has run out of book, which is the paginated
+            // renderer's version of the scrolling one running aground: a switch left on
+            // over a page that cannot turn is a control lying about what it is doing.
+            if edge == .end { autoScrolling = false }
             return
         }
         reachedEndOfBook = false

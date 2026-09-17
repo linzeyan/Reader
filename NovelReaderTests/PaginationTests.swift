@@ -342,6 +342,67 @@ final class PaginationTests: XCTestCase {
         )
     }
 
+    // MARK: - Reading with no hand on the page
+
+    /// What a page that turns itself is timed against. Every page but the last is full by
+    /// construction — the break was made by the first line that did not fit — and a page
+    /// measured short in the middle of a chapter would be one the reader is hurried off.
+    func testEveryPageButTheLastIsMeasuredAsFull() {
+        let paginator = paginator(paragraphs: longChapter())
+        XCTAssertGreaterThan(paginator.pages.count, 2)
+        for index in paginator.pages.indices.dropLast() {
+            XCTAssertEqual(
+                paginator.filledHeight(ofPage: index), pageSize.height,
+                "page \(index + 1) of \(paginator.pages.count) holds a full page of lines"
+            )
+        }
+    }
+
+    /// The end of a chapter, which is the case the measurement exists for: given a whole
+    /// page's reading time, two lines of text are most of a minute of watching nothing
+    /// happen before the chapter turns.
+    func testAChapterEndingPartWayDownAPageIsMeasuredShort() {
+        let paginator = paginator(paragraphs: ["他推開門。", "雪落在渡口的燈上。"])
+        XCTAssertEqual(paginator.pages.count, 1)
+
+        let filled = paginator.filledHeight(ofPage: 0)
+        XCTAssertGreaterThan(filled, 0, "there is text on it")
+        XCTAssertLessThan(
+            filled, pageSize.height / 2, "two short paragraphs are not a page of reading"
+        )
+    }
+
+    /// The band the page paints under a book being read aloud.
+    ///
+    /// Stated as an anchor and a length rather than searched for on the page, which only
+    /// holds because the voice and the page compose the same text — `ChineseText.rendered`
+    /// preserves UTF-16 length. One character of drift and the band sits under the wrong
+    /// words on every page of the book.
+    func testThePagePaintsExactlyTheSentenceTheVoiceIsSaying() {
+        let paragraphs = longChapter()
+        let title = "第十七章　渡口"
+        let text = ChapterText(title: title, paragraphs: paragraphs, typography: typography())
+        let composed = text.attributed.string as NSString
+        let sentences = SpeechScript.sentences(
+            chapterIndex: 0, siteChapterId: "c17", title: title,
+            paragraphs: paragraphs, script: .off
+        )
+        XCTAssertGreaterThan(
+            sentences.count, paragraphs.count, "each paragraph here is several sentences"
+        )
+
+        for sentence in sentences where !sentence.isTitle {
+            guard let range = text.range(of: sentence) else {
+                return XCTFail("the page has nothing to paint for 「\(sentence.text)」")
+            }
+            XCTAssertEqual(composed.substring(with: range), sentence.text)
+        }
+        XCTAssertNil(
+            sentences.first { $0.isTitle }.flatMap { text.range(of: $0) },
+            "the heading is read out, but no anchor names it and no band can be drawn for it"
+        )
+    }
+
     // MARK: - The mode setting
 
     /// Which renderer a reader chose has to outlive the app. It is the first thing they
