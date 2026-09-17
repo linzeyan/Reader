@@ -121,6 +121,13 @@ struct ReaderScrollingText: UIViewRepresentable {
     /// stopped: the end of the book, or a chapter that will not load. The owner holds the
     /// switch, so the owner is who has to be told it went off.
     let onAutoScrollEnded: () -> Void
+    /// The sentence being read out loud, drawn picked out and kept on screen. Nil when
+    /// nothing is speaking, or when the voice is somewhere this book is not.
+    ///
+    /// The whole of what listening asks of the page. Where a voice *is* in a book is one
+    /// anchor, and everything the page does about it — the band under the words, the
+    /// scroll that keeps up — follows from that one value changing.
+    let speaking: SpokenSentence?
 
     func makeUIView(context: Context) -> ReaderTextScrollView {
         let view = ReaderTextScrollView()
@@ -171,6 +178,9 @@ final class ReaderScrollCoordinator {
     /// several chapters behind where they were, and written down as their position by
     /// the report at the end of `place`.
     private var restoring: ReaderModel.ScrollTarget?
+    /// The spoken sentence the page has already been moved for, so the same one is not
+    /// chased on every frame the voice spends saying it.
+    private var followed: SpokenSentence?
 
     /// Everything that changes where lines break.
     private struct LayoutKey: Equatable {
@@ -269,6 +279,7 @@ final class ReaderScrollCoordinator {
         layOutMissing(for: config)
         dropChaptersNoLongerLoaded(config)
         applyTargetIfNeeded(config)
+        followSpeech(config)
         view?.refreshContentSize()
         view?.redraw()
     }
@@ -409,6 +420,11 @@ final class ReaderScrollCoordinator {
         // A jump states its aim before the chapter it names can possibly be laid out,
         // so this is where most landings actually happen.
         applyTargetIfNeeded(config)
+        // And so does the voice crossing into a chapter: it reads the next one as soon as
+        // the model has the text, which is a column's layout earlier than the page can
+        // show it. Until this landed there was nothing to aim at, and the sentence the
+        // reader is hearing would have been followed only when the one after it began.
+        followSpeech(config)
         view?.redraw()
         reportPlace()
     }
@@ -570,6 +586,59 @@ final class ReaderScrollCoordinator {
         guard let view, let chapter = placed.first(where: { $0.chapterIndex == index })
         else { return }
         view.setReadingOffset(chapter.top + chapter.column.y(for: anchor), animated: animated)
+    }
+
+    /// Where a sentence is put when the page moves to keep up with the voice.
+    ///
+    /// A third of the way down rather than at the top: what is being read out has the
+    /// lines that led to it above it and what comes next below it, which is where a
+    /// reader's eye already is on a page they are following.
+    private static let spokenLine: CGFloat = 1.0 / 3
+
+    /// How far down the window a spoken sentence may sit before the page follows it.
+    ///
+    /// Not every sentence, and this is the difference between reading along and watching
+    /// a page twitch: a scroll per sentence moves the text under the eye every few
+    /// seconds, always by a line or two, which is exactly the motion that makes text hard
+    /// to read. Letting the voice walk down to two thirds and then moving it back up to a
+    /// third means one deliberate movement every several sentences, and nothing in
+    /// between.
+    private static let spokenReach: CGFloat = 2.0 / 3
+
+    /// Keeps the page under the voice.
+    private func followSpeech(_ config: ReaderScrollingText) {
+        guard let sentence = config.speaking else {
+            followed = nil
+            return
+        }
+        // Nothing to aim at yet — the voice is a chapter ahead of what has been laid out.
+        // Left unrecorded on purpose, so the landing of that column tries this again
+        // rather than the reader waiting for the sentence after it.
+        guard sentence != followed, let view,
+              placed.contains(where: { $0.chapterIndex == sentence.chapterIndex })
+        else { return }
+        followed = sentence
+        guard let destination = speechDestination(for: sentence) else { return }
+        // Animated, unlike every other move this coordinator makes: the reader is looking
+        // at the page while it happens, and text that jumps by half a screen with nothing
+        // touching it is text they then have to find their place in.
+        view.setReadingOffset(destination, animated: true)
+    }
+
+    /// Where the page has to go to keep up with a spoken sentence, or nil where the
+    /// sentence is already somewhere a reader following along can see it.
+    ///
+    /// Separate from the move for `pageTurnDestination`'s reason: the number can be
+    /// asserted without a runloop to animate through.
+    func speechDestination(for sentence: SpokenSentence) -> CGFloat? {
+        guard let view,
+              let chapter = placed.first(where: { $0.chapterIndex == sentence.chapterIndex })
+        else { return nil }
+        let inWindow = chapter.top + chapter.column.y(for: sentence.anchor) - view.readingOffset
+        guard inWindow < 0 || inWindow > view.visibleHeight * Self.spokenReach else { return nil }
+        return view.clamped(
+            view.readingOffset + inWindow - view.visibleHeight * Self.spokenLine
+        )
     }
 
     /// The paragraphs with any part on screen, in the shape `ReaderTapZone` reads.
@@ -835,7 +904,38 @@ final class ReaderScrollCoordinator {
                 result.append((rect, UIColor(config.palette.selection)))
             }
         }
+        // The sentence in the voice's mouth, in the same ink as the paragraph a question
+        // is being asked about — both mean "this is the one the app is pointing at", and
+        // a second colour for the second of them would be a palette entry every theme has
+        // to answer for.
+        if let sentence = config.speaking, let range = composedRange(of: sentence, in: chapter),
+           reaches(sentence.paragraph, through: sentence.paragraph) {
+            for rect in chapter.column.rects(for: range) where rect.intersects(visible) {
+                result.append((rect, UIColor(config.palette.selection)))
+            }
+        }
         return result
+    }
+
+    /// Where a spoken sentence sits in one chapter's composed text.
+    ///
+    /// Nil unless it is this chapter's sentence and there is ink to put a band under: a
+    /// heading is announced without being one of the chapter's paragraphs, so it names no
+    /// range at all.
+    ///
+    /// Clamped to the paragraph, for the reason `ChapterText.offset(for:)` clamps. The
+    /// voice reads the model's paragraphs and the column was composed from the same text,
+    /// but those are two copies — and a chapter re-fetched between them can be shorter
+    /// than the words being said.
+    private func composedRange(of sentence: SpokenSentence, in chapter: PlacedColumn) -> NSRange? {
+        guard !sentence.isTitle, chapter.siteChapterId == sentence.siteChapterId,
+              chapter.column.text.paragraphRanges.indices.contains(sentence.paragraph)
+        else { return nil }
+        let paragraph = chapter.column.text.paragraphRanges[sentence.paragraph]
+        let start = chapter.column.text.offset(for: sentence.anchor)
+        let length = min(sentence.range.length, NSMaxRange(paragraph) - start)
+        guard length > 0 else { return nil }
+        return NSRange(location: start, length: length)
     }
 
     // MARK: - Accessibility

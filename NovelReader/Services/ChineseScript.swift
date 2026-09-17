@@ -150,7 +150,11 @@ enum ChineseText {
     /// Worth asking before anything else: most of what goes through here on an English
     /// article, and every marker and rule in a Chinese one, has no Han character in it at
     /// all, and both converters cost more than this scan.
-    private static func isHan(_ scalar: Unicode.Scalar) -> Bool {
+    ///
+    /// Also what picks the voice that reads a sentence out — see `SpeechReader`, which
+    /// asks the same question of the same text and must not answer it from a second copy
+    /// of these ranges.
+    static func isHan(_ scalar: Unicode.Scalar) -> Bool {
         switch scalar.value {
         case 0x3400...0x4DBF,   // CJK Extension A
              0x4E00...0x9FFF,   // CJK Unified Ideographs

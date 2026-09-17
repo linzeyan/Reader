@@ -642,19 +642,10 @@ extension ChapterText {
 /// is hiding; sentences are boundaries a reader can see before they press. It also
 /// means a highlight can never start mid-word or end mid-clause, which is the failure
 /// mode of every handle-free selection that snaps to nothing.
+///
+/// What counts as a sentence is `SentenceRules`, which the voice reads the same text by
+/// — see there for why that is one rule and not two.
 extension ChapterText {
-    /// What ends a sentence.
-    ///
-    /// The CJK terminators this app mostly reads, plus the Latin ones. `.` is included
-    /// knowing it splits "Mr. Smith" wrongly: over-splitting is recoverable by sliding
-    /// the finger further, whereas a paragraph with no terminator at all can only be
-    /// marked whole.
-    private static let terminators = Set("。．！？!?；;…⋯.".unicodeScalars.map { UInt16($0.value) })
-
-    /// Punctuation that belongs to the sentence it closes, so 「…。」 ends after the
-    /// bracket rather than between the two marks.
-    private static let closers = Set("」』〉》】）)］]｝}”’\"'".unicodeScalars.map { UInt16($0.value) })
-
     /// Expands two character positions into the whole sentences they fall in.
     ///
     /// Returns nil for anything a `TextAnchor` cannot name — the chapter heading sits
@@ -667,51 +658,10 @@ extension ChapterText {
         guard upper >= first.location else { return nil }
         let startParagraph = paragraphRanges[anchor(atOffset: max(lower, first.location)).paragraph]
         let endParagraph = paragraphRanges[anchor(atOffset: upper).paragraph]
-        let head = sentenceStart(at: lower, in: startParagraph)
-        let tail = sentenceEnd(at: upper, in: endParagraph)
+        let head = SentenceRules.start(at: lower, in: startParagraph, of: characters)
+        let tail = SentenceRules.end(at: upper, in: endParagraph, of: characters)
         guard tail > head else { return nil }
         return NSRange(location: head, length: tail - head)
-    }
-
-    /// The sentence boundary at or before `offset`, never leaving the paragraph.
-    private func sentenceStart(at offset: Int, in paragraph: NSRange) -> Int {
-        var index = clamp(offset, to: paragraph)
-        while index > paragraph.location, !endsSentence(before: index, in: paragraph) {
-            index -= 1
-        }
-        return index
-    }
-
-    /// The sentence boundary after `offset`, never leaving the paragraph.
-    ///
-    /// Starts one past the offset so that pressing *on* a full stop selects the
-    /// sentence it ends rather than the one after it.
-    private func sentenceEnd(at offset: Int, in paragraph: NSRange) -> Int {
-        let end = NSMaxRange(paragraph)
-        var index = min(clamp(offset, to: paragraph) + 1, end)
-        while index < end, !endsSentence(before: index, in: paragraph) {
-            index += 1
-        }
-        return index
-    }
-
-    /// Whether a sentence finishes immediately before `index`.
-    private func endsSentence(before index: Int, in paragraph: NSRange) -> Bool {
-        let end = NSMaxRange(paragraph)
-        guard index > paragraph.location, index <= end else { return false }
-        // A closer sitting at this position still belongs to the sentence being closed,
-        // so the boundary is on the far side of it.
-        if index < end, Self.closers.contains(characters.character(at: index)) { return false }
-        var scan = index - 1
-        while scan >= paragraph.location, Self.closers.contains(characters.character(at: scan)) {
-            scan -= 1
-        }
-        guard scan >= paragraph.location else { return false }
-        return Self.terminators.contains(characters.character(at: scan))
-    }
-
-    private func clamp(_ offset: Int, to paragraph: NSRange) -> Int {
-        min(max(offset, paragraph.location), NSMaxRange(paragraph))
     }
 }
 

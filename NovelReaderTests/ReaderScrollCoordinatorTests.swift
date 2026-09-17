@@ -80,7 +80,8 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         onNeedsNext: @escaping () -> Void = {},
         onRanOut: @escaping () -> Void = {},
         autoScroll: CGFloat = 0,
-        onAutoScrollEnded: @escaping () -> Void = {}
+        onAutoScrollEnded: @escaping () -> Void = {},
+        speaking: SpokenSentence? = nil
     ) -> ReaderScrollingText {
         ReaderScrollingText(
             chapters: chapters,
@@ -92,7 +93,8 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             onRanOut: onRanOut,
             onTouch: { _ in }, onTap: { _ in false }, onMark: { _, _ in },
             onTargetReached: {},
-            autoScroll: autoScroll, onAutoScrollEnded: onAutoScrollEnded
+            autoScroll: autoScroll, onAutoScrollEnded: onAutoScrollEnded,
+            speaking: speaking
         )
     }
 
@@ -507,6 +509,93 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         let stopped = view.readingOffset
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertEqual(view.readingOffset, stopped, "a page switched off has to stay put")
+    }
+
+    // MARK: - Keeping up with the voice
+
+    /// The rule that decides when a page follows what is being read out.
+    ///
+    /// Following every sentence is the obvious implementation and the wrong one: each
+    /// sentence is a line or two of text, so the page would step under the reader's eye
+    /// every few seconds for the whole book. Nothing moves until the voice has walked
+    /// down to two thirds of the window, and then the sentence goes back up to a third —
+    /// one deliberate movement, several sentences apart.
+    func testThePageOnlyFollowsTheVoiceOnceItHasWalkedDownTheWindow() async throws {
+        let window = [chapter(0, paragraphs: 40)]
+        try await show(window)
+        let column = try XCTUnwrap(coordinator.placed.first).column
+        let screen = view.visibleHeight
+
+        // A sentence the reader can comfortably see: the page has no business moving.
+        let near = try XCTUnwrap(sentence(inParagraph: 1, of: window[0]))
+        XCTAssertLessThan(column.y(for: near.anchor), screen * 2 / 3)
+        XCTAssertNil(coordinator.speechDestination(for: near))
+
+        // One well below the fold, which the reader cannot be following along with.
+        let below = try XCTUnwrap(sentence(inParagraph: 12, of: window[0]))
+        XCTAssertGreaterThan(column.y(for: below.anchor), screen)
+        let destination = try XCTUnwrap(coordinator.speechDestination(for: below))
+        XCTAssertEqual(
+            column.y(for: below.anchor) - destination, screen / 3, accuracy: 0.5,
+            "the sentence being read has to land a third of the way down the window"
+        )
+    }
+
+    /// The wiring, for `AutoScrollDriver`'s reason: a rule that works out the right
+    /// number and a page that never moves are indistinguishable to a reader, and only one
+    /// of the two is something a unit test notices. What is asserted here is the offset
+    /// itself, reached by handing the coordinator a sentence exactly as the voice does.
+    func testThePageMovesItselfWhenTheVoiceWalksOutOfTheWindow() async throws {
+        let window = [chapter(0, paragraphs: 40)]
+        try await show(window)
+        XCTAssertEqual(view.readingOffset, 0)
+
+        let below = try XCTUnwrap(sentence(inParagraph: 12, of: window[0]))
+        let destination = try XCTUnwrap(coordinator.speechDestination(for: below))
+        coordinator.update(with: text(window, speaking: below))
+
+        // Animated, so it arrives over several frames of the runloop rather than at once.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while abs(view.readingOffset - destination) > 1 {
+            guard ContinuousClock.now < deadline else {
+                return XCTFail(
+                    "the voice moved on and the page stayed at \(view.readingOffset), "
+                        + "\(destination) away from the sentence being read"
+                )
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// The same sentence, said again by the next `updateUIView`, must not move anything:
+    /// a place report, a highlight, any of the dozen things that re-run this view happen
+    /// while one sentence is being read, and a page that re-aimed on each of them would
+    /// fight a reader who scrolled ahead.
+    func testThePageIsNotMovedTwiceForOneSentence() async throws {
+        let window = [chapter(0, paragraphs: 40)]
+        try await show(window)
+        let below = try XCTUnwrap(sentence(inParagraph: 12, of: window[0]))
+        coordinator.update(with: text(window, speaking: below))
+        try await Task.sleep(for: .milliseconds(400))
+
+        let landed = view.readingOffset
+        view.contentOffset.y = landed + 400
+        coordinator.update(with: text(window, speaking: below))
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(view.readingOffset, landed + 400, accuracy: 1)
+    }
+
+    /// The first sentence of a paragraph, as the voice would be handed it.
+    private func sentence(
+        inParagraph paragraph: Int, of chapter: ReaderModel.LoadedChapter
+    ) -> SpokenSentence? {
+        SpeechScript.sentences(
+            chapterIndex: chapter.chapter.index,
+            siteChapterId: chapter.chapter.siteChapterId,
+            title: chapter.chapter.title,
+            paragraphs: chapter.paragraphs,
+            script: .off
+        ).first { $0.paragraph == paragraph && !$0.isTitle }
     }
 
     /// One tapped turn, asserted on what the reader is left looking at rather than on

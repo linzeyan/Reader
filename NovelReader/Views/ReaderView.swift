@@ -133,6 +133,15 @@ struct ReaderView: View {
                     // pages rather than scrolling, and a switch that did nothing there
                     // would be a control the reader has to learn the exceptions to.
                     autoScrolling: mode == .scroll ? $autoScrolling : nil,
+                    // Nil for the same reason, and it is the same reason: until pages turn
+                    // themselves, a voice in that renderer would read past the foot of the
+                    // page and leave the reader tapping to keep up with it.
+                    speech: mode == .scroll
+                        ? SpeechSwitch(
+                            isSpeaking: env.speech.isSpeaking,
+                            toggle: { toggleSpeech(model) }
+                        )
+                        : nil,
                     showCatalog: $showCatalog, showSettings: $showSettings
                 )
             }
@@ -140,13 +149,22 @@ struct ReaderView: View {
         // Only alongside the controls. A reader who has put the chrome away is watching
         // the text, and a slider left floating over it would be the one thing on screen
         // that is not the book.
+        //
+        // One strip for the two of them because they are never both on — see
+        // `startListening` — and because two stacked sliders over the foot of the page
+        // would be the chrome finally covering the book.
         .overlay(alignment: .bottom) {
-            if showControls, autoScrolling, mode == .scroll {
-                AutoScrollBar(settings: settings)
+            if showControls, mode == .scroll {
+                if isListening {
+                    SpeechBar(settings: settings) { env.speech.setPace($0) }
+                } else if autoScrolling {
+                    AutoScrollBar(settings: settings)
+                }
             }
         }
         .animation(.snappy(duration: 0.2), value: showControls)
         .animation(.snappy(duration: 0.2), value: autoScrolling)
+        .animation(.snappy(duration: 0.2), value: isListening)
         .sheet(isPresented: $showCatalog) {
             catalogSheet
                 // Which tab is right depends on what is being read, and that can change
@@ -213,8 +231,15 @@ struct ReaderView: View {
         // A page moving on its own is the only reading this app does with no touches in
         // it, so it is the only one the system would lock the screen in the middle of —
         // whatever the reader answered about keeping it awake in general.
+        //
+        // Not listening, which is the opposite case: a locked screen is where that is
+        // meant to end up, and holding the screen awake for it would burn a battery on a
+        // phone in a pocket.
         .onChange(of: autoScrolling) { _, moving in
             UIApplication.shared.isIdleTimerDisabled = moving || settings.keepScreenOn
+            // Two things moving one page is a page nobody is steering. The reader asked
+            // for this one, so the voice is the one that gives way.
+            if moving { env.speech.pause() }
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn
@@ -222,6 +247,10 @@ struct ReaderView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             model?.stopReading()
+            // Listening ends with the book it is in. The voice is owned outside this
+            // screen so that a locked phone goes on reading — not so that a reader who
+            // walked back to the shelf is read to by a book they have closed.
+            env.speech.stop()
             #if DEBUG
             ReaderProbe.stop()
             #endif
@@ -238,6 +267,12 @@ struct ReaderView: View {
             // the reader believes is still down would hold back every later chapter it
             // is asked for. Leaving is as good as lifting.
             model?.touch(down: false)
+            // The voice cannot survive the app being suspended — this build has not asked
+            // for the background audio mode — and a reader who comes back to a headphones
+            // glyph that says it is reading, over silence, has a broken feature rather than
+            // a paused one. Said out loud here, so that the day the mode *is* asked for,
+            // this line is the one that has to go.
+            if phase == .background { env.speech.pause() }
         }
     }
 
@@ -250,10 +285,63 @@ struct ReaderView: View {
         markChoice = nil
         // Nothing in the paginated renderer moves a page on its own, and a switch left on
         // behind a mode change is one the reader has to find and turn off before it means
-        // anything again.
+        // anything again. The voice is worse than a switch: it would go on reading with
+        // no control on screen to stop it and no page following it.
         autoScrolling = false
+        env.speech.stop()
         guard mode == .scroll else { return }
         model?.retarget()
+    }
+
+    /// Whether the voice is in this book, reading or stopped mid-sentence.
+    ///
+    /// Not `isSpeaking`: the pace slider belongs to a reader who has paused as much as to
+    /// one who is listening, and a strip that vanished on pause would be one they have to
+    /// start the voice again to reach.
+    private var isListening: Bool {
+        env.speech.bookId == book.id && env.speech.state != .idle
+    }
+
+    /// The listening control's one action.
+    ///
+    /// Three states behind two glyphs: not reading this book, reading it, and stopped
+    /// mid-sentence. Resuming is not starting — it carries on inside the sentence the
+    /// reader stopped, which is why pausing does not simply throw the voice away and
+    /// start again from wherever the page happens to be.
+    private func toggleSpeech(_ model: ReaderModel) {
+        switch env.speech.state {
+        case .speaking: env.speech.pause()
+        case .paused where isListening: env.speech.resume()
+        case .paused, .idle: startListening(model)
+        }
+    }
+
+    private func startListening(_ model: ReaderModel) {
+        // See `onChange(of: autoScrolling)` — one page, one thing moving it.
+        autoScrolling = false
+        let script = metrics.script
+        env.speech.start(
+            bookId: book.id,
+            chapterIndex: model.currentChapterIndex,
+            anchor: model.currentAnchor,
+            script: script,
+            pace: settings.speechPace
+        ) { [weak model] index in
+            guard let model else { return nil }
+            if let loaded = model.loaded.first(where: { $0.chapter.index == index }) {
+                return spokenSentences(of: loaded, script: script)
+            }
+            // The voice has read to the foot of what is loaded. This is the same ask the
+            // page makes as it nears it — and it is the reason listening can outrun the
+            // eye at all: nothing else would pull the next chapter in for a reader who
+            // has put the phone down.
+            guard model.canLoadNext, model.loaded.last?.chapter.index == index - 1 else {
+                return nil
+            }
+            await model.loadNext()
+            return model.loaded.first(where: { $0.chapter.index == index })
+                .map { spokenSentences(of: $0, script: script) }
+        }
     }
 
     // MARK: - Text
@@ -337,7 +425,12 @@ struct ReaderView: View {
                 autoScroll: autoScrolling
                     ? settings.autoScrollPace.pointsPerSecond(lineHeight: metrics.lineHeight)
                     : 0,
-                onAutoScrollEnded: { autoScrolling = false }
+                onAutoScrollEnded: { autoScrolling = false },
+                // Only what is being said *in this book*. The voice outlives this screen
+                // — see `SpeechReader` — so a reader who left one book listening and
+                // opened another would otherwise find a sentence of the first picked out
+                // somewhere in the second.
+                speaking: env.speech.bookId == book.id ? env.speech.current : nil
             )
             .overlay(alignment: .bottom) { markBar(model) }
             .overlay(alignment: .bottom) { loadFailure(model) }
@@ -801,6 +894,9 @@ private struct ReaderControlBar: View {
     /// Whether the page is moving on its own, where it can. Nil in a renderer that turns
     /// pages instead of scrolling, for `onBack`'s reason: nothing to switch, no switch.
     let autoScrolling: Binding<Bool>?
+    /// Reading the book out loud, where a page can follow the voice. Nil for
+    /// `autoScrolling`'s reason.
+    let speech: SpeechSwitch?
     @Binding var showCatalog: Bool
     @Binding var showSettings: Bool
     @Environment(\.openURL) private var openURL
@@ -879,6 +975,17 @@ private struct ReaderControlBar: View {
                 }
                 .accessibilityIdentifier("reader.autoScroll")
             }
+            if let speech {
+                // Filled while the voice is reading, the way the bookmark is filled while
+                // the page is saved: what the glyph says is the state it is in, and the
+                // tap is what changes it.
+                control(
+                    speech.isSpeaking ? "headphones.circle.fill" : "headphones.circle",
+                    label: speech.isSpeaking ? "reader.speech.pause" : "reader.speech.start",
+                    action: speech.toggle
+                )
+                .accessibilityIdentifier("reader.speech")
+            }
             control("textformat.size", label: "reader.settings") { showSettings = true }
         }
         .padding(.vertical, 10)
@@ -907,6 +1014,66 @@ private struct ReaderControlBar: View {
         Image(systemName: systemImage)
             .font(.system(size: 18))
             .frame(maxWidth: .infinity, minHeight: 34)
+    }
+}
+
+/// One loaded chapter as sentences for the voice.
+///
+/// A free function rather than a method on the reader, because the closure that calls it
+/// is handed to something that outlives this screen: a method would carry a copy of the
+/// view's state into it, and every answer in that copy is one from the moment listening
+/// started.
+private func spokenSentences(
+    of chapter: ReaderModel.LoadedChapter, script: ChineseScript
+) -> [SpokenSentence] {
+    SpeechScript.sentences(
+        chapterIndex: chapter.chapter.index,
+        siteChapterId: chapter.chapter.siteChapterId,
+        title: chapter.chapter.title,
+        paragraphs: chapter.paragraphs,
+        script: script
+    )
+}
+
+/// The listening control's two states and the one action between them.
+///
+/// Nil in a renderer that cannot follow a voice, the way `autoScrolling` is nil in one
+/// that cannot move a page: a button with nothing to do is not a button.
+private struct SpeechSwitch {
+    let isSpeaking: Bool
+    let toggle: () -> Void
+}
+
+/// How fast the voice reads.
+///
+/// The auto-scroll strip's twin, and deliberately the same strip in the same place: both
+/// answer "this is going too fast for me", and a reader who has found one has found the
+/// other. The pace is handed over when the slider is let go rather than as it moves —
+/// see `SpeechReader.setPace`, where the sentence has to be said again to be said faster.
+private struct SpeechBar: View {
+    @Bindable var settings: ReaderSettings
+    let onPace: (SpeechPace) -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "tortoise")
+            Slider(value: $settings.speechPace.rate, in: SpeechPace.range) { editing in
+                guard !editing else { return }
+                onPace(settings.speechPace)
+            }
+            .accessibilityLabel(Text("reader.speech.rate"))
+            .accessibilityIdentifier("reader.speech.rate")
+            Image(systemName: "hare")
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .background(.bar, in: .capsule)
+        .padding(.horizontal, 12)
+        // Clear of the control bar's own resting place — see `AutoScrollBar`.
+        .padding(.bottom, 72)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 }
 
@@ -1286,6 +1453,13 @@ final class ReaderModel {
     func jump(toChapterAt index: Int, anchor: TextAnchor = .start) async {
         guard chapters.indices.contains(index) else { return }
         persistProgress()
+        // Every deliberate move through this book comes through here — the catalog, the
+        // chapter buttons, a saved position — and every one of them is the reader saying
+        // they want to be somewhere else. A voice that went on reading where they left
+        // would drag the page back to itself a sentence later, and the reader would be
+        // fighting their own book. Not on the paths that merely load more text: reading
+        // on is not moving.
+        env.speech.stop()
         // Whatever was read ahead belonged to the old position.
         readAheadTask?.cancel()
         readAheadPhase = nil

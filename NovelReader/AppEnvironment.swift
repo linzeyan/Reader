@@ -48,6 +48,13 @@ final class AppEnvironment {
     let localImporter: LocalBookImporter
     let comicImporter: ComicArchiveImporter
     let backgroundDownloads: BackgroundDownloads
+    /// The voice, and the sentences waiting for it.
+    ///
+    /// Here rather than on the reader's model for the reason the download queue is here:
+    /// it must not stop because the screen that started it went away. Listening is the
+    /// one thing this app does that a reader expects to go on while the phone is in
+    /// their pocket — see `SpeechReader`.
+    let speech = SpeechReader()
     /// Owned but not exposed: nothing on screen asks about a queue read back from
     /// disk, it simply appears as the paused download it was when the app died.
     private let queueRestorer: DownloadQueueRestorer

@@ -197,6 +197,15 @@ final class ReaderSettings {
     var autoScrollPace: ReadingPace {
         didSet { defaults.set(autoScrollPace.linesPerMinute, forKey: Keys.autoScrollPace) }
     }
+    /// How fast the voice reads a book out loud — see `SpeechPace`.
+    ///
+    /// Not the same slider as the one above and not derived from it: a page that moves
+    /// under the eye and a voice reading to the ear are two speeds a reader picks for two
+    /// different reasons, and tying them together would mean listening faster the moment
+    /// somebody enlarged the type.
+    var speechPace: SpeechPace {
+        didSet { defaults.set(speechPace.rate, forKey: Keys.speechPace) }
+    }
 
     // MARK: - Writing one book's own layer
     //
@@ -278,6 +287,7 @@ final class ReaderSettings {
         static let pageTurn = "reader.pageTurn"
         static let swipeToGoBack = "reader.swipeToGoBack"
         static let autoScrollPace = "reader.autoScrollPace"
+        static let speechPace = "reader.speechPace"
     }
 
     private let defaults: UserDefaults
@@ -357,6 +367,9 @@ final class ReaderSettings {
         autoScrollPace = ReadingPace(
             linesPerMinute: defaults.object(forKey: Keys.autoScrollPace) as? Double
                 ?? ReadingPace.standard.linesPerMinute
+        )
+        speechPace = SpeechPace(
+            rate: defaults.object(forKey: Keys.speechPace) as? Double ?? SpeechPace.standard.rate
         )
         // `didSet` does not run for the value an initializer assigns, and the dictionaries
         // are wanted before the first chapter is composed rather than during it.
