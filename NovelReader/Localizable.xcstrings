@@ -6736,6 +6736,30 @@
         }
       }
     },
+    "reader.speech.downloadedOnly" : {
+      "comment" : "Shown when the next chapter is not on the device: a locked phone can only be read what has been downloaded.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "With the screen locked, only downloaded chapters can be read aloud."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "锁屏后只会朗读已下载的章节。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "鎖屏後只會朗讀已下載的章節。"
+          }
+        }
+      }
+    },
     "reader.speech.pause" : {
       "comment" : "Stops the voice mid-sentence; pressing it again carries on from there.",
       "extractionState" : "manual",
@@ -6780,6 +6804,78 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "朗讀速度"
+          }
+        }
+      }
+    },
+    "reader.speech.sleep" : {
+      "comment" : "Stops the voice after a while, for a reader falling asleep.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sleep timer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "睡眠计时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "睡眠計時"
+          }
+        }
+      }
+    },
+    "reader.speech.sleep.minutes %lld" : {
+      "comment" : "One sleep timer choice.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld minutes"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分钟"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分鐘"
+          }
+        }
+      }
+    },
+    "reader.speech.sleep.off" : {
+      "comment" : "Turns the sleep timer off again.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No timer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不计时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不計時"
           }
         }
       }

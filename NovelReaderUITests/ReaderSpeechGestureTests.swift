@@ -28,20 +28,7 @@ final class ReaderSpeechGestureTests: XCTestCase {
     }
 
     func testTheControlBarReadsTheBookOutLoudAndThePageFollowsIt() throws {
-        app.openLibraryTab()
-        let book = app.demoNovelRow()
-        XCTAssertTrue(book.waitForExistence(timeout: 20), "the demo library should be seeded")
-        book.tap()
-        let read = app.descendants(matching: .any).matching(identifier: "book.read").firstMatch
-        XCTAssertTrue(read.waitForExistence(timeout: 20))
-        read.tap()
-
-        XCTAssertTrue(
-            app.otherElements["reader.text"].waitForExistence(timeout: 20),
-            "the scrolling renderer should be showing"
-        )
-        XCTAssertFalse(app.topParagraphLabel().isEmpty, "the reader should have text on screen")
-
+        openTheDemoBook()
         showControls()
         let control = app.descendants(matching: .any)
             .matching(identifier: "reader.speech").firstMatch
@@ -79,6 +66,62 @@ final class ReaderSpeechGestureTests: XCTestCase {
             app.topParagraphLabel(), stopped,
             "a voice the reader paused has to stop reading them the book"
         )
+    }
+
+    /// Coming back to a book that was read to while nobody was looking: the page lands on
+    /// what the voice is saying now, not on the paragraph the eye left.
+    ///
+    /// That is the half of background listening a test can hold. While the app is off
+    /// screen there is no view to query and nothing to assert against, so what is checked
+    /// is what is true afterwards — and getting here at all exercises the two things that
+    /// have no other cover: the position the voice writes as it goes (nothing is drawn, so
+    /// neither renderer reports one) and the re-aim when the app comes back.
+    ///
+    /// It is *not* evidence that the `audio` background mode works. Measured: this walk
+    /// passes with that mode taken out of `Info.plist`, because a simulator does not
+    /// suspend a backgrounded app the way a phone does. Only a device can settle that one
+    /// — see PITFALLS, 2026-09-18.
+    func testComingBackFromTheBackgroundLandsOnWhatTheVoiceIsReading() throws {
+        openTheDemoBook()
+        showControls()
+        let control = app.descendants(matching: .any)
+            .matching(identifier: "reader.speech").firstMatch
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+        control.tap()
+
+        let pace = app.descendants(matching: .any)
+            .matching(identifier: "reader.speech.rate").firstMatch
+        XCTAssertTrue(pace.waitForExistence(timeout: 10), "listening should have started")
+        let start = app.topParagraphLabel()
+
+        XCUIDevice.shared.press(.home)
+        // Long enough to be several sentences of reading at the pace this walk sets.
+        Thread.sleep(forTimeInterval: 25)
+        app.activate()
+
+        XCTAssertTrue(
+            app.otherElements["reader.text"].waitForExistence(timeout: 20),
+            "the reader should still be up after coming back"
+        )
+        XCTAssertTrue(
+            movedAway(from: start, within: 15),
+            "the app was put away while it was reading and came back to the same paragraph"
+        )
+    }
+
+    private func openTheDemoBook() {
+        app.openLibraryTab()
+        let book = app.demoNovelRow()
+        XCTAssertTrue(book.waitForExistence(timeout: 20), "the demo library should be seeded")
+        book.tap()
+        let read = app.descendants(matching: .any).matching(identifier: "book.read").firstMatch
+        XCTAssertTrue(read.waitForExistence(timeout: 20))
+        read.tap()
+        XCTAssertTrue(
+            app.otherElements["reader.text"].waitForExistence(timeout: 20),
+            "the scrolling renderer should be showing"
+        )
+        XCTAssertFalse(app.topParagraphLabel().isEmpty, "the reader should have text on screen")
     }
 
     /// Brings the chrome up by tapping text in the band that asks for it — see

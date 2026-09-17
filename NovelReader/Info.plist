@@ -88,13 +88,19 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<!-- "processing" only. A paced download of a long book is minutes of work, not
-	     the seconds an app-refresh window grants, and it is not a background
-	     URLSession: the chapters come through the one WKWebView that holds the
-	     site's Cloudflare clearance cookie. -->
+	<!-- "processing" rather than an app-refresh window: a paced download of a long
+	     book is minutes of work, not seconds, and it is not a background URLSession
+	     either — the chapters come through the one WKWebView that holds the site's
+	     Cloudflare clearance cookie.
+
+	     "audio" is what lets a book go on being read aloud with the screen locked.
+	     It does not lift the limit above: the text a locked phone can read is the
+	     text already on disk, because fetching the next chapter still needs that web
+	     view and a window to run it in. See `SpeechReader`. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>
+		<string>audio</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>

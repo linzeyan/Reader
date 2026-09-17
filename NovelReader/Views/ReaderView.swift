@@ -155,8 +155,16 @@ struct ReaderView: View {
         // would be the chrome finally covering the book.
         .overlay(alignment: .bottom) {
             if showControls, mode == .scroll {
-                if isListening {
-                    SpeechBar(settings: settings) { env.speech.setPace($0) }
+                if isListening, let model {
+                    SpeechBar(
+                        settings: settings,
+                        sleepsAt: Binding(
+                            get: { env.speech.sleepsAt },
+                            set: { env.speech.sleepsAt = $0 }
+                        ),
+                        stopsAtWhatIsDownloaded: listeningRunsOutOfDownloads(model),
+                        onPace: { env.speech.setPace($0) }
+                    )
                 } else if autoScrolling {
                     AutoScrollBar(settings: settings)
                 }
@@ -261,18 +269,19 @@ struct ReaderView: View {
         // running, and writing a row is cheap enough to do for a pulled-down
         // notification centre that turns out to be nothing.
         .onChange(of: scenePhase) { _, phase in
-            guard phase != .active else { return }
+            guard phase != .active else {
+                // Coming back to a book that has been read to while nobody was looking:
+                // the page is where the eye left it and the voice is chapters on. The
+                // anchor the voice has been writing all along is where the reader
+                // actually is, so this is the same restatement a mode switch makes.
+                if isListening { model?.retarget() }
+                return
+            }
             model?.persistProgress()
             // A drag the app was taken away from mid-gesture never ends, and a finger
             // the reader believes is still down would hold back every later chapter it
             // is asked for. Leaving is as good as lifting.
             model?.touch(down: false)
-            // The voice cannot survive the app being suspended — this build has not asked
-            // for the background audio mode — and a reader who comes back to a headphones
-            // glyph that says it is reading, over silence, has a broken feature rather than
-            // a paused one. Said out loud here, so that the day the mode *is* asked for,
-            // this line is the one that has to go.
-            if phase == .background { env.speech.pause() }
         }
     }
 
@@ -299,7 +308,20 @@ struct ReaderView: View {
     /// one who is listening, and a strip that vanished on pause would be one they have to
     /// start the voice again to reach.
     private var isListening: Bool {
-        env.speech.bookId == book.id && env.speech.state != .idle
+        env.speech.book?.id == book.id && env.speech.state != .idle
+    }
+
+    /// Whether listening is about to reach text that is not on this device.
+    ///
+    /// The chapter after this one, and not the whole of what is left: a book being read
+    /// online is almost never downloaded to its end, so warning about that would be a
+    /// notice under every listening session anybody ever starts. What is worth saying is
+    /// that the voice is about to stop — and while the phone is locked, an undownloaded
+    /// chapter is where it stops.
+    private func listeningRunsOutOfDownloads(_ model: ReaderModel) -> Bool {
+        let next = model.currentChapterIndex + 1
+        guard model.chapters.indices.contains(next) else { return false }
+        return model.chapters[next].downloadedAt == nil
     }
 
     /// The listening control's one action.
@@ -320,28 +342,36 @@ struct ReaderView: View {
         // See `onChange(of: autoScrolling)` — one page, one thing moving it.
         autoScrolling = false
         let script = metrics.script
-        env.speech.start(
-            bookId: book.id,
+        env.speech.start(SpeechSession(
+            book: SpeechBook(
+                id: book.id,
+                title: book.shownName,
+                cover: env.coverFiles.has(book) ? env.coverFiles.fileURL(for: book) : nil
+            ),
             chapterIndex: model.currentChapterIndex,
             anchor: model.currentAnchor,
             script: script,
-            pace: settings.speechPace
-        ) { [weak model] index in
-            guard let model else { return nil }
-            if let loaded = model.loaded.first(where: { $0.chapter.index == index }) {
-                return spokenSentences(of: loaded, script: script)
+            pace: settings.speechPace,
+            supply: { [weak model] index in
+                guard let model else { return nil }
+                if let loaded = model.loaded.first(where: { $0.chapter.index == index }) {
+                    return spokenSentences(of: loaded, script: script)
+                }
+                // The voice has read to the foot of what is loaded. This is the same ask
+                // the page makes as it nears it — and it is the reason listening can
+                // outrun the eye at all: nothing else would pull the next chapter in for
+                // a reader who has put the phone down.
+                guard model.canLoadNext, model.loaded.last?.chapter.index == index - 1 else {
+                    return nil
+                }
+                await model.loadNext()
+                return model.loaded.first(where: { $0.chapter.index == index })
+                    .map { spokenSentences(of: $0, script: script) }
+            },
+            note: { [weak model] sentence in
+                model?.noteSpoken(chapterIndex: sentence.chapterIndex, anchor: sentence.anchor)
             }
-            // The voice has read to the foot of what is loaded. This is the same ask the
-            // page makes as it nears it — and it is the reason listening can outrun the
-            // eye at all: nothing else would pull the next chapter in for a reader who
-            // has put the phone down.
-            guard model.canLoadNext, model.loaded.last?.chapter.index == index - 1 else {
-                return nil
-            }
-            await model.loadNext()
-            return model.loaded.first(where: { $0.chapter.index == index })
-                .map { spokenSentences(of: $0, script: script) }
-        }
+        ))
     }
 
     // MARK: - Text
@@ -430,7 +460,7 @@ struct ReaderView: View {
                 // — see `SpeechReader` — so a reader who left one book listening and
                 // opened another would otherwise find a sentence of the first picked out
                 // somewhere in the second.
-                speaking: env.speech.bookId == book.id ? env.speech.current : nil
+                speaking: isListening ? env.speech.current : nil
             )
             .overlay(alignment: .bottom) { markBar(model) }
             .overlay(alignment: .bottom) { loadFailure(model) }
@@ -1052,28 +1082,73 @@ private struct SpeechSwitch {
 /// see `SpeechReader.setPace`, where the sentence has to be said again to be said faster.
 private struct SpeechBar: View {
     @Bindable var settings: ReaderSettings
+    /// When the voice stops on its own — see `SpeechReader.sleepsAt`. A moment rather
+    /// than a countdown, so that touching anything else in this strip does not quietly
+    /// give the reader another half hour.
+    @Binding var sleepsAt: Date?
+    /// Whether the chapter after this one is still only on the site.
+    let stopsAtWhatIsDownloaded: Bool
     let onPace: (SpeechPace) -> Void
 
+    /// The three answers worth offering. A reader setting this is going to sleep, not
+    /// timing something, so a picker of every value would be a decision where a choice
+    /// of three will do.
+    private static let minutes = [15, 30, 60]
+
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "tortoise")
-            Slider(value: $settings.speechPace.rate, in: SpeechPace.range) { editing in
-                guard !editing else { return }
-                onPace(settings.speechPace)
+        VStack(spacing: 6) {
+            HStack(spacing: 14) {
+                Image(systemName: "tortoise")
+                Slider(value: $settings.speechPace.rate, in: SpeechPace.range) { editing in
+                    guard !editing else { return }
+                    onPace(settings.speechPace)
+                }
+                .accessibilityLabel(Text("reader.speech.rate"))
+                .accessibilityIdentifier("reader.speech.rate")
+                Image(systemName: "hare")
+                sleepTimer
             }
-            .accessibilityLabel(Text("reader.speech.rate"))
-            .accessibilityIdentifier("reader.speech.rate")
-            Image(systemName: "hare")
+            // Said where the reader is when it matters — the moment they start listening
+            // — rather than in a banner they will have dismissed by bedtime. A locked
+            // phone can only be read the text already on disk; see `SpeechReader`.
+            if stopsAtWhatIsDownloaded {
+                Text("reader.speech.downloadedOnly")
+                    .font(.caption2)
+                    .multilineTextAlignment(.center)
+            }
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 18)
         .padding(.vertical, 8)
-        .background(.bar, in: .capsule)
+        .background(.bar, in: .rect(cornerRadius: 18))
         .padding(.horizontal, 12)
         // Clear of the control bar's own resting place — see `AutoScrollBar`.
         .padding(.bottom, 72)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private var sleepTimer: some View {
+        Menu {
+            ForEach(Self.minutes, id: \.self) { minutes in
+                Button {
+                    sleepsAt = Date().addingTimeInterval(TimeInterval(minutes) * 60)
+                } label: {
+                    Text("reader.speech.sleep.minutes \(minutes)")
+                }
+            }
+            // Only once there is a timer to turn off. A menu whose first item undoes
+            // something nobody has done is a menu that reads as broken.
+            if sleepsAt != nil {
+                Button("reader.speech.sleep.off") { sleepsAt = nil }
+            }
+        } label: {
+            // Filled while a timer is set, the way the bookmark is filled while the page
+            // is saved: a timer the reader cannot see is one they will set twice.
+            Image(systemName: sleepsAt == nil ? "moon" : "moon.fill")
+        }
+        .accessibilityLabel(Text("reader.speech.sleep"))
+        .accessibilityIdentifier("reader.speech.sleep")
     }
 }
 
@@ -2094,6 +2169,26 @@ final class ReaderModel {
         currentChapterIndex = chapterIndex
         currentAnchor = anchor
         reportedFraction = fraction
+        persistProgress(.reading)
+    }
+
+    /// Records where the voice has reached, for a reader who is listening rather than
+    /// looking.
+    ///
+    /// The third way a position arrives, and the only one with nothing on screen behind
+    /// it: a locked phone draws no frames, so neither renderer reports anything for as
+    /// long as the listening lasts. Without this an hour of a book read aloud in somebody's
+    /// pocket would be written down as the paragraph their eye last saw — and if the
+    /// process were killed in the meantime, that is where they would come back to.
+    ///
+    /// The share is dropped rather than restated, which makes `currentFraction` measure
+    /// the anchor itself. Both renderers report a share measured to the *bottom* of what
+    /// is shown, and there is nothing shown: the sentence being spoken is the whole of
+    /// what the reader has reached.
+    func noteSpoken(chapterIndex: Int, anchor: TextAnchor) {
+        if currentChapterIndex != chapterIndex { currentChapterIndex = chapterIndex }
+        if currentAnchor != anchor { currentAnchor = anchor }
+        if reportedFraction != nil { reportedFraction = nil }
         persistProgress(.reading)
     }
 

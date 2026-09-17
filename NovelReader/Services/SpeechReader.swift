@@ -1,5 +1,7 @@
 import AVFoundation
 import Foundation
+import MediaPlayer
+import UIKit
 
 /// How fast the voice reads.
 ///
@@ -73,12 +75,51 @@ final class SpeechSequence {
     }
 }
 
+/// What is being listened to, as everything outside the app has to describe it.
+///
+/// The lock screen, the control centre, a car's dashboard and a watch all ask the same
+/// three questions — what is playing, whose is it, what does it look like — and none of
+/// them can be answered from a sentence.
+struct SpeechBook: Equatable {
+    let id: String
+    let title: String
+    /// The cover as it sits on disk. Nil for a book that has none, which is a lock
+    /// screen with the app's own icon on it rather than a missing picture.
+    let cover: URL?
+}
+
+/// One stretch of listening: what to read, in what voice, where the words come from and
+/// who to tell about them.
+///
+/// One value rather than seven arguments because it is one decision — the reader pressed
+/// the headphones on this book, at this place, in the script and at the pace they have
+/// chosen — and because everything in it is wanted again the moment any of it changes.
+struct SpeechSession {
+    let book: SpeechBook
+    let chapterIndex: Int
+    let anchor: TextAnchor
+    let script: ChineseScript
+    let pace: SpeechPace
+    let supply: SpeechSequence.Supply
+    /// Called as each sentence begins.
+    ///
+    /// The book's own way of remembering where the voice got to. Nothing is drawn while
+    /// a phone is locked, so nothing reports a position — and without this an hour of
+    /// listening would be written down as the paragraph the eye last saw.
+    let note: @MainActor (SpokenSentence) -> Void
+}
+
 /// Reading the book out loud.
 ///
 /// Owned by `AppEnvironment` rather than by the reader's view, because listening outlives
 /// looking: a reader who starts a chapter and puts the phone in their pocket has left
 /// every view that could have held this. The view tree tells it what to read and follows
 /// what it says; it holds nothing about how a page is drawn.
+///
+/// What a locked phone can be read is what is already on disk. The app stays alive while
+/// it is speaking, but a chapter that has not been downloaded still has to come through
+/// the one `WKWebView` that carries the site's clearance cookie, and that needs a window
+/// — so listening online stops at the edge of what has been loaded. See SPEC 五、不做.
 @MainActor
 @Observable
 final class SpeechReader {
@@ -96,7 +137,14 @@ final class SpeechReader {
     private(set) var current: SpokenSentence?
     /// Which book is being read, so a reader who opens a different one is not shown
     /// another book's sentence picked out under their words.
-    private(set) var bookId: String?
+    private(set) var book: SpeechBook?
+    /// When the voice should stop of its own accord. Nil for no timer.
+    ///
+    /// A moment rather than a number of minutes, because that is what it has to be to
+    /// survive being asked twice: a reader who sets thirty minutes and then changes the
+    /// speed has not asked for another thirty. The current sentence is always finished —
+    /// cutting a voice off mid-clause is how a reader wakes up rather than falls asleep.
+    var sleepsAt: Date?
 
     var isSpeaking: Bool { state == .speaking }
 
@@ -122,39 +170,46 @@ final class SpeechReader {
     private var filling = false
     private var pace = SpeechPace.standard
     private var script = ChineseScript.off
+    private var note: (@MainActor (SpokenSentence) -> Void)?
+    /// The cover, decoded once for the lock screen.
+    private var artwork: MPMediaItemArtwork?
+    /// Whether the system took the audio away rather than the reader. Only a pause this
+    /// flag is set for may be undone by the system handing it back — a reader who pressed
+    /// pause and then took a phone call must not find the book reading itself afterwards.
+    private var pausedBySystem = false
 
     init() {
         let listener = Delegate()
         listener.reader = self
         self.listener = listener
         synthesiser.delegate = listener
+        watchTheAudioSession()
     }
 
     /// Starts reading where the reader is standing.
-    func start(
-        bookId: String,
-        chapterIndex: Int,
-        anchor: TextAnchor,
-        script: ChineseScript,
-        pace: SpeechPace,
-        supply: @escaping SpeechSequence.Supply
-    ) {
+    func start(_ session: SpeechSession) {
         stop()
-        self.bookId = bookId
-        self.script = script
-        self.pace = pace
-        let sequence = SpeechSequence(supply: supply)
+        book = session.book
+        script = session.script
+        pace = session.pace
+        note = session.note
+        let sequence = SpeechSequence(supply: session.supply)
         self.sequence = sequence
         // Before the first chapter has been read off disk: the control the reader just
         // pressed has to answer for the press, and loading a chapter can take a fetch.
         state = .speaking
         beginSession()
+        takeRemoteControl()
+        loadArtwork(session.book.cover)
+        publishNowPlaying()
         Task { @MainActor in
             // Only the book having nothing to read stops it here. A reader who pressed
             // pause while the first chapter was still being read off disk has paused —
             // stopping them instead would take the strip off the screen under their hand,
             // and `fill` is a no-op for everything but a voice that is still speaking.
-            guard await sequence.begin(chapterIndex: chapterIndex, anchor: anchor) else {
+            guard await sequence.begin(
+                chapterIndex: session.chapterIndex, anchor: session.anchor
+            ) else {
                 stop()
                 return
             }
@@ -166,14 +221,22 @@ final class SpeechReader {
     /// restarts. The reader pressed pause, not rewind.
     func pause() {
         guard state == .speaking else { return }
+        pausedBySystem = false
         state = .paused
         synthesiser.pauseSpeaking(at: .word)
+        publishNowPlaying()
     }
 
     func resume() {
         guard state == .paused else { return }
+        pausedBySystem = false
         state = .speaking
+        // Asked for again rather than assumed: an interruption that took the audio away
+        // handed the session back with it, and continuing into a session this app no
+        // longer holds is a voice nobody can hear.
+        beginSession()
         synthesiser.continueSpeaking()
+        publishNowPlaying()
         fill()
     }
 
@@ -181,11 +244,17 @@ final class SpeechReader {
         let wasReading = state != .idle
         state = .idle
         current = nil
-        bookId = nil
+        book = nil
+        note = nil
+        artwork = nil
         sequence = nil
         queue = []
+        sleepsAt = nil
+        pausedBySystem = false
         synthesiser.stopSpeaking(at: .immediate)
         guard wasReading else { return }
+        publishNowPlaying()
+        releaseRemoteControl()
         // Handed back rather than held: an app that keeps the session active is one that
         // stays paused over the music somebody put on after they stopped listening.
         try? AVAudioSession.sharedInstance().setActive(
@@ -220,7 +289,7 @@ final class SpeechReader {
         filling = true
         Task { @MainActor in
             defer { filling = false }
-            while state == .speaking, queue.count <= Self.readAhead,
+            while state == .speaking, !hasSleptIn, queue.count <= Self.readAhead,
                   let sentence = await sequence?.take() {
                 say(sentence)
             }
@@ -266,11 +335,161 @@ final class SpeechReader {
         try? session.setActive(true)
     }
 
+    /// Whether the sleep timer has rung.
+    ///
+    /// Read where the next sentence would be taken rather than driven by a timer of its
+    /// own: the sentence being said is always finished, and a voice that stopped in the
+    /// middle of a clause is what wakes a reader up rather than letting them go.
+    private var hasSleptIn: Bool {
+        guard let sleepsAt else { return false }
+        return sleepsAt <= Date()
+    }
+
+    // MARK: - Every screen that is not this app's
+
+    /// What is playing, for the lock screen, the control centre and a car's dashboard.
+    private func publishNowPlaying() {
+        let centre = MPNowPlayingInfoCenter.default()
+        guard let book else {
+            centre.nowPlayingInfo = nil
+            centre.playbackState = .stopped
+            return
+        }
+        var playing: [String: Any] = [
+            MPMediaItemPropertyTitle: current?.chapterTitle ?? book.title,
+            MPMediaItemPropertyArtist: book.title,
+            // Said to be live, which is what keeps a scrubber off the lock screen: speech
+            // has no duration to seek inside, and a progress bar that cannot be dragged is
+            // a control promising something it will not do.
+            MPNowPlayingInfoPropertyIsLiveStream: true,
+            MPNowPlayingInfoPropertyPlaybackRate: state == .speaking ? 1.0 : 0.0
+        ]
+        if let artwork { playing[MPMediaItemPropertyArtwork] = artwork }
+        centre.nowPlayingInfo = playing
+        centre.playbackState = state == .speaking ? .playing : .paused
+    }
+
+    /// The cover, decoded off the main thread and published when it arrives.
+    private func loadArtwork(_ file: URL?) {
+        artwork = nil
+        guard let file else { return }
+        Task.detached(priority: .utility) {
+            guard let image = UIImage(contentsOfFile: file.path) else { return }
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            await MainActor.run { [weak self] in
+                // A cover that arrives after the reader has closed the book belongs to
+                // nothing, and publishing it would put a stopped book back on the lock
+                // screen.
+                guard let self, book != nil else { return }
+                self.artwork = artwork
+                publishNowPlaying()
+            }
+        }
+    }
+
+    private func takeRemoteControl() {
+        let centre = MPRemoteCommandCenter.shared()
+        centre.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.resume() }
+            return .success
+        }
+        centre.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.pause() }
+            return .success
+        }
+        // What a pair of headphones sends, and what a steering wheel sends. Handled
+        // separately from the two above because the system does not promise which of
+        // them a given accessory will use.
+        centre.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.state == .speaking { self.pause() } else { self.resume() }
+            }
+            return .success
+        }
+        // Skipping is not offered rather than offered and ignored: a lock screen with
+        // buttons that do nothing is worse than one without them, and "next" in a book
+        // being read sentence by sentence has no obvious meaning to promise.
+        centre.nextTrackCommand.isEnabled = false
+        centre.previousTrackCommand.isEnabled = false
+    }
+
+    private func releaseRemoteControl() {
+        let centre = MPRemoteCommandCenter.shared()
+        centre.playCommand.removeTarget(nil)
+        centre.pauseCommand.removeTarget(nil)
+        centre.togglePlayPauseCommand.removeTarget(nil)
+    }
+
+    // MARK: - When the system takes the audio away
+
+    private func watchTheAudioSession() {
+        let centre = NotificationCenter.default
+        centre.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] message in
+            guard let raw = message.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            let options = AVAudioSession.InterruptionOptions(
+                rawValue: message.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            )
+            Task { @MainActor in
+                self?.interrupted(began: type == .began, mayResume: options.contains(.shouldResume))
+            }
+        }
+        centre.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] message in
+            guard let raw = message.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  AVAudioSession.RouteChangeReason(rawValue: raw) == .oldDeviceUnavailable
+            else { return }
+            Task { @MainActor in self?.unplugged() }
+        }
+    }
+
+    /// A phone call, an alarm, another app taking the audio — and the moment it is given
+    /// back.
+    ///
+    /// Internal rather than private, and stated as two flags rather than as a
+    /// notification, so the rule can be asserted without an interruption to arrange.
+    func interrupted(began: Bool, mayResume: Bool) {
+        guard began else {
+            // Only a voice the system itself stopped may be started again by the system
+            // handing the audio back. A reader who pressed pause and then took a call did
+            // not ask for their book to carry on when they hung up.
+            guard pausedBySystem, mayResume else { return }
+            resume()
+            return
+        }
+        guard state == .speaking else { return }
+        pause()
+        pausedBySystem = true
+    }
+
+    /// The headphones came out.
+    ///
+    /// Reading the rest of the chapter aloud to a carriage full of strangers is the one
+    /// behaviour nobody wants, and it is what happens by default. Not marked as the
+    /// system's pause: nothing is going to hand this back, and going on is a tap.
+    func unplugged() {
+        guard state == .speaking else { return }
+        pause()
+    }
+
     // MARK: - What the synthesiser says back
 
     fileprivate func began(_ utterance: AVSpeechUtterance) {
         guard let match = queue.first(where: { $0.utterance === utterance }) else { return }
+        let arrivedInAChapter = current?.chapterIndex != match.sentence.chapterIndex
         current = match.sentence
+        // Every sentence, because this is the only record a locked phone keeps of where
+        // the reader got to — `ProgressWriteRule` is what keeps it from being a database
+        // write per sentence.
+        note?(match.sentence)
+        // Only per chapter: what the lock screen shows is the chapter's name, and
+        // republishing it every few seconds would be a line of work per sentence for a
+        // string that did not change.
+        if arrivedInAChapter { publishNowPlaying() }
     }
 
     fileprivate func finished(_ utterance: AVSpeechUtterance) {

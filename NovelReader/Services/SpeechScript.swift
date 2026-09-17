@@ -12,6 +12,12 @@ struct SpokenSentence: Equatable, Identifiable {
     /// What is written down, which outlives the catalog being renumbered — see
     /// `ReadingPosition`.
     let siteChapterId: String
+    /// The chapter's name, carried by every sentence in it rather than looked up.
+    ///
+    /// What the lock screen shows while a phone is in a pocket — and there is nothing
+    /// else there to ask: the reader's model, the loaded window and the catalog are all
+    /// on the other side of a view that is not being drawn.
+    let chapterTitle: String
     let paragraph: Int
     /// Where the sentence sits inside its paragraph, in the UTF-16 offsets a
     /// `TextAnchor` stores. Empty for a chapter's heading, which belongs to no paragraph.
@@ -55,6 +61,7 @@ enum SpeechScript {
         if !heading.isEmpty {
             result.append(SpokenSentence(
                 chapterIndex: chapterIndex, siteChapterId: siteChapterId,
+                chapterTitle: heading,
                 // Anchored at the top of the chapter, which is where a reader who is
                 // being told its name is standing. An empty range marks nothing, which
                 // is right: the heading is not a sentence of the text.
@@ -68,6 +75,7 @@ enum SpeechScript {
             for range in SentenceRules.sentences(in: whole, of: rendered) {
                 result.append(SpokenSentence(
                     chapterIndex: chapterIndex, siteChapterId: siteChapterId,
+                    chapterTitle: heading,
                     paragraph: index, range: range,
                     text: rendered.substring(with: range), isTitle: false
                 ))
