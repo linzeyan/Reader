@@ -49,6 +49,12 @@ struct ReaderView: View {
     /// whichever renderer is up has taken it. One state for both, because "put the reader
     /// here" is one intent — the two renderers differ only in how they honour it.
     @State private var outlineJump: TextAnchor?
+    /// Whether the page is moving on its own right now.
+    ///
+    /// State for this session rather than a setting, unlike the speed it moves at: this is
+    /// switched on for a stretch of reading and off again, and a book that reopened already
+    /// scrolling would be one that started moving before the reader had looked at it.
+    @State private var autoScrolling = false
 
     enum CatalogTab: Hashable {
         case outline
@@ -123,11 +129,24 @@ struct ReaderView: View {
                     // Nil where the edge swipe does this instead: two ways out is a
                     // sixth of the bar spent saying the same thing twice.
                     onBack: settings.swipeToGoBack ? nil : { dismiss() },
+                    // Only where a page can move on its own. The paginated renderer turns
+                    // pages rather than scrolling, and a switch that did nothing there
+                    // would be a control the reader has to learn the exceptions to.
+                    autoScrolling: mode == .scroll ? $autoScrolling : nil,
                     showCatalog: $showCatalog, showSettings: $showSettings
                 )
             }
         }
+        // Only alongside the controls. A reader who has put the chrome away is watching
+        // the text, and a slider left floating over it would be the one thing on screen
+        // that is not the book.
+        .overlay(alignment: .bottom) {
+            if showControls, autoScrolling, mode == .scroll {
+                AutoScrollBar(settings: settings)
+            }
+        }
         .animation(.snappy(duration: 0.2), value: showControls)
+        .animation(.snappy(duration: 0.2), value: autoScrolling)
         .sheet(isPresented: $showCatalog) {
             catalogSheet
                 // Which tab is right depends on what is being read, and that can change
@@ -189,7 +208,13 @@ struct ReaderView: View {
         // the setting off mid-session changed nothing until the reader was left and
         // re-entered — invisible exactly when someone worried about battery flips it.
         .onChange(of: settings.keepScreenOn) { _, keepOn in
-            UIApplication.shared.isIdleTimerDisabled = keepOn
+            UIApplication.shared.isIdleTimerDisabled = keepOn || autoScrolling
+        }
+        // A page moving on its own is the only reading this app does with no touches in
+        // it, so it is the only one the system would lock the screen in the middle of —
+        // whatever the reader answered about keeping it awake in general.
+        .onChange(of: autoScrolling) { _, moving in
+            UIApplication.shared.isIdleTimerDisabled = moving || settings.keepScreenOn
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn
@@ -223,6 +248,10 @@ struct ReaderView: View {
         // A question about a passage belongs to the renderer that asked it: the
         // paginated one is about to ask its own, over text it has laid out itself.
         markChoice = nil
+        // Nothing in the paginated renderer moves a page on its own, and a switch left on
+        // behind a mode change is one the reader has to find and turn off before it means
+        // anything again.
+        autoScrolling = false
         guard mode == .scroll else { return }
         model?.retarget()
     }
@@ -304,7 +333,11 @@ struct ReaderView: View {
                 onTargetReached: {
                     outlineJump = nil
                     model.clearScrollTarget()
-                }
+                },
+                autoScroll: autoScrolling
+                    ? settings.autoScrollPace.pointsPerSecond(lineHeight: metrics.lineHeight)
+                    : 0,
+                onAutoScrollEnded: { autoScrolling = false }
             )
             .overlay(alignment: .bottom) { markBar(model) }
             .overlay(alignment: .bottom) { loadFailure(model) }
@@ -765,6 +798,9 @@ private struct ReaderControlBar: View {
     /// `ReaderSettings.swipeToGoBack`. Absence rather than a flag, because a button with
     /// nothing to call is not a button.
     let onBack: (() -> Void)?
+    /// Whether the page is moving on its own, where it can. Nil in a renderer that turns
+    /// pages instead of scrolling, for `onBack`'s reason: nothing to switch, no switch.
+    let autoScrolling: Binding<Bool>?
     @Binding var showCatalog: Bool
     @Binding var showSettings: Bool
     @Environment(\.openURL) private var openURL
@@ -830,6 +866,19 @@ private struct ReaderControlBar: View {
                 .accessibilityLabel(Text("reader.fetchFullText"))
                 .accessibilityIdentifier("reader.reloadFromPage")
             }
+            if let autoScrolling {
+                // The one control here that is a state rather than an action, so it says
+                // which one it is in: a play glyph on a page already moving would be a
+                // button promising what it has just done.
+                control(
+                    autoScrolling.wrappedValue ? "pause.circle" : "play.circle",
+                    label: autoScrolling.wrappedValue
+                        ? "reader.autoScroll.stop" : "reader.autoScroll.start"
+                ) {
+                    autoScrolling.wrappedValue.toggle()
+                }
+                .accessibilityIdentifier("reader.autoScroll")
+            }
             control("textformat.size", label: "reader.settings") { showSettings = true }
         }
         .padding(.vertical, 10)
@@ -858,6 +907,39 @@ private struct ReaderControlBar: View {
         Image(systemName: systemImage)
             .font(.system(size: 18))
             .frame(maxWidth: .infinity, minHeight: 34)
+    }
+}
+
+/// How fast a page that is moving on its own moves.
+///
+/// A strip of its own above the control bar rather than a row in the settings sheet. The
+/// only way to tell whether a scrolling speed is right is to watch the text go past while
+/// you change it — which is the same reason that sheet is half-height and not resizable —
+/// and a speed set over a page that has stopped to show you a sheet is set blind.
+private struct AutoScrollBar: View {
+    @Bindable var settings: ReaderSettings
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "tortoise")
+            Slider(
+                value: $settings.autoScrollPace.linesPerMinute,
+                in: ReadingPace.range
+            )
+            .accessibilityLabel(Text("reader.autoScroll.speed"))
+            .accessibilityIdentifier("reader.autoScroll.speed")
+            Image(systemName: "hare")
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .background(.bar, in: .capsule)
+        .padding(.horizontal, 12)
+        // Clear of the control bar's own resting place, so the two never stack on top of
+        // each other — the same clearance the mark bar and the end-of-book notice keep.
+        .padding(.bottom, 72)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 }
 

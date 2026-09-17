@@ -5344,6 +5344,78 @@
         }
       }
     },
+    "reader.autoScroll.speed" : {
+      "comment" : "Label of the slider that sets how fast the page moves on its own.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scrolling speed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滚动速度"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "捲動速度"
+          }
+        }
+      }
+    },
+    "reader.autoScroll.start" : {
+      "comment" : "Reader control: starts moving the page on its own.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start scrolling"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始自动滚动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始自動捲動"
+          }
+        }
+      }
+    },
+    "reader.autoScroll.stop" : {
+      "comment" : "Reader control: stops the page moving on its own.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop scrolling"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止自动滚动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止自動捲動"
+          }
+        }
+      }
+    },
     "reader.bookmark.add" : {
       "comment" : "Reader control: saves the position on screen.",
       "extractionState" : "manual",

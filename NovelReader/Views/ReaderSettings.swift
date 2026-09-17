@@ -189,6 +189,14 @@ final class ReaderSettings {
             defaults.set(swipeToGoBack, forKey: Keys.swipeToGoBack)
         }
     }
+    /// How fast the page moves when the reader has stopped turning it themselves — see
+    /// `ReadingPace`, which is where the unit is argued for.
+    ///
+    /// Per device like everything else in this file, and for the same reason type size is:
+    /// a phone held in one hand and an iPad propped on a desk are not read at one pace.
+    var autoScrollPace: ReadingPace {
+        didSet { defaults.set(autoScrollPace.linesPerMinute, forKey: Keys.autoScrollPace) }
+    }
 
     // MARK: - Writing one book's own layer
     //
@@ -269,6 +277,7 @@ final class ReaderSettings {
         static let keepScreenOn = "reader.keepScreenOn"
         static let pageTurn = "reader.pageTurn"
         static let swipeToGoBack = "reader.swipeToGoBack"
+        static let autoScrollPace = "reader.autoScrollPace"
     }
 
     private let defaults: UserDefaults
@@ -342,6 +351,13 @@ final class ReaderSettings {
         // the only way a walk can ask about a gesture without persisting the choice into
         // the simulator for every test that runs after it.
         swipeToGoBack = defaults.bool(forKey: Keys.swipeToGoBack)
+        // `object(forKey:) as? Double` rather than `double(forKey:)`, which answers zero
+        // for a key nobody has set — and zero here is a page that never moves, which is
+        // indistinguishable from the feature being broken.
+        autoScrollPace = ReadingPace(
+            linesPerMinute: defaults.object(forKey: Keys.autoScrollPace) as? Double
+                ?? ReadingPace.standard.linesPerMinute
+        )
         // `didSet` does not run for the value an initializer assigns, and the dictionaries
         // are wanted before the first chapter is composed rather than during it.
         ChineseText.prewarm(chineseScript)

@@ -78,7 +78,9 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         palette: ReaderPalette = .light,
         onPlaceChange: @escaping (ReaderPlace) -> Void = { _ in },
         onNeedsNext: @escaping () -> Void = {},
-        onRanOut: @escaping () -> Void = {}
+        onRanOut: @escaping () -> Void = {},
+        autoScroll: CGFloat = 0,
+        onAutoScrollEnded: @escaping () -> Void = {}
     ) -> ReaderScrollingText {
         ReaderScrollingText(
             chapters: chapters,
@@ -89,7 +91,8 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             onPlaceChange: onPlaceChange, onNeedsNext: onNeedsNext, onNeedsPrevious: {},
             onRanOut: onRanOut,
             onTouch: { _ in }, onTap: { _ in false }, onMark: { _, _ in },
-            onTargetReached: {}
+            onTargetReached: {},
+            autoScroll: autoScroll, onAutoScrollEnded: onAutoScrollEnded
         )
     }
 
@@ -473,6 +476,37 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             }
             try tap(.previous, number: taps)
         }
+    }
+
+    // MARK: - Moving with nobody touching it
+
+    /// The wiring, which no amount of arithmetic in `AutoScrollDriver` can stand in for: a
+    /// page told to move on its own has to travel *through the scroll offset*, so that
+    /// everything which follows from where the reader is — the place reports, the next
+    /// chapter being asked for, which paragraphs are drawn — is reached by the path a
+    /// finger would have taken rather than by a second one written for this feature.
+    ///
+    /// Switching it off is half the test. A driver that cannot be stopped is worse than one
+    /// that never started: the reader taps the control, the glyph changes, and the book
+    /// keeps walking away from them.
+    func testAPageToldToMoveOnItsOwnTravelsThroughTheScrollOffsetAndStopsWhenAsked() async throws {
+        let window = [chapter(0, paragraphs: 40)]
+        try await show(window)
+        XCTAssertEqual(view.readingOffset, 0)
+
+        coordinator.update(with: text(window, autoScroll: 600))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while view.readingOffset <= 0 {
+            guard ContinuousClock.now < deadline else {
+                return XCTFail("the page was told to move and never did")
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        coordinator.update(with: text(window, autoScroll: 0))
+        let stopped = view.readingOffset
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(view.readingOffset, stopped, "a page switched off has to stay put")
     }
 
     /// One tapped turn, asserted on what the reader is left looking at rather than on

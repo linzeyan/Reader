@@ -111,6 +111,16 @@ struct ReaderScrollingText: UIViewRepresentable {
     /// asking. Unlike the arrival gate this replaces, there is nothing to detect: the
     /// scroll offset was set to an exact number, so it has arrived by construction.
     let onTargetReached: () -> Void
+    /// How fast the page moves with nobody touching it, in points a second. Zero is off.
+    ///
+    /// A distance rather than the reader's own setting, which is stated in lines a minute
+    /// — see `ReadingPace`. The conversion needs the type size, and the owner is where
+    /// that is resolved for the book on screen, the same way `metrics` and `palette` are.
+    let autoScroll: CGFloat
+    /// The page has had nowhere to go for several seconds, so whatever was moving it has
+    /// stopped: the end of the book, or a chapter that will not load. The owner holds the
+    /// switch, so the owner is who has to be told it went off.
+    let onAutoScrollEnded: () -> Void
 
     func makeUIView(context: Context) -> ReaderTextScrollView {
         let view = ReaderTextScrollView()
@@ -191,6 +201,23 @@ final class ReaderScrollCoordinator {
         label: "reader.column.layout", qos: .userInitiated
     )
 
+    /// Moves the page with nobody touching it — see `AutoScrollDriver`.
+    ///
+    /// Aimed at the scroll view rather than at this stack of columns: a page moving on its
+    /// own has to travel exactly the way a finger does, through the offset, so that every
+    /// answer that follows from it — where the reader is, when the next chapter is asked
+    /// for, which paragraphs are drawn — is reached by the path it has always been.
+    private lazy var autoScroll: AutoScrollDriver = {
+        let driver = AutoScrollDriver { [weak self] distance in
+            guard let view = self?.view else { return 0 }
+            let before = view.readingOffset
+            view.setReadingOffset(before + distance, animated: false)
+            return view.readingOffset - before
+        }
+        driver.onRanAground = { [weak self] in self?.config?.onAutoScrollEnded() }
+        return driver
+    }()
+
     func update(with config: ReaderScrollingText) {
         self.config = config
         view?.showFooter(config.footer)
@@ -205,6 +232,11 @@ final class ReaderScrollCoordinator {
         )
         guard key.width > 0 else { return }
         view?.apply(palette: config.palette)
+        // Before the rebuild check below, which returns early: a reader who changes the
+        // type size while the page is moving on its own must not find it stopped, and the
+        // driver reads nothing about the columns — it moves an offset and asks what
+        // happened, which a stack still being laid out answers by not moving.
+        autoScroll.setSpeed(config.autoScroll)
         // A jump replaced the window while a rebuild was in flight, so there is no longer
         // a chapter to put the reader back into. Dropped rather than left to miss for
         // ever, because a restore that can never land silences every place report.
@@ -579,7 +611,12 @@ final class ReaderScrollCoordinator {
         // Animated, unlike a jump between chapters: this is the reader moving through
         // text they are reading, and a page that appears without moving gives them
         // nothing to tell it apart from a page that never turned.
-        view.setReadingOffset(destination, animated: true)
+        //
+        // Except while the page is already moving on its own, where the animation cannot
+        // survive: the driver sets an offset on the very next frame, which cancels it
+        // part way and leaves the turn half made. An instant turn the reader can see the
+        // end of beats an animated one they see the middle of.
+        view.setReadingOffset(destination, animated: !autoScroll.isRunning)
     }
 
     /// A move shorter than this is one the reader cannot see, which is the same to them
@@ -686,6 +723,10 @@ final class ReaderScrollCoordinator {
     }
 
     func handleTouch(down: Bool) {
+        // The reader's own hand outranks the driver: a page being dragged while something
+        // else also moves it is a page nobody is steering. Held rather than switched off,
+        // so letting go carries on from where they left it.
+        autoScroll.hold(down)
         config?.onTouch(down)
     }
 
