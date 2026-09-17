@@ -197,6 +197,13 @@ final class ReaderSettings {
     var autoScrollPace: ReadingPace {
         didSet { defaults.set(autoScrollPace.linesPerMinute, forKey: Keys.autoScrollPace) }
     }
+    /// How fast a comic moves when the reader has stopped scrolling it themselves — see
+    /// `ComicPace`, and its own slider rather than the one above: the two are stated in
+    /// units that do not convert (lines against screens), and a page of artwork is not
+    /// looked at for as long as a screen of prose is read.
+    var comicScrollPace: ComicPace {
+        didSet { defaults.set(comicScrollPace.screensPerMinute, forKey: Keys.comicScrollPace) }
+    }
     /// How fast the voice reads a book out loud — see `SpeechPace`.
     ///
     /// Not the same slider as the one above and not derived from it: a page that moves
@@ -287,6 +294,7 @@ final class ReaderSettings {
         static let pageTurn = "reader.pageTurn"
         static let swipeToGoBack = "reader.swipeToGoBack"
         static let autoScrollPace = "reader.autoScrollPace"
+        static let comicScrollPace = "reader.comicScrollPace"
         static let speechPace = "reader.speechPace"
     }
 
@@ -367,6 +375,10 @@ final class ReaderSettings {
         autoScrollPace = ReadingPace(
             linesPerMinute: defaults.object(forKey: Keys.autoScrollPace) as? Double
                 ?? ReadingPace.standard.linesPerMinute
+        )
+        comicScrollPace = ComicPace(
+            screensPerMinute: defaults.object(forKey: Keys.comicScrollPace) as? Double
+                ?? ComicPace.standard.screensPerMinute
         )
         speechPace = SpeechPace(
             rate: defaults.object(forKey: Keys.speechPace) as? Double ?? SpeechPace.standard.rate

@@ -95,6 +95,30 @@ final class AutoScrollTests: XCTestCase {
         XCTAssertTrue(ReadingPace.range.contains(ReadingPace.standard.linesPerMinute))
     }
 
+    // MARK: - The unit a comic is paced by
+
+    /// Why a comic's speed is screens a minute rather than the novel's lines, or points.
+    ///
+    /// Magnifying to 2x halves how much of the book the glass holds — `visibleHeight` is
+    /// content points — so a speed in points would be twice the reading the moment somebody
+    /// pinched, with the same number in the settings meaning something else. Stated in
+    /// screens, a screenful goes past in the same time at every magnification.
+    func testMagnifyingDoesNotChangeHowFastAComicGoesPast() {
+        let pace = ComicPace(screensPerMinute: 3)
+        let window: CGFloat = 800
+
+        let unmagnified = window / pace.pointsPerSecond(windowHeight: window)
+        let magnified = (window / 2) / pace.pointsPerSecond(windowHeight: window / 2)
+        XCTAssertEqual(unmagnified, 20, accuracy: 0.001, "three screens a minute is one every twenty seconds")
+        XCTAssertEqual(magnified, unmagnified, accuracy: 0.001)
+    }
+
+    /// A `Slider` clamps a value outside its range and writes the clamp back — see the
+    /// novel's copy of this, which is the same trap.
+    func testTheDefaultComicPaceIsInsideTheRangeTheSliderOffers() {
+        XCTAssertTrue(ComicPace.range.contains(ComicPace.standard.screensPerMinute))
+    }
+
     // MARK: - What one frame is worth
 
     /// A speed whose frame is comfortably worth more than a pixel, so that this measures the

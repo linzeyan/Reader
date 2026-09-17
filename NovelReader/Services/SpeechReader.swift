@@ -179,8 +179,10 @@ final class SpeechReader {
     private var pausedBySystem = false
 
     init() {
-        let listener = Delegate()
-        listener.reader = self
+        let listener = Delegate(
+            started: { [weak self] in self?.began($0) },
+            finished: { [weak self] in self?.finished($0) }
+        )
         self.listener = listener
         synthesiser.delegate = listener
         watchTheAudioSession()
@@ -506,19 +508,33 @@ final class SpeechReader {
     /// promise about which thread they arrive on. A separate object that hops onto the
     /// main actor keeps that promise in one place instead of on every observable property
     /// this class holds.
+    ///
+    /// Two closures rather than a reference back: the protocol is `Sendable`, so nothing
+    /// stored here may be mutable, and a `weak var` pointing at the reader is exactly that.
+    /// Each of them holds the reader weakly, which is the cycle the old reference was
+    /// avoiding — the synthesiser is owned by the reader and holds this in its place.
     private final class Delegate: NSObject, AVSpeechSynthesizerDelegate {
-        weak var reader: SpeechReader?
+        private let started: @MainActor (AVSpeechUtterance) -> Void
+        private let finished: @MainActor (AVSpeechUtterance) -> Void
+
+        init(
+            started: @escaping @MainActor (AVSpeechUtterance) -> Void,
+            finished: @escaping @MainActor (AVSpeechUtterance) -> Void
+        ) {
+            self.started = started
+            self.finished = finished
+        }
 
         func speechSynthesizer(
             _ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance
         ) {
-            Task { @MainActor in reader?.began(utterance) }
+            Task { @MainActor in started(utterance) }
         }
 
         func speechSynthesizer(
             _ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance
         ) {
-            Task { @MainActor in reader?.finished(utterance) }
+            Task { @MainActor in finished(utterance) }
         }
     }
 }

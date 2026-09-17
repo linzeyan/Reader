@@ -42,6 +42,12 @@ struct ComicScrollingPages: UIViewRepresentable {
     let target: ComicReaderModel.ScrollTarget?
     let footer: ReaderTextFooter.State
     let fetcher: ImageFetcher
+    /// How fast the pages move with nobody touching them. Nil is off.
+    ///
+    /// A pace rather than the points a second the text reader is handed, because the
+    /// conversion needs the height of the window and this is the only side of the boundary
+    /// that knows it — magnified, that height is not the screen's. See `ComicPace`.
+    let autoScroll: ComicPace?
 
     let onPlaceChange: (ComicPlace) -> Void
     let onNeedsNext: () -> Void
@@ -50,6 +56,10 @@ struct ComicScrollingPages: UIViewRepresentable {
     /// - Returns: whether the tap should go on to turn a page.
     let onTap: (ReaderTapZone.Zone) -> Bool
     let onTargetReached: () -> Void
+    /// The pages have had nowhere to go for several seconds, so whatever was moving them
+    /// has stopped: the end of the book, or a chapter that will not load. The owner holds
+    /// the switch, so the owner is who has to be told it went off.
+    let onAutoScrollEnded: () -> Void
 
     func makeUIView(context: Context) -> ComicScrollView {
         let view = ComicScrollView()
@@ -113,12 +123,31 @@ final class ComicScrollCoordinator {
     /// attention, and magnifying does not narrow that.
     private static let decodeMargin: CGFloat = 1
 
+    /// Moves the pages with nobody touching them — the same driver the text reader uses,
+    /// which is why it was written to know nothing about what it is moving: it offers a
+    /// distance and is told how far the surface really went.
+    ///
+    /// Aimed at the scroll view's own offset, so everything that follows from moving —
+    /// which pages are decoded, where the reader is, when the next chapter is asked for —
+    /// is reached by the path a finger reaches it by.
+    private lazy var autoScroll: AutoScrollDriver = {
+        let driver = AutoScrollDriver { [weak self] distance in
+            guard let view = self?.view else { return 0 }
+            let before = view.readingOffset
+            view.setReadingOffset(before + distance, animated: false)
+            return view.readingOffset - before
+        }
+        driver.onRanAground = { [weak self] in self?.config?.onAutoScrollEnded() }
+        return driver
+    }()
+
     // MARK: - Updating
 
     func update(with config: ComicScrollingPages) {
         self.config = config
         view?.showFooter(config.footer)
         guard let view, view.pageWidth > 0 else { return }
+        applyAutoScrollSpeed()
 
         if builtForWidth != view.pageWidth {
             // Every column describes a width nobody is reading at. Keep the page the
@@ -354,11 +383,16 @@ final class ComicScrollCoordinator {
     /// 2634 back to 2394.5 in the middle of coming out of the zoom, over and over.
     func magnificationBegan() {
         pendingLanding = nil
+        holdAutoScroll()
     }
 
     /// Everything a magnification held back, once it is over.
     func magnificationEnded() {
         applyHeldCorrections()
+        // In this order: the speed is measured against a window whose height the zoom has
+        // just changed, and only then are the pages given back to it.
+        applyAutoScrollSpeed()
+        holdAutoScroll()
         reportPlace()
         askForMoreIfNeeded()
         refreshVisible()
@@ -501,6 +535,29 @@ final class ComicScrollCoordinator {
         }
     }
 
+    // MARK: - Moving on its own
+
+    /// The pace turned into a distance, which needs the height of the window — so it has
+    /// to be re-stated whenever that height changes. Magnifying is what changes it: at 2x
+    /// the screen holds half as much of the book, and a speed left where it was would be
+    /// twice the reading.
+    private func applyAutoScrollSpeed() {
+        guard let view else { return }
+        autoScroll.setSpeed(
+            config?.autoScroll?.pointsPerSecond(windowHeight: view.visibleHeight) ?? 0
+        )
+    }
+
+    /// Anything the reader does with their own hands takes the pages back: a surface being
+    /// dragged or pinched while something else also moves it is one nobody is steering.
+    ///
+    /// One place rather than a call at each end of each gesture, because the driver holds a
+    /// single flag — and written from two sides, a pinch that ends over a resting finger
+    /// would start the pages moving under it.
+    private func holdAutoScroll() {
+        autoScroll.hold(isTouching || view?.isMagnifying == true)
+    }
+
     // MARK: - Touching
 
     func handleTap(at point: CGPoint) {
@@ -514,6 +571,7 @@ final class ComicScrollCoordinator {
 
     func handleTouch(down: Bool) {
         isTouching = down
+        holdAutoScroll()
         // Where they are is theirs to decide now, and a restored position still trying to
         // land would be taking the book back off them.
         if down { pendingLanding = nil }

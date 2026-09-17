@@ -40,6 +40,31 @@ struct ReadingPace: Equatable {
     }
 }
 
+/// How fast a comic moves when nobody is touching it.
+///
+/// Screens a minute, where a novel is read in lines a minute. A comic has no line to
+/// measure a pace against — a page is one picture, often taller than the glass — so what
+/// a reader is actually pacing is how much of it is in front of them at once.
+///
+/// Measured against the window rather than the content, which is what makes the setting
+/// survive a pinch: magnifying to 2x halves how much of the book the screen holds, so the
+/// same speed in points would be twice the reading, while the same speed in screens looks
+/// the same to the reader at every magnification.
+struct ComicPace: Equatable {
+    var screensPerMinute: Double
+
+    /// Slow enough to read the lettering on a dense page, fast enough to be looking rather
+    /// than reading. The middle of it is a screen every twenty seconds.
+    static let range: ClosedRange<Double> = 0.5...8
+
+    /// Where a reader who has never touched the slider starts.
+    static let standard = ComicPace(screensPerMinute: 3)
+
+    func pointsPerSecond(windowHeight: CGFloat) -> CGFloat {
+        CGFloat(max(0, screensPerMinute)) * max(0, windowHeight) / 60
+    }
+}
+
 extension ReadingMetrics {
     /// The height one line of body text occupies, its leading included — what a speed in
     /// lines a minute is measured against.

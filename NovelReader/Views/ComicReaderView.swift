@@ -25,6 +25,12 @@ struct ComicReaderView: View {
     @State private var showControls = false
     @State private var showCatalog = false
     @State private var showSettings = false
+    /// Whether the pages are moving on their own right now.
+    ///
+    /// State for this session rather than a setting, unlike the speed they move at — the
+    /// text reader's copy of this says why: a book that reopened already scrolling would
+    /// be one that started moving before the reader had looked at it.
+    @State private var autoScrolling = false
     /// Nothing in here is a type setting — a comic has no type — but how a book is left
     /// and how its pages are turned are the same acts on every shelf, so they are answered
     /// once, in one place, for all three.
@@ -69,12 +75,22 @@ struct ComicReaderView: View {
                 ComicControlBar(
                     model: model,
                     onBack: settings.swipeToGoBack ? nil : { dismiss() },
+                    autoScrolling: $autoScrolling,
                     showCatalog: $showCatalog,
                     showSettings: $showSettings
                 )
             }
         }
+        // Only alongside the controls, and only while the pages are moving: a reader who
+        // has put the chrome away is looking at the artwork, and a slider left floating
+        // over it would be the one thing on screen that is not the book.
+        .overlay(alignment: .bottom) {
+            if showControls, autoScrolling {
+                ComicScrollBar(settings: settings)
+            }
+        }
         .animation(.snappy(duration: 0.2), value: showControls)
+        .animation(.snappy(duration: 0.2), value: autoScrolling)
         .sheet(isPresented: $showCatalog) { catalogSheet }
         .sheet(isPresented: $showSettings) {
             // The text reader's panel, which reduces itself to the one question a comic
@@ -116,6 +132,7 @@ struct ComicReaderView: View {
                 target: model.scrollTarget,
                 footer: model.footerState,
                 fetcher: env.images,
+                autoScroll: autoScrolling ? settings.comicScrollPace : nil,
                 onPlaceChange: { model.record($0) },
                 onNeedsNext: { Task { await model.loadNext() } },
                 onNeedsPrevious: { Task { await model.loadPrevious() } },
@@ -131,7 +148,8 @@ struct ComicReaderView: View {
                     if showControls { showControls = false }
                     return true
                 },
-                onTargetReached: { model.clearScrollTarget() }
+                onTargetReached: { model.clearScrollTarget() },
+                onAutoScrollEnded: { autoScrolling = false }
             )
             .ignoresSafeArea()
 
@@ -247,15 +265,16 @@ private struct ComicTitleCapsule: View {
 
 /// The comic reader's bottom controls.
 ///
-/// Five buttons where the text reader has six. The one that is missing is missing on
-/// purpose: a bookmark is a text anchor. Zoom, which is what a comic wants in its place,
-/// is a pinch and a double tap rather than a button — see `ComicScrollView`. Reading
-/// direction is not in this version.
+/// Six buttons where the text reader has up to eight. The ones that are missing are
+/// missing on purpose: a bookmark is a text anchor, and there is nothing here to read out
+/// loud. Zoom, which is what a comic wants in their place, is a pinch and a double tap
+/// rather than a button — see `ComicScrollView`. Reading direction is not in this version.
 private struct ComicControlBar: View {
     let model: ComicReaderModel
     /// Nil when the edge swipe leaves the book instead — see
     /// `ReaderSettings.swipeToGoBack`, and the text reader's bar, which does the same.
     let onBack: (() -> Void)?
+    @Binding var autoScrolling: Bool
     @Binding var showCatalog: Bool
     @Binding var showSettings: Bool
 
@@ -275,6 +294,17 @@ private struct ComicControlBar: View {
             }
             .disabled(model.currentChapterIndex >= model.chapters.count - 1)
             .accessibilityIdentifier("comic.nextChapter")
+            // The one control here that is a state rather than an action, so it says which
+            // one it is in — the text reader's bar carries the same pair of glyphs for the
+            // same reason: a play glyph over pages already moving would be a button
+            // promising what it has just done.
+            control(
+                autoScrolling ? "pause.circle" : "play.circle",
+                label: autoScrolling ? "reader.autoScroll.stop" : "reader.autoScroll.start"
+            ) {
+                autoScrolling.toggle()
+            }
+            .accessibilityIdentifier("comic.autoScroll")
             // A hand rather than the text reader's `textformat.size`: what this opens for a
             // comic is how the pages are turned, and nothing about type.
             control("hand.tap", label: "reader.settings.pageTurn") { showSettings = true }
@@ -297,5 +327,35 @@ private struct ComicControlBar: View {
                 .frame(maxWidth: .infinity, minHeight: 34)
         }
         .accessibilityLabel(Text(label))
+    }
+}
+
+/// How fast pages that are moving on their own move.
+///
+/// The text reader's strip, in the unit a comic is paced by — see `ComicPace`. A strip
+/// over the pages rather than a row in the settings sheet, for that one's reason: the only
+/// way to tell whether a speed is right is to watch the book go past while you change it,
+/// and a speed set over a page that has stopped to show a sheet is set blind.
+private struct ComicScrollBar: View {
+    @Bindable var settings: ReaderSettings
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "tortoise")
+            Slider(value: $settings.comicScrollPace.screensPerMinute, in: ComicPace.range)
+                .accessibilityLabel(Text("reader.autoScroll.speed"))
+                .accessibilityIdentifier("comic.autoScroll.speed")
+            Image(systemName: "hare")
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .background(.bar, in: .capsule)
+        .padding(.horizontal, 12)
+        // Clear of the control bar's own resting place, so the two never stack on top of
+        // each other — the same clearance the text reader's strip keeps.
+        .padding(.bottom, 72)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 }
