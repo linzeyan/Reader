@@ -40,8 +40,8 @@ final class ReaderSpeechGestureTests: XCTestCase {
         let start = app.topParagraphLabel()
         control.tap()
 
-        // The pace strip is the one thing on screen that says listening began: it is shown
-        // for a reader who is listening and for one who has paused, and for nobody else.
+        // The pace strip is the one thing on screen that says listening began: it comes up
+        // with the voice and stays for as long as somebody might be setting the speed.
         let pace = app.descendants(matching: .any)
             .matching(identifier: "reader.speech.rate").firstMatch
         XCTAssertTrue(

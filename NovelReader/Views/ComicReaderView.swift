@@ -31,6 +31,12 @@ struct ComicReaderView: View {
     /// text reader's copy of this says why: a book that reopened already scrolling would
     /// be one that started moving before the reader had looked at it.
     @State private var autoScrolling = false
+    /// When the speed strip was last wanted — the text reader's `paceAskedAt`, and the
+    /// same rule: a speed is set once and then read at, so a slider that stays is a slider
+    /// covering the artwork.
+    @State private var paceAskedAt: Date?
+
+    private static let paceLingers: TimeInterval = 10
     /// Nothing in here is a type setting — a comic has no type — but how a book is left
     /// and how its pages are turned are the same acts on every shelf, so they are answered
     /// once, in one place, for all three.
@@ -38,6 +44,14 @@ struct ComicReaderView: View {
 
     private var pageTurn: ReaderSettings.PageTurn {
         settings.resolvedPageTurn(forBook: book.id, kind: book.kind)
+    }
+
+    /// Waits out the strip's welcome and takes it away.
+    private func letThePaceStripGo() async {
+        guard paceAskedAt != nil else { return }
+        do { try await Task.sleep(for: .seconds(Self.paceLingers)) } catch { return }
+        guard !Task.isCancelled else { return }
+        paceAskedAt = nil
     }
 
     var body: some View {
@@ -81,16 +95,26 @@ struct ComicReaderView: View {
                 )
             }
         }
-        // Only alongside the controls, and only while the pages are moving: a reader who
-        // has put the chrome away is looking at the artwork, and a slider left floating
-        // over it would be the one thing on screen that is not the book.
+        // Only alongside the controls, only while the pages are moving, and only for a
+        // while after it was asked for — the text reader's three conditions, for its
+        // reasons.
         .overlay(alignment: .bottom) {
-            if showControls, autoScrolling {
-                ComicScrollBar(settings: settings)
+            if showControls, autoScrolling, paceAskedAt != nil {
+                ComicScrollBar(settings: settings, onTouched: { paceAskedAt = .now })
             }
         }
+        .task(id: paceAskedAt) { await letThePaceStripGo() }
+        .onChange(of: autoScrolling) { _, moving in
+            paceAskedAt = moving ? .now : nil
+        }
+        // Bringing the chrome up over pages that are already moving is how the slider is
+        // asked for again without stopping them.
+        .onChange(of: showControls) { _, shown in
+            guard shown, autoScrolling else { return }
+            paceAskedAt = .now
+        }
         .animation(.snappy(duration: 0.2), value: showControls)
-        .animation(.snappy(duration: 0.2), value: autoScrolling)
+        .animation(.snappy(duration: 0.2), value: paceAskedAt)
         .sheet(isPresented: $showCatalog) { catalogSheet }
         .sheet(isPresented: $showSettings) {
             // The text reader's panel, which reduces itself to the one question a comic
@@ -338,13 +362,17 @@ private struct ComicControlBar: View {
 /// and a speed set over a page that has stopped to show a sheet is set blind.
 private struct ComicScrollBar: View {
     @Bindable var settings: ReaderSettings
+    /// The reader is still setting this — see `ComicReaderView.paceAskedAt`.
+    let onTouched: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: "tortoise")
-            Slider(value: $settings.comicScrollPace.screensPerMinute, in: ComicPace.range)
-                .accessibilityLabel(Text("reader.autoScroll.speed"))
-                .accessibilityIdentifier("comic.autoScroll.speed")
+            Slider(value: $settings.comicScrollPace.screensPerMinute, in: ComicPace.range) { _ in
+                onTouched()
+            }
+            .accessibilityLabel(Text("reader.autoScroll.speed"))
+            .accessibilityIdentifier("comic.autoScroll.speed")
             Image(systemName: "hare")
         }
         .font(.footnote)

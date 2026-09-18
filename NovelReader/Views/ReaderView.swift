@@ -55,6 +55,20 @@ struct ReaderView: View {
     /// switched on for a stretch of reading and off again, and a book that reopened already
     /// scrolling would be one that started moving before the reader had looked at it.
     @State private var autoScrolling = false
+    /// When the speed strip was last wanted: something started moving the page, the reader
+    /// brought the chrome up over it, or they touched the slider. Nil is "not on screen".
+    ///
+    /// A moment rather than a flag, because what it answers is "how long ago" — and because
+    /// `task(id:)` keyed on it restarts the wait every time it is restated, which is what
+    /// makes a second touch of the slider buy another few seconds.
+    @State private var paceAskedAt: Date?
+
+    /// How long the speed strip stays after the last thing that asked for it.
+    ///
+    /// Long enough to reach for the slider, watch a line or two go past at the new speed
+    /// and decide, and short enough that a reader who did not want it has it out of the
+    /// way before it becomes part of the furniture.
+    private static let paceLingers: TimeInterval = 10
 
     enum CatalogTab: Hashable {
         case outline
@@ -141,16 +155,21 @@ struct ReaderView: View {
                 )
             }
         }
-        // Only alongside the controls. A reader who has put the chrome away is watching
-        // the text, and a slider left floating over it would be the one thing on screen
-        // that is not the book.
+        // The speed, for as long as somebody is setting it and no longer.
+        //
+        // Three conditions, and each of them is a way the strip used to overstay. Only
+        // alongside the controls: a reader who has put the chrome away is watching the
+        // text. Only while something is actually moving the page — a voice the reader
+        // paused is not reading to them, whatever the sentence still in its mouth says.
+        // And only for a while after it was last asked for, because a speed is set once
+        // and then read at: a slider that stays is a slider covering the book.
         //
         // One strip for the two of them because they are never both on — see
         // `startListening` — and because two stacked sliders over the foot of the page
         // would be the chrome finally covering the book.
         .overlay(alignment: .bottom) {
-            if showControls {
-                if isListening, let model {
+            if showControls, paceAskedAt != nil {
+                if voiceIsReadingThisBook, let model {
                     SpeechBar(
                         settings: settings,
                         sleepsAt: Binding(
@@ -158,16 +177,20 @@ struct ReaderView: View {
                             set: { env.speech.sleepsAt = $0 }
                         ),
                         stopsAtWhatIsDownloaded: listeningRunsOutOfDownloads(model),
-                        onPace: { env.speech.setPace($0) }
+                        onPace: { env.speech.setPace($0) },
+                        onTouched: { paceAskedAt = .now }
                     )
                 } else if autoScrolling {
-                    AutoScrollBar(settings: settings)
+                    AutoScrollBar(settings: settings, onTouched: { paceAskedAt = .now })
                 }
             }
         }
+        // Takes the strip away once the reader has stopped adjusting. Keyed on the moment
+        // itself, so every touch of the slider starts the wait over.
+        .task(id: paceAskedAt) { await letThePaceStripGo() }
         .animation(.snappy(duration: 0.2), value: showControls)
         .animation(.snappy(duration: 0.2), value: autoScrolling)
-        .animation(.snappy(duration: 0.2), value: isListening)
+        .animation(.snappy(duration: 0.2), value: paceAskedAt)
         .sheet(isPresented: $showCatalog) {
             catalogSheet
                 // Which tab is right depends on what is being read, and that can change
@@ -243,6 +266,22 @@ struct ReaderView: View {
             // Two things moving one page is a page nobody is steering. The reader asked
             // for this one, so the voice is the one that gives way.
             if moving { env.speech.pause() }
+            // A speed is worth offering the moment there is something moving at it, and
+            // worth taking away the moment there is not.
+            paceAskedAt = moving ? .now : nil
+        }
+        // The same two moments for the voice, and it is watched rather than set where the
+        // control is tapped because listening starts and stops in more places than that
+        // one: a remote button, a phone call, the sleep timer, the end of the book.
+        .onChange(of: voiceIsReadingThisBook) { _, reading in
+            paceAskedAt = reading ? .now : nil
+        }
+        // Bringing the chrome up over a page that is already moving is how a reader asks
+        // for the slider back, and the only way back to it that does not go through
+        // stopping the thing they want to adjust.
+        .onChange(of: showControls) { _, shown in
+            guard shown, autoScrolling || voiceIsReadingThisBook else { return }
+            paceAskedAt = .now
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn
@@ -294,6 +333,20 @@ struct ReaderView: View {
         // turns itself at the speed it was scrolling at.
         guard mode == .scroll else { return }
         model?.retarget()
+    }
+
+    /// Whether the voice is reading *this* book right now — which is not the same question
+    /// as `isListening`, and the difference is the whole of what the speed strip is for: a
+    /// reader who pressed pause has stopped listening, and a slider left over the page
+    /// afterwards is a control for something that is not happening.
+    private var voiceIsReadingThisBook: Bool { isListening && env.speech.isSpeaking }
+
+    /// Waits out the strip's welcome and takes it away.
+    private func letThePaceStripGo() async {
+        guard paceAskedAt != nil else { return }
+        do { try await Task.sleep(for: .seconds(Self.paceLingers)) } catch { return }
+        guard !Task.isCancelled else { return }
+        paceAskedAt = nil
     }
 
     /// Whether the voice is in this book, reading or stopped mid-sentence.
@@ -1096,6 +1149,10 @@ private struct SpeechBar: View {
     /// Whether the chapter after this one is still only on the site.
     let stopsAtWhatIsDownloaded: Bool
     let onPace: (SpeechPace) -> Void
+    /// The reader is still using this strip, so it is not yet in their way — see
+    /// `ReaderView.paceAskedAt`. Every control in here reports it, including the timer,
+    /// whose menu would otherwise be dismissed by the strip going out from under it.
+    let onTouched: () -> Void
 
     /// The three answers worth offering. A reader setting this is going to sleep, not
     /// timing something, so a picker of every value would be a decision where a choice
@@ -1107,6 +1164,7 @@ private struct SpeechBar: View {
             HStack(spacing: 14) {
                 Image(systemName: "tortoise")
                 Slider(value: $settings.speechPace.rate, in: SpeechPace.range) { editing in
+                    onTouched()
                     guard !editing else { return }
                     onPace(settings.speechPace)
                 }
@@ -1139,6 +1197,7 @@ private struct SpeechBar: View {
         Menu {
             ForEach(Self.minutes, id: \.self) { minutes in
                 Button {
+                    onTouched()
                     sleepsAt = Date().addingTimeInterval(TimeInterval(minutes) * 60)
                 } label: {
                     Text("reader.speech.sleep.minutes \(minutes)")
@@ -1147,7 +1206,10 @@ private struct SpeechBar: View {
             // Only once there is a timer to turn off. A menu whose first item undoes
             // something nobody has done is a menu that reads as broken.
             if sleepsAt != nil {
-                Button("reader.speech.sleep.off") { sleepsAt = nil }
+                Button("reader.speech.sleep.off") {
+                    onTouched()
+                    sleepsAt = nil
+                }
             }
         } label: {
             // Filled while a timer is set, the way the bookmark is filled while the page
@@ -1167,6 +1229,9 @@ private struct SpeechBar: View {
 /// and a speed set over a page that has stopped to show you a sheet is set blind.
 private struct AutoScrollBar: View {
     @Bindable var settings: ReaderSettings
+    /// The reader is still setting this, so the strip has not outstayed its welcome — see
+    /// `ReaderView.paceAskedAt`.
+    let onTouched: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -1174,7 +1239,9 @@ private struct AutoScrollBar: View {
             Slider(
                 value: $settings.autoScrollPace.linesPerMinute,
                 in: ReadingPace.range
-            )
+            ) { _ in
+                onTouched()
+            }
             .accessibilityLabel(Text("reader.autoScroll.speed"))
             .accessibilityIdentifier("reader.autoScroll.speed")
             Image(systemName: "hare")
