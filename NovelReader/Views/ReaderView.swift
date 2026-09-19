@@ -151,7 +151,8 @@ struct ReaderView: View {
                         isSpeaking: env.speech.isSpeaking,
                         toggle: { toggleSpeech(model) }
                     ),
-                    showCatalog: $showCatalog, showSettings: $showSettings
+                    showCatalog: $showCatalog, showSettings: $showSettings,
+                    arrangement: settings.resolvedToolbar(forBook: book.id, kind: book.kind)
                 )
             }
         }
@@ -981,102 +982,36 @@ private struct ReaderControlBar: View {
     /// `ReaderSettings.swipeToGoBack`. Absence rather than a flag, because a button with
     /// nothing to call is not a button.
     let onBack: (() -> Void)?
-    /// Whether the page is moving on its own, where it can. Nil in a renderer that turns
-    /// pages instead of scrolling, for `onBack`'s reason: nothing to switch, no switch.
-    let autoScrolling: Binding<Bool>?
-    /// Reading the book out loud, where a page can follow the voice. Nil for
-    /// `autoScrolling`'s reason.
-    let speech: SpeechSwitch?
+    /// Whether the page is moving on its own. Both renderers answer it — see the bar's
+    /// caller — so it is not optional the way it was before they both did.
+    let autoScrolling: Binding<Bool>
+    /// Reading the book out loud, which both renderers also answer.
+    let speech: SpeechSwitch
     @Binding var showCatalog: Bool
     @Binding var showSettings: Bool
+    /// What this book's reader arranged: what sits on the bar, and what is folded behind
+    /// the last button — see `ReaderToolbarLayout`.
+    let arrangement: (bar: [ReaderButton], folded: [ReaderButton])
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         HStack(spacing: 0) {
-            if let onBack {
-                control("chevron.left", label: "common.back") { onBack() }
-                    .accessibilityIdentifier("reader.back")
+            ForEach(arrangement.bar.filter(isOnScreen)) { button in
+                bar(button)
             }
-            control(
-                "list.bullet",
-                label: model.isSubscription ? "reader.articles" : "reader.catalog"
-            ) { showCatalog = true }
-            // Filled when the page on screen is already saved: a bookmark the reader
-            // cannot see is one they will add twice.
-            control(
-                model.isCurrentPositionBookmarked ? "bookmark.fill" : "bookmark",
-                label: model.isCurrentPositionBookmarked
-                    ? "reader.bookmark.remove" : "reader.bookmark.add"
-            ) {
-                model.toggleBookmark()
-            }
-            .accessibilityIdentifier("reader.bookmark")
-            control(
-                "arrow.up.to.line",
-                label: model.isSubscription ? "reader.previousArticle" : "reader.previousChapter"
-            ) {
-                Task { await model.jump(toChapterAt: model.currentChapterIndex - 1) }
-            }
-            .disabled(model.currentChapterIndex <= 0)
-            control(
-                "arrow.down.to.line",
-                label: model.isSubscription ? "reader.nextArticle" : "reader.nextChapter"
-            ) {
-                Task { await model.jump(toChapterAt: model.currentChapterIndex + 1) }
-            }
-            .disabled(model.currentChapterIndex >= model.chapters.count - 1)
-            // Named for the walks that have to make a chapter jump. The label is
-            // localized, so it is not a handle a test can hold.
-            .accessibilityIdentifier("reader.nextChapter")
-            // Only where there is an original to read — see `currentArticleURL`. A
-            // seventh control on every novel would be a browser button on text that is
-            // already fully here.
-            //
-            // The tap re-reads the piece into this reader; the browser is the long press.
-            // Both gestures go to the same page, and which of them deserves the tap is
-            // settled by what happens afterwards: one leaves the reader where they were
-            // with the rest of the article under them, the other hands them to another app
-            // that does not know they were reading. The one that keeps the reader is the
-            // one that should not need to be discovered.
-            if let original = model.currentArticleURL {
+            // Only where something is actually folded away. A control that opens an empty
+            // menu is the bar spending a place on nothing — and the reader who folded
+            // nothing away is the reader who wanted every place for a control.
+            let folded = arrangement.folded.filter(isOnScreen)
+            if !folded.isEmpty {
                 Menu {
-                    Button("reader.fetchFullText", systemImage: "arrow.clockwise") {
-                        Task { await model.reloadFromPage() }
-                    }
-                    Button("reader.openOriginal", systemImage: "safari") { openURL(original) }
+                    ForEach(folded) { button in menu(button) }
                 } label: {
-                    controlIcon("arrow.clockwise")
-                } primaryAction: {
-                    Task { await model.reloadFromPage() }
+                    controlIcon("ellipsis.circle")
                 }
-                .accessibilityLabel(Text("reader.fetchFullText"))
-                .accessibilityIdentifier("reader.reloadFromPage")
+                .accessibilityLabel(Text("reader.toolbar.more"))
+                .accessibilityIdentifier("reader.more")
             }
-            if let autoScrolling {
-                // The one control here that is a state rather than an action, so it says
-                // which one it is in: a play glyph on a page already moving would be a
-                // button promising what it has just done.
-                control(
-                    autoScrolling.wrappedValue ? "pause.circle" : "play.circle",
-                    label: autoScrolling.wrappedValue
-                        ? "reader.autoScroll.stop" : "reader.autoScroll.start"
-                ) {
-                    autoScrolling.wrappedValue.toggle()
-                }
-                .accessibilityIdentifier("reader.autoScroll")
-            }
-            if let speech {
-                // Filled while the voice is reading, the way the bookmark is filled while
-                // the page is saved: what the glyph says is the state it is in, and the
-                // tap is what changes it.
-                control(
-                    speech.isSpeaking ? "headphones.circle.fill" : "headphones.circle",
-                    label: speech.isSpeaking ? "reader.speech.pause" : "reader.speech.start",
-                    action: speech.toggle
-                )
-                .accessibilityIdentifier("reader.speech")
-            }
-            control("textformat.size", label: "reader.settings") { showSettings = true }
         }
         .padding(.vertical, 10)
         .background(.bar)
@@ -1086,24 +1021,159 @@ private struct ReaderControlBar: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
-    private func control(
-        _ systemImage: String,
-        label: LocalizedStringKey,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) { controlIcon(systemImage) }
-            .accessibilityLabel(Text(label))
+    /// Whether a control is on screen at all right now.
+    ///
+    /// Not the same question as whether this shelf has it — see `ReaderButton.appears(in:)`
+    /// — because these two change while the reader is standing here: the way out of a book
+    /// depends on a setting, and an article has an original only where it came from one.
+    private func isOnScreen(_ button: ReaderButton) -> Bool {
+        switch button {
+        case .back: return onBack != nil
+        case .original: return model.currentArticleURL != nil
+        default: return true
+        }
     }
 
-    /// One control's glyph at the bar's own metrics, shared with the article control —
-    /// which is a `Menu` rather than a `Button` and so cannot go through `control`. The
-    /// bar's controls are evenly spaced by the width each of them claims, so a second
-    /// copy of these numbers is a bar that stops being evenly spaced the day one of them
-    /// is edited.
+    // MARK: - One control, in the two places it can be
+
+    /// A control as the bar draws it.
+    @ViewBuilder
+    private func bar(_ button: ReaderButton) -> some View {
+        if case .original = button, let original = model.currentArticleURL {
+            // The tap re-reads the piece into this reader; the browser is the long press.
+            // Both gestures go to the same page, and which of them deserves the tap is
+            // settled by what happens afterwards: one leaves the reader where they were
+            // with the rest of the article under them, the other hands them to another app
+            // that does not know they were reading. The one that keeps the reader is the
+            // one that should not need to be discovered.
+            Menu {
+                Button("reader.fetchFullText", systemImage: "arrow.clockwise") {
+                    Task { await model.reloadFromPage() }
+                }
+                Button("reader.openOriginal", systemImage: "safari") { openURL(original) }
+            } label: {
+                controlIcon("arrow.clockwise")
+            } primaryAction: {
+                Task { await model.reloadFromPage() }
+            }
+            .accessibilityLabel(Text("reader.fetchFullText"))
+            .accessibilityIdentifier("reader.reloadFromPage")
+        } else if let control = control(button) {
+            Button(action: control.act) { controlIcon(control.icon) }
+                .disabled(!control.isEnabled)
+                .accessibilityLabel(Text(control.label))
+                .accessibilityIdentifier(control.identifier)
+        }
+    }
+
+    /// The same control as a row in the menu behind the last button.
+    @ViewBuilder
+    private func menu(_ button: ReaderButton) -> some View {
+        if case .original = button, let original = model.currentArticleURL {
+            // Flattened into its two actions. A menu inside a menu is a submenu nobody
+            // opens, and the long press that separates them on the bar has nothing to be
+            // a long press on in here.
+            Button("reader.fetchFullText", systemImage: "arrow.clockwise") {
+                Task { await model.reloadFromPage() }
+            }
+            Button("reader.openOriginal", systemImage: "safari") { openURL(original) }
+        } else if let control = control(button) {
+            Button(action: control.act) {
+                Label { Text(control.label) } icon: { Image(systemName: control.icon) }
+            }
+            .disabled(!control.isEnabled)
+            .accessibilityIdentifier(control.identifier)
+        }
+    }
+
+    /// What one control looks like, is called and does, right now.
+    ///
+    /// Stated once because two places draw it: a control folded away has to do exactly
+    /// what it did on the bar, and a glyph that says which state it is in has to say the
+    /// same thing in both. Nil for the article control, which is two actions rather than
+    /// one and is built where it is drawn.
+    private func control(_ button: ReaderButton) -> Control? {
+        switch button {
+        case .back:
+            return Control(icon: "chevron.left", label: "common.back", identifier: "reader.back") {
+                onBack?()
+            }
+        case .catalog:
+            return Control(
+                icon: "list.bullet",
+                label: model.isSubscription ? "reader.articles" : "reader.catalog",
+                identifier: "reader.catalog"
+            ) { showCatalog = true }
+        case .bookmark:
+            // Filled when the page on screen is already saved: a bookmark the reader
+            // cannot see is one they will add twice.
+            let saved = model.isCurrentPositionBookmarked
+            return Control(
+                icon: saved ? "bookmark.fill" : "bookmark",
+                label: saved ? "reader.bookmark.remove" : "reader.bookmark.add",
+                identifier: "reader.bookmark"
+            ) { model.toggleBookmark() }
+        case .previousChapter:
+            return Control(
+                icon: "arrow.up.to.line",
+                label: model.isSubscription ? "reader.previousArticle" : "reader.previousChapter",
+                identifier: "reader.previousChapter",
+                isEnabled: model.currentChapterIndex > 0
+            ) { Task { await model.jump(toChapterAt: model.currentChapterIndex - 1) } }
+        case .nextChapter:
+            // Named for the walks that have to make a chapter jump. The label is
+            // localized, so it is not a handle a test can hold.
+            return Control(
+                icon: "arrow.down.to.line",
+                label: model.isSubscription ? "reader.nextArticle" : "reader.nextChapter",
+                identifier: "reader.nextChapter",
+                isEnabled: model.currentChapterIndex < model.chapters.count - 1
+            ) { Task { await model.jump(toChapterAt: model.currentChapterIndex + 1) } }
+        case .original:
+            return nil
+        case .autoScroll:
+            // A state rather than an action, so it says which one it is in: a play glyph
+            // on a page already moving would be a button promising what it has just done.
+            let moving = autoScrolling.wrappedValue
+            return Control(
+                icon: moving ? "pause.circle" : "play.circle",
+                label: moving ? "reader.autoScroll.stop" : "reader.autoScroll.start",
+                identifier: "reader.autoScroll"
+            ) { autoScrolling.wrappedValue.toggle() }
+        case .speech:
+            // Filled while the voice is reading, the way the bookmark is filled while the
+            // page is saved: what the glyph says is the state it is in, and the tap is
+            // what changes it.
+            return Control(
+                icon: speech.isSpeaking ? "headphones.circle.fill" : "headphones.circle",
+                label: speech.isSpeaking ? "reader.speech.pause" : "reader.speech.start",
+                identifier: "reader.speech",
+                act: speech.toggle
+            )
+        case .settings:
+            return Control(
+                icon: "textformat.size", label: "reader.settings", identifier: "reader.settings"
+            ) { showSettings = true }
+        }
+    }
+
+    /// One control's glyph at the bar's own metrics, shared with the article control and
+    /// the folded-away menu — both of which are a `Menu` rather than a `Button`. The bar's
+    /// controls are evenly spaced by the width each of them claims, so a second copy of
+    /// these numbers is a bar that stops being evenly spaced the day one of them is edited.
     private func controlIcon(_ systemImage: String) -> some View {
         Image(systemName: systemImage)
             .font(.system(size: 18))
             .frame(maxWidth: .infinity, minHeight: 34)
+    }
+
+    /// One control as both places that draw it need it.
+    struct Control {
+        let icon: String
+        let label: LocalizedStringKey
+        let identifier: String
+        var isEnabled = true
+        let act: () -> Void
     }
 }
 

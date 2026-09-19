@@ -31,6 +31,13 @@ extension ReaderSettings {
         var fontSize: Double?
         var lineSpacing: Double?
         var paragraphSpacing: Double?
+        /// How this layer's bottom bar is arranged — see `ReaderToolbarLayout`, which is
+        /// itself written in raw strings for the reason the three above are.
+        ///
+        /// Nil is "follows"; an arrangement that says nothing is stored as nil rather than
+        /// as itself, so that a reader who arranges a book's bar and then puts every
+        /// control back is following again rather than pinned to today's default order.
+        var toolbar: ReaderToolbarLayout?
 
         var mode: Mode? {
             get { modeRaw.flatMap(Mode.init(rawValue:)) }
@@ -52,6 +59,7 @@ extension ReaderSettings {
         var isEmpty: Bool {
             modeRaw == nil && pageTurnRaw == nil && themeRaw == nil && fontName == nil
                 && fontSize == nil && lineSpacing == nil && paragraphSpacing == nil
+                && toolbar == nil
         }
 
         init(
@@ -61,7 +69,8 @@ extension ReaderSettings {
             fontSize: Double? = nil,
             lineSpacing: Double? = nil,
             paragraphSpacing: Double? = nil,
-            theme: Theme? = nil
+            theme: Theme? = nil,
+            toolbar: ReaderToolbarLayout? = nil
         ) {
             self.modeRaw = mode?.rawValue
             self.pageTurnRaw = pageTurn?.rawValue
@@ -70,6 +79,7 @@ extension ReaderSettings {
             self.fontSize = fontSize
             self.lineSpacing = lineSpacing
             self.paragraphSpacing = paragraphSpacing
+            self.toolbar = toolbar
         }
     }
 
@@ -192,6 +202,16 @@ extension ReaderSettings {
         value(\.theme, of: .book(id: bookId, kind: kind), general: \.theme)
     }
 
+    /// What this book's bottom bar holds and what is folded behind its last button.
+    ///
+    /// Resolved down to the two lists here so that neither bar has to know a book has
+    /// layers — the same thing `metrics(forBook:kind:)` does for the text.
+    func resolvedToolbar(
+        forBook bookId: String, kind: SiteRule.Kind
+    ) -> (bar: [ReaderButton], folded: [ReaderButton]) {
+        value(\.toolbar, of: .book(id: bookId, kind: kind), general: \.toolbar).resolve(for: kind)
+    }
+
     /// What a book's text is laid out with, resolved once so that the renderers never have
     /// to know a book has layers — see `ReadingMetrics`.
     func metrics(forBook bookId: String, kind: SiteRule.Kind) -> ReadingMetrics {
@@ -238,6 +258,13 @@ extension ReaderSettings {
 
     func defaultTheme(for kind: SiteRule.Kind) -> Theme {
         value(\.theme, of: .shelf(kind), general: \.theme)
+    }
+
+    /// The arrangement a layer reads with, unresolved — what the editor shows and what the
+    /// line under it names. `resolve(for:)` is the caller's, because the editor needs the
+    /// two lists for *its* layer and the bar needs them for the book it is drawing.
+    func toolbar(of layer: Layer) -> ReaderToolbarLayout {
+        value(\.toolbar, of: layer, general: \.toolbar)
     }
 
     // MARK: - Reading and writing one stored layer

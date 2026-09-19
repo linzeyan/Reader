@@ -50,6 +50,19 @@ struct ReadingAppearanceSections: View {
             } else {
                 ReadingOverrideSections(settings: settings, layer: scope)
             }
+
+            // Outside the branch above, because this is the one question every layer
+            // answers the same way — the general answers included. A pushed screen rather
+            // than rows here: reordering wants the width, and this panel is half a screen
+            // tall when it is opened from inside a book.
+            Section {
+                NavigationLink("reader.toolbar") {
+                    ReaderToolbarEditor(settings: settings, layer: scope)
+                }
+                .accessibilityIdentifier("reader.settings.toolbar")
+            } footer: {
+                Text("reader.toolbar.section.footer")
+            }
         }
     }
 

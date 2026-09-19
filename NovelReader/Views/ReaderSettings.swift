@@ -189,6 +189,16 @@ final class ReaderSettings {
             defaults.set(swipeToGoBack, forKey: Keys.swipeToGoBack)
         }
     }
+    /// How the bottom bar is arranged: the order of its controls, and which of them are
+    /// folded away behind the last button — see `ReaderToolbarLayout`.
+    ///
+    /// A shelf and a book may each disagree, because which controls are worth a place is a
+    /// question about what is being read: a subscription is read with the article button
+    /// and a novel has no such thing, and somebody who listens to novels and looks at
+    /// comics wants a different bar in each.
+    var toolbar: ReaderToolbarLayout {
+        didSet { write(toolbar, forKey: Keys.toolbar) }
+    }
     /// How fast the page moves when the reader has stopped turning it themselves — see
     /// `ReadingPace`, which is where the unit is argued for.
     ///
@@ -293,6 +303,7 @@ final class ReaderSettings {
         static let keepScreenOn = "reader.keepScreenOn"
         static let pageTurn = "reader.pageTurn"
         static let swipeToGoBack = "reader.swipeToGoBack"
+        static let toolbar = "reader.toolbar"
         static let autoScrollPace = "reader.autoScrollPace"
         static let comicScrollPace = "reader.comicScrollPace"
         static let speechPace = "reader.speechPace"
@@ -369,6 +380,9 @@ final class ReaderSettings {
         // the only way a walk can ask about a gesture without persisting the choice into
         // the simulator for every test that runs after it.
         swipeToGoBack = defaults.bool(forKey: Keys.swipeToGoBack)
+        toolbar = defaults.data(forKey: Keys.toolbar)
+            .flatMap { try? JSONDecoder().decode(ReaderToolbarLayout.self, from: $0) }
+            ?? .standard
         // `object(forKey:) as? Double` rather than `double(forKey:)`, which answers zero
         // for a key nobody has set — and zero here is a page that never moves, which is
         // indistinguishable from the feature being broken.

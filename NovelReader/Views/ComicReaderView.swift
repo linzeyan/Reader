@@ -91,7 +91,8 @@ struct ComicReaderView: View {
                     onBack: settings.swipeToGoBack ? nil : { dismiss() },
                     autoScrolling: $autoScrolling,
                     showCatalog: $showCatalog,
-                    showSettings: $showSettings
+                    showSettings: $showSettings,
+                    arrangement: settings.resolvedToolbar(forBook: book.id, kind: book.kind)
                 )
             }
         }
@@ -300,10 +301,14 @@ private struct ComicTitleCapsule: View {
 
 /// The comic reader's bottom controls.
 ///
-/// Six buttons where the text reader has up to eight. The ones that are missing are
-/// missing on purpose: a bookmark is a text anchor, and there is nothing here to read out
-/// loud. Zoom, which is what a comic wants in their place, is a pinch and a double tap
-/// rather than a button — see `ComicScrollView`. Reading direction is not in this version.
+/// The same controls the text reader's bar draws, minus the ones a comic has no use for —
+/// see `ReaderButton.appears(in:)`, which is where that is decided for both bars. A
+/// bookmark is a text anchor and there is nothing here to read out loud. Zoom, which is
+/// what a comic wants in their place, is a pinch and a double tap rather than a button —
+/// see `ComicScrollView`. Reading direction is not in this version.
+///
+/// Arranged and folded away by the reader, exactly as the text reader's bar is: a shelf is
+/// a `SiteRule.Kind` and comics are one of them.
 private struct ComicControlBar: View {
     let model: ComicReaderModel
     /// Nil when the edge swipe leaves the book instead — see
@@ -312,38 +317,39 @@ private struct ComicControlBar: View {
     @Binding var autoScrolling: Bool
     @Binding var showCatalog: Bool
     @Binding var showSettings: Bool
+    let arrangement: (bar: [ReaderButton], folded: [ReaderButton])
 
     var body: some View {
         HStack(spacing: 0) {
-            if let onBack {
-                control("chevron.left", label: "common.back") { onBack() }
-                    .accessibilityIdentifier("comic.back")
+            ForEach(arrangement.bar.filter(isOnScreen)) { button in
+                if let control = control(button) {
+                    Button(action: control.act) { controlIcon(control.icon) }
+                        .disabled(!control.isEnabled)
+                        .accessibilityLabel(Text(control.label))
+                        .accessibilityIdentifier(control.identifier)
+                }
             }
-            control("list.bullet", label: "reader.catalog") { showCatalog = true }
-            control("arrow.up.to.line", label: "reader.previousChapter") {
-                Task { await model.jump(toChapterAt: model.currentChapterIndex - 1) }
+            // Only where something is folded away — the text reader's bar, for its reason.
+            let folded = arrangement.folded.filter(isOnScreen)
+            if !folded.isEmpty {
+                Menu {
+                    ForEach(folded) { button in
+                        if let control = control(button) {
+                            Button(action: control.act) {
+                                Label { Text(control.label) } icon: {
+                                    Image(systemName: control.icon)
+                                }
+                            }
+                            .disabled(!control.isEnabled)
+                            .accessibilityIdentifier(control.identifier)
+                        }
+                    }
+                } label: {
+                    controlIcon("ellipsis.circle")
+                }
+                .accessibilityLabel(Text("reader.toolbar.more"))
+                .accessibilityIdentifier("comic.more")
             }
-            .disabled(model.currentChapterIndex <= 0)
-            control("arrow.down.to.line", label: "reader.nextChapter") {
-                Task { await model.jump(toChapterAt: model.currentChapterIndex + 1) }
-            }
-            .disabled(model.currentChapterIndex >= model.chapters.count - 1)
-            .accessibilityIdentifier("comic.nextChapter")
-            // The one control here that is a state rather than an action, so it says which
-            // one it is in — the text reader's bar carries the same pair of glyphs for the
-            // same reason: a play glyph over pages already moving would be a button
-            // promising what it has just done.
-            control(
-                autoScrolling ? "pause.circle" : "play.circle",
-                label: autoScrolling ? "reader.autoScroll.stop" : "reader.autoScroll.start"
-            ) {
-                autoScrolling.toggle()
-            }
-            .accessibilityIdentifier("comic.autoScroll")
-            // A hand rather than the text reader's `textformat.size`: what this opens for a
-            // comic is how the pages are turned, and nothing about type.
-            control("hand.tap", label: "reader.settings.pageTurn") { showSettings = true }
-                .accessibilityIdentifier("comic.settings")
         }
         .padding(.vertical, 10)
         .background(.bar)
@@ -353,15 +359,77 @@ private struct ComicControlBar: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
-    private func control(
-        _ systemImage: String, label: LocalizedStringKey, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 18))
-                .frame(maxWidth: .infinity, minHeight: 34)
+    /// The way out of a book is the only control here that comes and goes.
+    private func isOnScreen(_ button: ReaderButton) -> Bool {
+        guard case .back = button else { return true }
+        return onBack != nil
+    }
+
+    /// What one control looks like, is called and does — the text reader's `Control`, for
+    /// its reason: the bar and the menu behind it must not disagree about any of the three.
+    ///
+    /// Nil for the controls a comic has none of. `appears(in: .comic)` already keeps them
+    /// out of the arrangement, so reaching one here would be that rule and this switch
+    /// having come apart — and a bar quietly drawing the wrong glyph is worse than a gap.
+    private func control(_ button: ReaderButton) -> Control? {
+        switch button {
+        case .bookmark, .original, .speech:
+            return nil
+        case .back:
+            return Control(icon: "chevron.left", label: "common.back", identifier: "comic.back") {
+                onBack?()
+            }
+        case .catalog:
+            return Control(icon: "list.bullet", label: "reader.catalog", identifier: "comic.catalog") {
+                showCatalog = true
+            }
+        case .previousChapter:
+            return Control(
+                icon: "arrow.up.to.line",
+                label: "reader.previousChapter",
+                identifier: "comic.previousChapter",
+                isEnabled: model.currentChapterIndex > 0
+            ) { Task { await model.jump(toChapterAt: model.currentChapterIndex - 1) } }
+        case .nextChapter:
+            return Control(
+                icon: "arrow.down.to.line",
+                label: "reader.nextChapter",
+                identifier: "comic.nextChapter",
+                isEnabled: model.currentChapterIndex < model.chapters.count - 1
+            ) { Task { await model.jump(toChapterAt: model.currentChapterIndex + 1) } }
+        case .autoScroll:
+            // A state rather than an action, so it says which one it is in — the text
+            // reader's bar carries the same pair of glyphs for the same reason: a play
+            // glyph over pages already moving would be a button promising what it has
+            // just done.
+            return Control(
+                icon: autoScrolling ? "pause.circle" : "play.circle",
+                label: autoScrolling ? "reader.autoScroll.stop" : "reader.autoScroll.start",
+                identifier: "comic.autoScroll"
+            ) { autoScrolling.toggle() }
+        case .settings:
+            // A hand rather than the text reader's `textformat.size`: what this opens for
+            // a comic is how the pages are turned, and nothing about type.
+            return Control(
+                icon: "hand.tap",
+                label: "reader.settings.pageTurn",
+                identifier: "comic.settings"
+            ) { showSettings = true }
         }
-        .accessibilityLabel(Text(label))
+    }
+
+    private func controlIcon(_ systemImage: String) -> some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 18))
+            .frame(maxWidth: .infinity, minHeight: 34)
+    }
+
+    struct Control {
+        let icon: String
+        let label: LocalizedStringKey
+        let identifier: String
+        var isEnabled = true
+        let act: () -> Void
     }
 }
 

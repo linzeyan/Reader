@@ -6832,6 +6832,9 @@
         }
       }
     },
+    "reader.speech.sleep.minutes %@" : {
+
+    },
     "reader.speech.sleep.minutes %lld" : {
       "comment" : "One sleep timer choice.",
       "extractionState" : "manual",
@@ -7284,6 +7287,270 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文字顏色"
+          }
+        }
+      }
+    },
+    "reader.toolbar" : {
+      "comment" : "Arranging the reader's bottom bar.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Toolbar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具列"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具列"
+          }
+        }
+      }
+    },
+    "reader.toolbar.fold" : {
+      "comment" : "Takes one control off the bar and puts it in the menu.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fold away"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起来"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起來"
+          }
+        }
+      }
+    },
+    "reader.toolbar.follow.defaults" : {
+      "comment" : "This shelf arranges its bar the way the general settings do.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow the default arrangement"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随预设的排列"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟隨預設的排列"
+          }
+        }
+      }
+    },
+    "reader.toolbar.follow.shelf" : {
+      "comment" : "This book arranges its bar the way its shelf does.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow the shelf's arrangement"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随书柜的排列"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟隨書櫃的排列"
+          }
+        }
+      }
+    },
+    "reader.toolbar.footer" : {
+      "comment" : "What the toolbar editor does, under the list.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag to reorder. A control you fold away is still there, in the menu behind the last button."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拖曳可以调整顺序。收起来的按钮不会消失，都在最右边那颗按钮的选单里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拖曳可以調整順序。收起來的按鈕不會消失，都在最右邊那顆按鈕的選單裡。"
+          }
+        }
+      }
+    },
+    "reader.toolbar.more" : {
+      "comment" : "The button the folded-away controls are behind.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        }
+      }
+    },
+    "reader.toolbar.order" : {
+      "comment" : "The list of controls, in the order they sit in.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Controls"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按钮"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按鈕"
+          }
+        }
+      }
+    },
+    "reader.toolbar.section.footer" : {
+      "comment" : "What the toolbar row in the settings panel leads to.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which controls the bar at the foot of the page holds, and in what order."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页面下方那一列放哪些按钮、怎么排。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頁面下方那一列放哪些按鈕、怎麼排。"
+          }
+        }
+      }
+    },
+    "reader.toolbar.show" : {
+      "comment" : "Puts one control back on the bar.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Put on the bar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放回工具列"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放回工具列"
+          }
+        }
+      }
+    },
+    "reader.toolbar.when.back" : {
+      "comment" : "The back control only exists where the edge swipe does not leave the book.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only when you are not leaving books by swiping from the edge"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在「滑动返回」关闭时出现"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在「滑動返回」關閉時出現"
+          }
+        }
+      }
+    },
+    "reader.toolbar.when.original" : {
+      "comment" : "The article control only exists where the piece came from a page.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only on articles that came from a page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在有原始网页的文章上出现"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在有原始網頁的文章上出現"
           }
         }
       }
