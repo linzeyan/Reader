@@ -106,6 +106,10 @@ struct ComicReaderView: View {
         .task(id: paceAskedAt) { await letThePaceStripGo() }
         .onChange(of: autoScrolling) { _, moving in
             paceAskedAt = moving ? .now : nil
+            // Pages moving on their own are the only reading this app does with no
+            // touches in it, so they are the only reading the system would lock the
+            // screen in the middle of — whatever the reader answered in general.
+            UIApplication.shared.isIdleTimerDisabled = moving || settings.keepScreenOn
         }
         // Bringing the chrome up over pages that are already moving is how the slider is
         // asked for again without stopping them.
@@ -136,7 +140,14 @@ struct ComicReaderView: View {
         ) { _ in
             model?.dropDistantChapters()
         }
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        // The reader's own answer, the way the text reader honours it — and applied on the
+        // toggle as well as on the way in, because a setting that only takes effect on
+        // re-entry is invisible exactly when somebody worried about their battery turns it
+        // off.
+        .onChange(of: settings.keepScreenOn) { _, keepOn in
+            UIApplication.shared.isIdleTimerDisabled = keepOn || autoScrolling
+        }
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             model?.stopReading()
