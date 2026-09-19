@@ -73,6 +73,26 @@ final class SpeechSequence {
             next = 0
         }
     }
+
+    /// The next run of sentences to say as one: a paragraph, or a heading on its own.
+    ///
+    /// A paragraph rather than a sentence, because a sentence is not the right size to
+    /// hand a synthesiser — every utterance boundary is the audio pipeline starting over,
+    /// and at one per sentence that was fifteen restarts a minute. See `SpeechReader.say`.
+    ///
+    /// Empty only where `take` answers nil: the end of the book.
+    func takeParagraph() async -> [SpokenSentence] {
+        guard let first = await take() else { return [] }
+        var run = [first]
+        // Only out of the buffer already in hand. Reaching past it would mean loading the
+        // next chapter to find out whether its opening continues this paragraph — and it
+        // never does, because a chapter starts with its own name.
+        while next < buffer.count, SpeechScript.belongTogether(first, buffer[next]) {
+            run.append(buffer[next])
+            next += 1
+        }
+        return run
+    }
 }
 
 /// What is being listened to, as everything outside the app has to describe it.
@@ -148,25 +168,43 @@ final class SpeechReader {
 
     var isSpeaking: Bool { state == .speaking }
 
-    /// How many sentences are handed to the synthesiser ahead of the one being said.
+    /// How many paragraphs are handed to the synthesiser ahead of the one being said.
     ///
-    /// Two, and not because one would leave a gap — `AVSpeechSynthesizer` speaks its
-    /// queue without a seam. It is what a change of pace costs: the queued sentences
-    /// carry the old rate and have to be said again, so the deeper the queue the more of
-    /// the book jumps backwards when the slider is let go.
-    private static let readAhead = 2
+    /// One, which is enough for a seam nobody hears — `AVSpeechSynthesizer` speaks its
+    /// queue without a gap. Deeper costs nothing to say and everything to un-say: a change
+    /// of pace has to hand every queued paragraph back at the new rate.
+    private static let readAhead = 1
+
+    /// One utterance and the sentences it says.
+    ///
+    /// The synthesiser reports by utterance and by character offset inside it. Neither
+    /// says anything about where in the book the words came from, and where in the book
+    /// the voice is is the whole of what the page, the band and the stored position need.
+    private struct Chunk {
+        let utterance: AVSpeechUtterance
+        let sentences: [SpokenSentence]
+        /// Where each sentence starts inside the utterance's string, in the UTF-16 units
+        /// `willSpeakRangeOfSpeechString` reports in.
+        let starts: [Int]
+
+        /// Which sentence the voice is in the middle of.
+        func sentence(at offset: Int) -> SpokenSentence? {
+            // The last one starting at or before the offset: the synthesiser reports a
+            // word, which lands inside a sentence rather than on its head.
+            guard let index = starts.lastIndex(where: { $0 <= offset }) else { return nil }
+            return sentences[index]
+        }
+    }
 
     private let synthesiser = AVSpeechSynthesizer()
     /// Held strongly: `AVSpeechSynthesizer.delegate` is weak, and a delegate nobody owns
     /// is one that stops answering the moment this method returns.
     private var listener: Delegate?
     private var sequence: SpeechSequence?
-    /// The utterances handed over and not yet finished, oldest first, each with the
-    /// sentence it says. The synthesiser reports by utterance, and an utterance on its
-    /// own says nothing about where in the book it came from.
-    private var queue: [(utterance: AVSpeechUtterance, sentence: SpokenSentence)] = []
+    /// The paragraphs handed over and not yet finished, oldest first.
+    private var queue: [Chunk] = []
     /// Whether a top-up is already in flight. Filling the queue has to await the next
-    /// chapter, and every finished sentence asks for one.
+    /// chapter, and every finished paragraph asks for one.
     private var filling = false
     private var pace = SpeechPace.standard
     private var script = ChineseScript.off
@@ -187,6 +225,7 @@ final class SpeechReader {
     init() {
         let listener = Delegate(
             started: { [weak self] in self?.began($0) },
+            saying: { [weak self] in self?.saying($0, at: $1) },
             finished: { [weak self] in self?.finished($0) }
         )
         self.listener = listener
@@ -273,36 +312,38 @@ final class SpeechReader {
         )
     }
 
-    /// A new pace, applied to the sentence in the voice's mouth as well as to what
-    /// follows it.
+    /// A new pace, applied to what is in the voice's mouth as well as to what follows it.
     ///
     /// An utterance's rate is fixed when it is handed to the synthesiser, so the only way
-    /// to say the current sentence faster is to say it again. That is why the reader's
-    /// slider calls this when it is let go and not as it moves: a rate applied per drag
-    /// frame would be one sentence restarting sixty times a second.
+    /// to say the rest faster is to hand it over again. From the sentence being said and
+    /// not from the head of the paragraph it is in the middle of — a touch of the slider
+    /// must not take the reader back several sentences. That is also why the slider calls
+    /// this when it is let go and not as it moves: a rate applied per drag frame would be
+    /// one paragraph restarting sixty times a second.
     func setPace(_ pace: SpeechPace) {
         guard pace != self.pace else { return }
         self.pace = pace
         // Nothing to re-say while paused, and re-saying it would start the voice up
         // under a reader who has stopped it.
         guard state == .speaking else { return }
-        let again = queue.map(\.sentence)
+        let owed = queue.flatMap(\.sentences)
+        let from = current.flatMap { owed.firstIndex(of: $0) } ?? 0
         queue = []
         synthesiser.stopSpeaking(at: .immediate)
-        for sentence in again { say(sentence) }
+        for run in SpeechScript.runs(of: Array(owed[from...])) { say(run) }
     }
 
     // MARK: - The queue
 
-    /// Tops the synthesiser up to `readAhead` sentences, loading chapters as needed.
+    /// Tops the synthesiser up to `readAhead` paragraphs, loading chapters as needed.
     private func fill() {
         guard state == .speaking, !filling else { return }
         filling = true
         Task { @MainActor in
             defer { filling = false }
             while state == .speaking, !hasSleptIn, queue.count <= Self.readAhead,
-                  let sentence = await sequence?.take() {
-                say(sentence)
+                  let run = await sequence?.takeParagraph(), !run.isEmpty {
+                say(run)
             }
             // The book ran out under the voice. Nothing is queued, nothing is coming,
             // and a reader whose phone is in their pocket is owed the session back.
@@ -310,14 +351,24 @@ final class SpeechReader {
         }
     }
 
-    private func say(_ sentence: SpokenSentence) {
-        let utterance = AVSpeechUtterance(string: sentence.text)
+    /// Hands one paragraph to the synthesiser as a single utterance.
+    ///
+    /// Not one per sentence, which is what this was. Measured over two eight-minute
+    /// listening sessions with nobody touching the phone: every utterance boundary
+    /// starved the audio queue, which padded it with silence and began again — fifteen
+    /// times a minute at a sentence, which is the shape of a phone that will not cool
+    /// down rather than of a phone that is working hard. See `ReaderListeningProbeTests`.
+    private func say(_ run: [SpokenSentence]) {
+        guard !run.isEmpty else { return }
+        let (text, starts) = SpeechScript.spoken(run)
+        let utterance = AVSpeechUtterance(string: text)
         utterance.rate = Float(pace.rate)
-        utterance.voice = voice(for: language(of: sentence.text))
-        // A breath between sentences. Prose read with no gap at all is the one thing
-        // that makes a synthesised voice tiring to follow for an hour.
+        utterance.voice = voice(for: language(of: text))
+        // A breath between paragraphs, which is where one belongs — inside a paragraph
+        // the punctuation being read is already doing it. Prose read with no gap at all
+        // is the one thing that makes a synthesised voice tiring to follow for an hour.
         utterance.postUtteranceDelay = 0.15
-        queue.append((utterance, sentence))
+        queue.append(Chunk(utterance: utterance, sentences: run, starts: starts))
         synthesiser.speak(utterance)
     }
 
@@ -497,13 +548,33 @@ final class SpeechReader {
     // MARK: - What the synthesiser says back
 
     fileprivate func began(_ utterance: AVSpeechUtterance) {
-        guard let match = queue.first(where: { $0.utterance === utterance }) else { return }
-        let arrivedInAChapter = current?.chapterIndex != match.sentence.chapterIndex
-        current = match.sentence
+        guard let chunk = queue.first(where: { $0.utterance === utterance }),
+              let first = chunk.sentences.first else { return }
+        // The head of the paragraph, refined to the sentence by `saying` as the voice
+        // walks through it — where the voice reports one. `willSpeakRangeOfSpeechString`
+        // is not promised for every voice, and a band that never moved at all would be a
+        // worse answer than one that moves a paragraph at a time.
+        arriveAt(first)
+    }
+
+    /// Which sentence of the paragraph is being said now.
+    fileprivate func saying(_ utterance: AVSpeechUtterance, at range: NSRange) {
+        guard let chunk = queue.first(where: { $0.utterance === utterance }),
+              let sentence = chunk.sentence(at: range.location) else { return }
+        arriveAt(sentence)
+    }
+
+    /// The voice has reached a sentence, and everything that follows it is told once.
+    private func arriveAt(_ sentence: SpokenSentence) {
+        // Every word of a sentence reports, and the sentence is the unit anything outside
+        // here cares about.
+        guard sentence != current else { return }
+        let arrivedInAChapter = current?.chapterIndex != sentence.chapterIndex
+        current = sentence
         // Every sentence, because this is the only record a locked phone keeps of where
         // the reader got to — `ProgressWriteRule` is what keeps it from being a database
         // write per sentence.
-        note?(match.sentence)
+        note?(sentence)
         // Only per chapter: what the lock screen shows is the chapter's name, and
         // republishing it every few seconds would be a line of work per sentence for a
         // string that did not change.
@@ -531,13 +602,16 @@ final class SpeechReader {
     /// avoiding — the synthesiser is owned by the reader and holds this in its place.
     private final class Delegate: NSObject, AVSpeechSynthesizerDelegate {
         private let started: @MainActor (AVSpeechUtterance) -> Void
+        private let saying: @MainActor (AVSpeechUtterance, NSRange) -> Void
         private let finished: @MainActor (AVSpeechUtterance) -> Void
 
         init(
             started: @escaping @MainActor (AVSpeechUtterance) -> Void,
+            saying: @escaping @MainActor (AVSpeechUtterance, NSRange) -> Void,
             finished: @escaping @MainActor (AVSpeechUtterance) -> Void
         ) {
             self.started = started
+            self.saying = saying
             self.finished = finished
         }
 
@@ -545,6 +619,17 @@ final class SpeechReader {
             _ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance
         ) {
             Task { @MainActor in started(utterance) }
+        }
+
+        /// Where in the utterance the voice has got to — which is what makes a paragraph
+        /// safe to hand over whole. Without it the reader would be followed a paragraph
+        /// at a time.
+        func speechSynthesizer(
+            _ synthesizer: AVSpeechSynthesizer,
+            willSpeakRangeOfSpeechString characterRange: NSRange,
+            utterance: AVSpeechUtterance
+        ) {
+            Task { @MainActor in saying(utterance, characterRange) }
         }
 
         func speechSynthesizer(

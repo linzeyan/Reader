@@ -89,6 +89,109 @@ final class SpeechTests: XCTestCase {
         )
     }
 
+    // MARK: - What goes into one utterance
+
+    /// A paragraph is one thing to say, and a heading is its own.
+    ///
+    /// The synthesiser is handed a run at a time rather than a sentence at a time because
+    /// every utterance boundary restarts the audio pipeline — measured at fifteen restarts
+    /// a minute when the unit was the sentence. Glue a chapter's name to its first
+    /// paragraph, though, and the voice reads the title as the opening clause.
+    func testAParagraphIsOneThingToSayAndAHeadingIsItsOwn() {
+        XCTAssertEqual(
+            SpeechScript.runs(of: script(paragraphs)).map { $0.map(\.text) },
+            [
+                ["第一章　渡口"],
+                ["他推開門。", "雪落在渡口的燈上。"],
+                ["船還沒有來。"]
+            ]
+        )
+    }
+
+    /// What is actually handed over is the sentences and nothing between them.
+    ///
+    /// `SentenceRules` drops the indent in 「　　他推開門。」 and any run of punctuation
+    /// with no words in it, so the paragraph as it sits on the page is *not* what its
+    /// sentences add up to. Saying the paragraph instead would read the indent out as a
+    /// pause the author never wrote.
+    func testAParagraphIsSaidAsItsSentencesAndNothingBetweenThem() {
+        let sentences = script(["　　他推開門。　　雪落在渡口的燈上。"])
+        let run = Array(sentences.dropFirst())
+        XCTAssertEqual(SpeechScript.spoken(run).text, "他推開門。雪落在渡口的燈上。")
+    }
+
+    /// Where each sentence starts inside the string its paragraph is said as.
+    ///
+    /// This is what turns "the voice is at character 5 of this utterance" back into a
+    /// place in the book, and everything a listener can see hangs off it: one offset wrong
+    /// and the band sits under the previous sentence for a whole paragraph.
+    func testEverySentenceKnowsWhereItStartsInsideWhatIsSaid() {
+        let run = Array(script(paragraphs).dropFirst().prefix(2))
+        let (text, starts) = SpeechScript.spoken(run)
+        XCTAssertEqual(starts, [0, 5])
+        XCTAssertEqual(
+            starts.last.map { (text as NSString).substring(from: $0) },
+            "雪落在渡口的燈上。",
+            "the offset has to name the sentence the synthesiser would be reading there"
+        )
+    }
+
+    /// Taking a paragraph takes all of it and stops, so the run handed to the voice is
+    /// one breath rather than whatever happened to be buffered.
+    func testTakingAParagraphTakesAllOfItAndStopsAtTheNext() async {
+        let sequence = SpeechSequence { [self] index in
+            index == 0 ? script(paragraphs, chapterIndex: 0) : nil
+        }
+        _ = await sequence.begin(chapterIndex: 0, anchor: .start)
+        var said: [[String]] = []
+        while true {
+            let run = await sequence.takeParagraph()
+            guard !run.isEmpty else { break }
+            said.append(run.map(\.text))
+        }
+        XCTAssertEqual(
+            said,
+            [
+                ["第一章　渡口"],
+                ["他推開門。", "雪落在渡口的燈上。"],
+                ["船還沒有來。"]
+            ]
+        )
+    }
+
+    /// A run never spans two chapters: the next chapter's name is its own utterance, and
+    /// reaching for it would mean loading a chapter to find out it did not belong.
+    func testAParagraphRunStopsAtTheEndOfItsChapter() async {
+        let sequence = SpeechSequence { [self] index in
+            guard index < 2 else { return nil }
+            return script(["第\(index)章的一句話。"], chapterIndex: index, title: "第\(index)章")
+        }
+        _ = await sequence.begin(chapterIndex: 0, anchor: .start)
+        var said: [[String]] = []
+        while true {
+            let run = await sequence.takeParagraph()
+            guard !run.isEmpty else { break }
+            said.append(run.map(\.text))
+        }
+        XCTAssertEqual(
+            said, [["第0章"], ["第0章的一句話。"], ["第1章"], ["第1章的一句話。"]]
+        )
+    }
+
+    /// Picking up mid-paragraph hands over the rest of it and not the whole of it — the
+    /// reader who pressed the headphones halfway down a paragraph must not hear the half
+    /// they have already read.
+    func testTakingAParagraphTheReaderIsInsideStartsWhereTheyAre() async {
+        let sequence = SpeechSequence { [self] index in
+            index == 0 ? script(paragraphs, chapterIndex: 0) : nil
+        }
+        _ = await sequence.begin(
+            chapterIndex: 0, anchor: TextAnchor(paragraph: 0, characterOffset: 5)
+        )
+        let run = await sequence.takeParagraph()
+        XCTAssertEqual(run.map(\.text), ["雪落在渡口的燈上。"])
+    }
+
     // MARK: - Where to pick up
 
     func testStartingAtTheTopOfAChapterSaysItsNameFirst() {
