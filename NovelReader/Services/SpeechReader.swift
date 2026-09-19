@@ -170,6 +170,12 @@ final class SpeechReader {
     private var filling = false
     private var pace = SpeechPace.standard
     private var script = ChineseScript.off
+    /// The voice for each language, looked up once.
+    ///
+    /// Building one per sentence put a synchronous call into the text-to-speech stack on
+    /// the main thread fifteen times a minute — measured, and the reason this exists; see
+    /// `ReaderListeningProbeTests`. A book is read in two languages at the most.
+    private var voices: [String: AVSpeechSynthesisVoice] = [:]
     private var note: (@MainActor (SpokenSentence) -> Void)?
     /// The cover, decoded once for the lock screen.
     private var artwork: MPMediaItemArtwork?
@@ -251,6 +257,9 @@ final class SpeechReader {
         artwork = nil
         sequence = nil
         queue = []
+        // Dropped with everything else about the book: the voice a language resolves to is
+        // the reader's own setting, and leaving is the moment they could have changed it.
+        voices = [:]
         sleepsAt = nil
         pausedBySystem = false
         synthesiser.stopSpeaking(at: .immediate)
@@ -304,7 +313,7 @@ final class SpeechReader {
     private func say(_ sentence: SpokenSentence) {
         let utterance = AVSpeechUtterance(string: sentence.text)
         utterance.rate = Float(pace.rate)
-        utterance.voice = AVSpeechSynthesisVoice(language: language(of: sentence.text))
+        utterance.voice = voice(for: language(of: sentence.text))
         // A breath between sentences. Prose read with no gap at all is the one thing
         // that makes a synthesised voice tiring to follow for an hour.
         utterance.postUtteranceDelay = 0.15
@@ -324,6 +333,13 @@ final class SpeechReader {
             return AVSpeechSynthesisVoice.currentLanguageCode()
         }
         return script.spokenLanguage
+    }
+
+    private func voice(for language: String) -> AVSpeechSynthesisVoice? {
+        if let held = voices[language] { return held }
+        let found = AVSpeechSynthesisVoice(language: language)
+        voices[language] = found
+        return found
     }
 
     private func beginSession() {
