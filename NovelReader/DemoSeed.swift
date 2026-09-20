@@ -42,6 +42,11 @@ enum DemoSeed {
         // folded a source left every later one starting behind a heading it never
         // closed — with the wrong book under the finger.
         env.librarySettings.unfoldEverything()
+        // And the bottom bar, for the same reason and with the same cost: a walk that
+        // folded a control away left every later one looking for a button that is no
+        // longer on the bar — a speech walk failing at `reader.speech` with nothing at
+        // all wrong with the voice.
+        ReaderSettings.shared.unarrangeEveryToolbar()
 
         for source in sources { _ = try? env.sites.importRule(data: source.ruleJSON) }
         for book in books { seed(book, into: env) }

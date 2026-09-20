@@ -165,6 +165,49 @@ final class ReaderToolbarTests: XCTestCase {
         XCTAssertTrue(settings.overridesByBook.isEmpty, "an empty layer is stored as no layer")
     }
 
+    /// Every arrangement at every layer, undone — and undone without leaving the empty
+    /// layers behind that every other override is careful not to store.
+    ///
+    /// This is the demo seed's, and it is here because of what it cost when it did not
+    /// exist: an arrangement outlives the launch that made it, so the walk that folds the
+    /// voice away to prove folding works left every later walk on that simulator looking
+    /// for a button no longer on the bar. Both speech walks failed at `reader.speech`,
+    /// with nothing whatever wrong with the voice. `LibrarySettings.unfoldEverything`
+    /// exists for the same thing one layer over.
+    func testUnarrangingPutsEveryLayerBackAndStoresNoEmptyOnes() {
+        let settings = ReaderSettings(defaults: scratchDefaults())
+        settings.toolbar = ReaderToolbarLayout(order: ReaderButton.allCases, folded: [.speech])
+        settings.setOverrides(
+            .init(toolbar: ReaderToolbarLayout(order: ReaderButton.allCases, folded: [.speech])),
+            of: .shelf(.novel)
+        )
+        // A book that disagrees about two things, only one of which is the bar: what must
+        // survive is the half that has nothing to do with arranging.
+        settings.setOverrides(
+            .init(
+                fontSize: 22,
+                toolbar: ReaderToolbarLayout(order: ReaderButton.allCases, folded: [.catalog])
+            ),
+            of: .book(id: "b1", kind: .novel)
+        )
+
+        settings.unarrangeEveryToolbar()
+
+        XCTAssertEqual(
+            settings.resolvedToolbar(forBook: "b1", kind: .novel).bar,
+            ReaderToolbarLayout.standard.resolve(for: .novel).bar,
+            "a seeded launch has to start from the bar as it was designed"
+        )
+        XCTAssertTrue(
+            settings.overridesByKind.isEmpty,
+            "a shelf that disagreed about nothing else must not be left as an empty layer"
+        )
+        XCTAssertEqual(
+            settings.overrides(of: .book(id: "b1", kind: .novel)).fontSize, 22,
+            "and a book that also disagreed about its text keeps that — only bars are undone"
+        )
+    }
+
     /// The general answers list every control there is, because they are not about any one
     /// shelf: each shelf then takes the subset it has.
     func testTheGeneralAnswersArrangeEveryControlThereIs() {

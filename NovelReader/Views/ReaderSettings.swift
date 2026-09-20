@@ -250,6 +250,28 @@ final class ReaderSettings {
         overridesByBook[bookId] = nil
     }
 
+    /// Every bar back the way it is drawn before anybody arranges one: the general
+    /// arrangement, and every shelf's and book's disagreement with it.
+    ///
+    /// The demo seed's, and only the demo seed's — `LibrarySettings.unfoldEverything`'s
+    /// reason exactly, one layer over. An arrangement outlives the launch that made it, so
+    /// a walk that folded a control away left every later walk on that simulator looking
+    /// for a button that is no longer on the bar. Measured: it cost both speech walks,
+    /// which failed at `reader.speech` with nothing wrong with the voice at all.
+    func unarrangeEveryToolbar() {
+        toolbar = .standard
+        for (kind, overrides) in overridesByKind where overrides.toolbar != nil {
+            var cleared = overrides
+            cleared.toolbar = nil
+            overridesByKind[kind] = cleared.isEmpty ? nil : cleared
+        }
+        for (bookId, overrides) in overridesByBook where overrides.toolbar != nil {
+            var cleared = overrides
+            cleared.toolbar = nil
+            overridesByBook[bookId] = cleared.isEmpty ? nil : cleared
+        }
+    }
+
     // MARK: - Writing the faces the reader installed
     //
     // Here rather than with the rest of the font list in `FontCatalog`, for the reason the
