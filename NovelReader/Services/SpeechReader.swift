@@ -258,11 +258,17 @@ final class SpeechReader {
     /// calls, so that changing the sample interval cannot silently change what `/min`
     /// means.
     ///
-    /// Read it against 2026-09-19: `utt` about 9/min with `chars` about 58 is the shape
-    /// after paragraph utterances and a cached voice. Back at 15/min with `chars` near 30
-    /// is a sentence per utterance again, and any `miss` at all after the first is the
-    /// voice lookup happening per sentence — which is what a phone that will not cool
-    /// down is made of.
+    /// Read the two rate fields together, never `utt` alone. Their product is characters
+    /// read per minute, which the pace sets and which no change on this side can move:
+    /// measured 9.0/min × 32 ≈ 290 chars/min over an eight-minute listen at pace 0.8. So
+    /// the regression shape is the two of them moving *apart* at a constant product — the
+    /// same prose cut into more pieces, which is what a sentence per utterance was, and
+    /// what every utterance boundary starving the audio queue is made of. `utt` on its own
+    /// says nothing, because a book of long paragraphs reads at a lower `utt` than a book
+    /// of short ones with nothing wrong with either.
+    ///
+    /// `miss` is absolute: anything but 0 after the first minute is the voice being looked
+    /// up per utterance rather than once.
     private func speechFields() -> String? {
         guard state != .idle else { return nil }
         var fields = "speak=\(state == .speaking ? 1 : 0)"
