@@ -2195,11 +2195,11 @@ final class ReaderModel {
         let began = CACurrentMediaTime()
         env.trace.note("fetch idx=\(chapter.index)")
         do {
-            let content = try await gotContent(of: chapter)
+            let (content, source) = try await gotContent(of: chapter)
             env.trace.note(
                 String(
                     format: "fetchOK idx=%d src=%@ paras=%d after=%.1f",
-                    chapter.index, chapter.isDownloaded ? "disk" : "net",
+                    chapter.index, source.rawValue,
                     content.paragraphs.count, CACurrentMediaTime() - began
                 )
             )
@@ -2216,12 +2216,37 @@ final class ReaderModel {
         }
     }
 
-    private func gotContent(of chapter: Chapter) async throws -> LoadedChapter {
-        if let stored = await storedContent(of: chapter) { return stored }
-        return LoadedChapter(
-            chapter: chapter,
-            blocks: try await paragraphs(for: chapter).map(ArticleBlock.paragraph),
-            titleLink: articleLink(of: chapter)
+    /// Where a chapter's text actually came from.
+    ///
+    /// A different question from `Chapter.isDownloaded`, which is what `fetchOK` used to
+    /// report and which says only where the catalog thinks the text ought to live. Read
+    /// a book that was never downloaded and every line says `src=net`, however local the
+    /// answer really was: the 2026-09-20 device trace said it sixteen times out of
+    /// sixteen, each with `after=0.0` beside it, which is not a duration any wire
+    /// produces. By TRACE.md's own rule that reads as offline reading having stopped
+    /// working — a false alarm pointing at the wrong file, in a log whose whole purpose
+    /// is to point at the right one.
+    private enum TextSource: String {
+        /// Downloaded, and read back from the book's own files.
+        case disk
+        /// Held by `ChapterCache` from an earlier visit in this install.
+        case cache
+        /// The one chapter read ahead, already in memory when the reader arrived.
+        case ahead
+        /// The wire. The only one of the four that costs the reader a wait.
+        case net
+    }
+
+    private func gotContent(of chapter: Chapter) async throws -> (LoadedChapter, TextSource) {
+        if let stored = await storedContent(of: chapter) { return (stored, .disk) }
+        let (paragraphs, source) = try await paragraphs(for: chapter)
+        return (
+            LoadedChapter(
+                chapter: chapter,
+                blocks: paragraphs.map(ArticleBlock.paragraph),
+                titleLink: articleLink(of: chapter)
+            ),
+            source
         )
     }
 
@@ -2274,9 +2299,9 @@ final class ReaderModel {
     /// it does have one, scrolling back up a chapter costs a disk read instead of a
     /// trip to the site. Which is also the polite thing: the page has not changed
     /// since the reader passed it two minutes ago.
-    private func paragraphs(for chapter: Chapter) async throws -> [String] {
+    private func paragraphs(for chapter: Chapter) async throws -> ([String], TextSource) {
         if let cached = await env.cache.paragraphs(of: book, siteChapterId: chapter.siteChapterId) {
-            return cached
+            return (cached, .cache)
         }
         switch readAheadPhase {
         case .fetching(let id) where id == chapter.id:
@@ -2296,7 +2321,7 @@ final class ReaderModel {
         }
         if let readAhead, readAhead.chapterId == chapter.id {
             self.readAhead = nil
-            return readAhead.paragraphs
+            return (readAhead.paragraphs, .ahead)
         }
         // An article's text arrives with the refresh that found it, so reaching here
         // means there never was any: a feed that published a headline and a link and no
@@ -2313,7 +2338,7 @@ final class ReaderModel {
         }
         let fetched = try await env.bookService.chapterParagraphs(rule: rule, chapter: chapter)
         env.cache.store(paragraphs: fetched, of: book, siteChapterId: chapter.siteChapterId)
-        return fetched
+        return (fetched, .net)
     }
 
     /// Reads a downloaded chapter off the main actor.

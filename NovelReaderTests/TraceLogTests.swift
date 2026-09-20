@@ -189,4 +189,28 @@ final class TraceLogTests: XCTestCase {
             "a return with no duration on it cannot be told from a return after an hour"
         )
     }
+
+    /// Coming back without ever having left is its own event, and not a relaunch.
+    ///
+    /// Control Centre, a notification banner and the app switcher all resign active
+    /// without reaching the background, so no `phase bg` is written and the return looks
+    /// exactly like a launch. The 2026-09-20 device trace had three in under three
+    /// seconds; read as three relaunches they explain nothing, and read correctly they
+    /// are the transition PITFALLS 2026-09-06 is about.
+    func testAReturnThatNeverReachedTheBackgroundSaysSo() throws {
+        let log = makeLog()
+        log.isOn = true
+        log.notePhase(true)
+        log.notePhase(true)
+
+        let lines = try XCTUnwrap(String(data: log.contents(), encoding: .utf8))
+            .split(separator: "\n")
+            .filter { $0.contains("phase") }
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertTrue(lines[0].hasSuffix("phase fg"), "the launch: \(lines[0])")
+        XCTAssertTrue(
+            lines[1].hasSuffix("phase fg from=inactive"),
+            "a banner pulled down over the reader must not read as a relaunch: \(lines[1])"
+        )
+    }
 }

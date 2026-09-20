@@ -105,6 +105,33 @@ final class ReaderChapterAppendTests: XCTestCase {
         )
     }
 
+    /// `src` has to say where the text came from, not where the catalog thinks it lives.
+    ///
+    /// `c3` was never downloaded, so `isDownloaded` — which is what this field used to be
+    /// derived from — calls it a network fetch. The text never leaves the device. A
+    /// fifty minute device trace on 2026-09-20 said `src=net` sixteen times out of
+    /// sixteen with `after=0.0` beside each one, which by TRACE.md's own rule reads as
+    /// offline reading having broken: a whole session's worth of false alarm, in the one
+    /// file that exists to say where to look.
+    func testTextTheDeviceAlreadyHadDoesNotReportItselfAsANetworkFetch() async throws {
+        // Written straight into the cache's own store rather than through
+        // `ChapterCache.store`, which writes on a queue: this is a test about what the
+        // trace says, not about when a write lands.
+        try ChapterFileStore(root: tempRoot.appendingPathComponent("cache")).write(
+            paragraphs: ["第三章的一段"],
+            siteId: siteId, siteBookId: siteBookId, siteChapterId: "c3"
+        )
+        trace.isOn = true
+        let model = ReaderModel(book: book, env: env)
+        await model.start(at: .chapterStart("c3"))
+
+        let answered = try XCTUnwrap(traceLines("fetchOK idx=").first, dump())
+        XCTAssertTrue(
+            answered.contains("src=cache"),
+            "text served from the device must not read as a trip to the wire: \(answered)"
+        )
+    }
+
     private func dump() -> String {
         String(data: trace.contents(), encoding: .utf8) ?? ""
     }

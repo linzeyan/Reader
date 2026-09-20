@@ -134,10 +134,21 @@ final class TraceLog {
         // No `after=` on the first activation of a launch, because there is no duration to
         // state: writing `after=0` there reads as "left and came straight back", which is
         // a different event and the wrong one to go looking for.
+        //
+        // A *second* foreground with nothing between it and the last one is the other
+        // thing that gets here, and it reads identically without `from=`: the app
+        // resigned active and came back without ever reaching the background. Control
+        // Centre, a notification banner, the app switcher. The 2026-09-20 device trace
+        // had three in under three seconds and they looked like three relaunches — while
+        // being the exact transition PITFALLS 2026-09-06 is about, so this is the line
+        // that says whether the app-switcher snapshot has started rebuilding columns
+        // again.
         guard let away = leftAt.map({ CACurrentMediaTime() - $0 }) else {
-            note("phase fg")
+            note(hasBeenForeground ? "phase fg from=inactive" : "phase fg")
+            hasBeenForeground = true
             return
         }
+        hasBeenForeground = true
         leftAt = nil
         note(String(format: "phase fg after=%.0f", away))
     }
@@ -312,6 +323,9 @@ final class TraceLog {
     @ObservationIgnored private var lastSampleAt: Double = 0
     /// When the app last went to the background — see `notePhase`.
     @ObservationIgnored private var leftAt: Double?
+    /// Whether this trace has recorded a foreground before. What tells a launch's first
+    /// activation apart from a return that never reached the background — see `notePhase`.
+    @ObservationIgnored private var hasBeenForeground = false
     /// Times are seconds since this launch, not wall clock: a `DateFormatter` per line is
     /// real work on a path that runs several times a second, and the `boot` line carries
     /// the one absolute time needed to place the rest.
