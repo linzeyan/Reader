@@ -944,6 +944,10 @@ final class AppEnvironment {
     /// What is left over is handed to `BGTaskScheduler`, which is the only way the
     /// rest of a long book can arrive without the app being on screen.
     func enterBackground() {
+        // Before the guard, not after it: the line is the dividing every other trace event
+        // is read against, and it must not depend on whether a download happened to be
+        // running.
+        trace.notePhase(false)
         guard downloader.isBusy else { return }
         resumeWhenActive = true
         let reason = String(localized: "downloads.paused.background")
@@ -973,6 +977,7 @@ final class AppEnvironment {
     /// may well have changed while the app was away, which is precisely when the
     /// Wi-Fi-only check earns its keep.
     func becomeActive() {
+        trace.notePhase(true)
         // Coming back to the app is opening it, as far as a subscription is concerned —
         // an app left in the background for a day and returned to is the commonest way
         // this one is "opened" at all. Gated on staleness like the launch sweep, so

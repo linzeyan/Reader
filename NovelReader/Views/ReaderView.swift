@@ -104,6 +104,9 @@ struct ReaderView: View {
         // is busy" is the first fork in every reader stall. See `ReaderProbe`.
         let _ = ReaderProbe.body()
         #endif
+        // The same count, for the trace that ships — this is the fork on a device nobody
+        // here can attach a probe to.
+        let _ = env.trace.noteBody()
         ZStack {
             ReaderBackgroundView(background: palette.background).ignoresSafeArea()
             if let model {
@@ -213,6 +216,14 @@ struct ReaderView: View {
             guard model == nil else { return }
             let created = ReaderModel(book: book, env: env)
             model = created
+            // What a sample says while there is a reader to say it about. Installed
+            // against the model rather than the view's `@State`, which a closure made
+            // here would have captured while it was still nil; weak, so that recording
+            // being left on cannot be what keeps a closed book in memory.
+            env.trace.watch("reader") { [weak created] in
+                guard let created else { return nil }
+                return "loaded=\(created.loaded.count)"
+            }
             await created.start(at: position)
             #if DEBUG
             // Test-only: grow the loaded window to what hours of continuous reading
@@ -295,6 +306,7 @@ struct ReaderView: View {
             UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn
         }
         .onDisappear {
+            env.trace.stopWatching("reader")
             UIApplication.shared.isIdleTimerDisabled = false
             model?.stopReading()
             // Listening ends with the book it is in. The voice is owned outside this
@@ -1640,23 +1652,60 @@ final class ReaderModel {
     private var wantsPreviousBehindLanding = false
     /// Whether a finger is on the glass right now. Set by the reader's drag recogniser.
     private var isTouching = false
+    /// When the trace last recorded a position — see `tracePlace`.
+    private var lastTracedPlaceAt: Double = 0
 
     init(book: Book, env: AppEnvironment) {
         self.book = book
         self.env = env
     }
 
-    /// Announces a structural change to the loaded window to the stall probe, so a
-    /// heartbeat gap has an event to be attributed to. A no-op in Release, where
-    /// `ReaderProbe` does not exist.
+    /// Announces a structural change to the loaded window — to the stall probe, so a
+    /// heartbeat gap has an event to be attributed to, and to the trace, where the window
+    /// is the thing a long session is read for.
     ///
-    /// The message is an autoclosure so an unarmed run does not even build the string.
+    /// The message is an autoclosure so a run with neither armed does not even build the
+    /// string, and it is called twice rather than bound to a `let` for the same reason:
+    /// the common case is a release build with the trace off, where this whole function
+    /// is one boolean read.
+    ///
+    /// `loaded` and `touch` are added here rather than at the four call sites because
+    /// every one of them wants both: how big the window got, and whether a finger was on
+    /// the glass while it changed. A `touch=1` beside an `insertAbove` is PITFALLS
+    /// 2026-08-22 come back — the correction cannot win against a running gesture.
     private func probe(_ what: @autoclosure () -> String) {
         #if DEBUG
-        guard ReaderProbe.isArmed else { return }
-        ReaderProbe.mutated(what(), loaded: loaded.count)
+        if ReaderProbe.isArmed { ReaderProbe.mutated(what(), loaded: loaded.count) }
         #endif
+        env.trace.note("win \(what()) loaded=\(loaded.count) touch=\(isTouching ? 1 : 0)")
     }
+
+    /// Where the reader is, at most once every ten seconds.
+    ///
+    /// The one trace event that has to be throttled at its source: a scrolled frame
+    /// reports a place, so this is called at frame rate. Ten seconds because of what it
+    /// answers — "did the position go backwards on its own" is a question about minutes,
+    /// and PITFALLS 2026-09-06 is visible at any sampling rate at all.
+    ///
+    /// - Parameter source: which of the three ways a position arrives this was. There are
+    ///   only three and there must never be a fourth; `voice` during `phase=bg` is the
+    ///   only evidence that a locked phone is writing progress down.
+    private func tracePlace(_ source: String) {
+        guard env.trace.isOn else { return }
+        let now = CACurrentMediaTime()
+        guard now - lastTracedPlaceAt >= Self.placeTraceInterval else { return }
+        lastTracedPlaceAt = now
+        // `frac=-1` when there is no share to state — the chapter under the reader is not
+        // loaded, which is itself worth seeing next to a position report.
+        let share = currentFraction ?? -1
+        env.trace.note(
+            "place idx=\(currentChapterIndex) para=\(currentAnchor.paragraph) "
+                + "off=\(currentAnchor.characterOffset) "
+                + String(format: "frac=%.2f ", share) + "src=\(source)"
+        )
+    }
+
+    private static let placeTraceInterval: Double = 10
 
     // MARK: Loading
 
@@ -1707,7 +1756,7 @@ final class ReaderModel {
         generation += 1
         let mine = generation
         loaded = []
-        probe("jump idx=\(index)")
+        probe("jump to=\(index) from=\(currentChapterIndex)")
         // Aimed before the load rather than after it. The renderer holds a target until
         // the chapter it names has a laid-out column and then applies it exactly, so
         // stating it early costs nothing — and the reports that arrive in the meantime
@@ -2317,6 +2366,7 @@ final class ReaderModel {
         if currentAnchor != place.anchor { currentAnchor = place.anchor }
         if reportedFraction != place.fraction { reportedFraction = place.fraction }
         persistProgress(.reading)
+        tracePlace("scroll")
     }
 
     /// Records the page the paginated reader settled on.
@@ -2335,6 +2385,7 @@ final class ReaderModel {
         currentAnchor = anchor
         reportedFraction = fraction
         persistProgress(.reading)
+        tracePlace("page")
     }
 
     /// Records where the voice has reached, for a reader who is listening rather than
@@ -2355,6 +2406,7 @@ final class ReaderModel {
         if currentAnchor != anchor { currentAnchor = anchor }
         if reportedFraction != nil { reportedFraction = nil }
         persistProgress(.reading)
+        tracePlace("voice")
     }
 
     /// Gives back every chapter more than `reach` either side of the one being read.
@@ -2382,8 +2434,15 @@ final class ReaderModel {
         }) else { return }
         let keep = max(0, current - reach)...min(loaded.count - 1, current + reach)
         guard keep.count < loaded.count else { return }
+        // Read before the array is replaced, and reported because they are the check: a
+        // `cur` outside `lo..hi` would mean the trim threw away the chapter being read.
+        let lowest = loaded[keep.lowerBound].chapter.index
+        let highest = loaded[keep.upperBound].chapter.index
         loaded = Array(loaded[keep])
-        probe("drop keeping=\(keep.count)")
+        probe(
+            "drop keeping=\(keep.count) cur=\(currentChapterIndex) "
+                + "lo=\(lowest) hi=\(highest)"
+        )
         // The renderer takes care of where the reader ends up: it records their anchor,
         // restacks what is left and puts them back on it — see
         // `ReaderScrollCoordinator.dropChaptersNoLongerLoaded`.

@@ -85,6 +85,115 @@ final class TraceLog {
         size = queue.sync { writer.size() }
     }
 
+    // MARK: - Sampling
+
+    /// Adds a source of fields to the periodic sample, under a name it can be removed by.
+    ///
+    /// Installed rather than pulled, because the things worth sampling have different
+    /// owners and different lifetimes: the loaded window belongs to a screen that comes
+    /// and goes, and the voice belongs to the app. Returning nil says "nothing to report
+    /// just now", and with every source silent no line is written at all — a phone left
+    /// on the shelf overnight should produce an empty trace, not eight hours of evidence
+    /// that nobody was reading.
+    ///
+    /// Sources are called on the main thread, because what they read is main-actor state.
+    func watch(_ name: String, fields: @escaping () -> String?) {
+        sources[name] = fields
+    }
+
+    func stopWatching(_ name: String) {
+        sources.removeValue(forKey: name)
+    }
+
+    /// One evaluation of `ReaderView.body`.
+    ///
+    /// Counted, never written: this runs at frame rate whenever something in the body
+    /// reads per-frame state, so a line each would be the load. The rate is what the
+    /// sample reports, and it is the first fork in every reader stall — "the body is
+    /// re-running" and "the container is busy" look identical from the outside.
+    func noteBody() {
+        guard isOn else { return }
+        bodies += 1
+    }
+
+    /// The foreground/background boundary, which every other event is read against.
+    ///
+    /// The one thing a simulator cannot answer. It does not suspend the app, so a walk
+    /// that presses Home and finds the voice still speaking proves nothing — taking
+    /// `audio` out of `UIBackgroundModes` entirely leaves that walk green, measured, 47.4s
+    /// against 47.2s (PITFALLS 2026-09-18). On a phone, `say` lines continuing past
+    /// `phase bg` are the proof that background audio works, and their stopping dead is
+    /// the failure.
+    func notePhase(_ isForeground: Bool) {
+        guard isOn else { return }
+        guard isForeground else {
+            leftAt = CACurrentMediaTime()
+            note("phase bg")
+            return
+        }
+        // No `after=` on the first activation of a launch, because there is no duration to
+        // state: writing `after=0` there reads as "left and came straight back", which is
+        // a different event and the wrong one to go looking for.
+        guard let away = leftAt.map({ CACurrentMediaTime() - $0 }) else {
+            note("phase fg")
+            return
+        }
+        leftAt = nil
+        note(String(format: "phase fg after=%.0f", away))
+    }
+
+    /// Writes one sample, if any source has something to say.
+    ///
+    /// Driven by the timer, and called directly by tests: waiting five seconds for a
+    /// timer to prove that an idle app writes nothing is five seconds spent proving it
+    /// slowly. Main thread only — sources read main-actor state, and so does `phase`.
+    func sampleNow() {
+        // Sorted so the fields land in the same order on every line. A trace is read by
+        // eye, down a column.
+        let extra = sources.keys.sorted().compactMap { sources[$0]?() }
+        guard !extra.isEmpty else { return }
+        let now = CACurrentMediaTime()
+        let window = max(now - lastSampleAt, 0.001)
+        let rate = Double(bodies - bodiesAtLastSample) / window
+        lastSampleAt = now
+        bodiesAtLastSample = bodies
+        note(
+            "sample rss=\(Self.residentMB()) phase=\(Self.phase) "
+                + String(format: "body=%.1f/s ", rate) + extra.joined(separator: " ")
+        )
+    }
+
+    /// Resident size in megabytes.
+    ///
+    /// Shared with `ReaderProbe` rather than copied into it: there is one right way to ask
+    /// this and two of them would drift.
+    static func residentMB() -> Int {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return -1 }
+        return Int(info.resident_size / (1024 * 1024))
+    }
+
+    /// Foreground or background, as the sample sees it.
+    ///
+    /// The dividing line every other event is read against: whether the voice is still
+    /// speaking after `phase=bg` is the only evidence that background audio works at all,
+    /// and it is not a question a simulator can answer.
+    private static var phase: String {
+        #if canImport(UIKit)
+        MainActor.assumeIsolated { UIApplication.shared.applicationState == .active ? "fg" : "bg" }
+        #else
+        "fg"
+        #endif
+    }
+
     // MARK: - Lifetime
 
     private func begin() {
@@ -96,10 +205,28 @@ final class TraceLog {
             // was this?" has no other answer once the file is out of the app.
             writer.write("      0.0 boot \(Self.stamp) at=\(started)\n")
         }
+        startSampling()
     }
 
     private func erase() {
+        ticker?.invalidate()
+        ticker = nil
         queue.async { [writer] in writer.erase() }
+    }
+
+    private func startSampling() {
+        guard ticker == nil else { return }
+        lastSampleAt = CACurrentMediaTime()
+        bodiesAtLastSample = bodies
+        let timer = Timer(timeInterval: Self.sampleInterval, repeats: true) { [weak self] _ in
+            self?.sampleNow()
+        }
+        // `.common`, not the default mode: a timer in the default mode does not fire at
+        // all while a scroll view is tracking a finger, so the samples would go silent
+        // exactly while the reader is scrolling — which is the half of the session worth
+        // sampling. `ReaderProbe` learned this the same way.
+        RunLoop.main.add(timer, forMode: .common)
+        ticker = timer
     }
 
     /// Version, build, hardware and system — the four things a file needs to mean
@@ -165,8 +292,26 @@ final class TraceLog {
         refreshSize()
     }
 
+    /// Five seconds, the interval `ReaderProbe`'s summary line has always used — so that
+    /// a number read out of a trace and one read out of a probe run mean the same thing.
+    private static let sampleInterval: TimeInterval = 5
+
     private let defaults: UserDefaults
     private let writer: Writer
+
+    // Bookkeeping, and every one of them `@ObservationIgnored` on purpose. `@Observable`
+    // makes *every* stored `var` observable, private ones included, so `bodies += 1` —
+    // which happens on every evaluation of `ReaderView.body` — would otherwise fire an
+    // observation mutation at frame rate. Nothing observes these, so nothing would
+    // re-render; it would simply be the instrument charging rent on the hot path it was
+    // brought in to measure. Only `isOn` and `size` are watched, by the settings screen.
+    @ObservationIgnored private var sources: [String: () -> String?] = [:]
+    @ObservationIgnored private var ticker: Timer?
+    @ObservationIgnored private var bodies = 0
+    @ObservationIgnored private var bodiesAtLastSample = 0
+    @ObservationIgnored private var lastSampleAt: Double = 0
+    /// When the app last went to the background — see `notePhase`.
+    @ObservationIgnored private var leftAt: Double?
     /// Times are seconds since this launch, not wall clock: a `DateFormatter` per line is
     /// real work on a path that runs several times a second, and the `boot` line carries
     /// the one absolute time needed to place the rest.
