@@ -110,7 +110,9 @@ struct ComicReaderView: View {
             // Pages moving on their own are the only reading this app does with no
             // touches in it, so they are the only reading the system would lock the
             // screen in the middle of — whatever the reader answered in general.
-            UIApplication.shared.isIdleTimerDisabled = moving || settings.keepScreenOn
+            ScreenWake.hold(
+                keepOn: settings.keepScreenOn, autoScrolling: moving, trace: env.trace
+            )
         }
         // Bringing the chrome up over pages that are already moving is how the slider is
         // asked for again without stopping them.
@@ -146,11 +148,15 @@ struct ComicReaderView: View {
         // re-entry is invisible exactly when somebody worried about their battery turns it
         // off.
         .onChange(of: settings.keepScreenOn) { _, keepOn in
-            UIApplication.shared.isIdleTimerDisabled = keepOn || autoScrolling
+            ScreenWake.hold(keepOn: keepOn, autoScrolling: autoScrolling, trace: env.trace)
         }
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn }
+        .onAppear {
+            ScreenWake.hold(
+                keepOn: settings.keepScreenOn, autoScrolling: autoScrolling, trace: env.trace
+            )
+        }
         .onDisappear {
-            UIApplication.shared.isIdleTimerDisabled = false
+            ScreenWake.release(trace: env.trace)
             model?.stopReading()
         }
         .onChange(of: scenePhase) { _, phase in

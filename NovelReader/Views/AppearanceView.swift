@@ -250,10 +250,15 @@ struct ReadingAppearanceSections: View {
         }
 
         Section {
+            // The toggle only records the answer; the screens that read do the holding, in
+            // `ScreenWake`. Applying it here as well left the flag set from Settings with
+            // no reader open — the shelf, the search tab and this panel itself then stayed
+            // awake until the next book was opened and closed, which is the reader's own
+            // battery spent on a screen they are not reading. Shown over a reader it was
+            // worse: two handlers wrote the same flag from different conditions, and this
+            // one did not know about auto-scroll, so turning the setting off under a moving
+            // page could let the screen lock in the middle of it.
             Toggle("reader.settings.keepScreenOn", isOn: $settings.keepScreenOn)
-                .onChange(of: settings.keepScreenOn) { _, wake in
-                    UIApplication.shared.isIdleTimerDisabled = wake
-                }
         }
     }
 }

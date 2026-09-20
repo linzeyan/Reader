@@ -271,7 +271,7 @@ struct ReaderView: View {
         // the setting off mid-session changed nothing until the reader was left and
         // re-entered — invisible exactly when someone worried about battery flips it.
         .onChange(of: settings.keepScreenOn) { _, keepOn in
-            UIApplication.shared.isIdleTimerDisabled = keepOn || autoScrolling
+            ScreenWake.hold(keepOn: keepOn, autoScrolling: autoScrolling, trace: env.trace)
         }
         // A page moving on its own is the only reading this app does with no touches in
         // it, so it is the only one the system would lock the screen in the middle of —
@@ -281,7 +281,9 @@ struct ReaderView: View {
         // meant to end up, and holding the screen awake for it would burn a battery on a
         // phone in a pocket.
         .onChange(of: autoScrolling) { _, moving in
-            UIApplication.shared.isIdleTimerDisabled = moving || settings.keepScreenOn
+            ScreenWake.hold(
+                keepOn: settings.keepScreenOn, autoScrolling: moving, trace: env.trace
+            )
             // Two things moving one page is a page nobody is steering. The reader asked
             // for this one, so the voice is the one that gives way.
             if moving { env.speech.pause() }
@@ -303,11 +305,13 @@ struct ReaderView: View {
             paceAskedAt = .now
         }
         .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = settings.keepScreenOn
+            ScreenWake.hold(
+                keepOn: settings.keepScreenOn, autoScrolling: autoScrolling, trace: env.trace
+            )
         }
         .onDisappear {
             env.trace.stopWatching("reader")
-            UIApplication.shared.isIdleTimerDisabled = false
+            ScreenWake.release(trace: env.trace)
             model?.stopReading()
             // Listening ends with the book it is in. The voice is owned outside this
             // screen so that a locked phone goes on reading — not so that a reader who
