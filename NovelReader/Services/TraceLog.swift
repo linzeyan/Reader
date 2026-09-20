@@ -218,14 +218,28 @@ final class TraceLog {
         return Int(info.resident_size / (1024 * 1024))
     }
 
-    /// Foreground or background, as the sample sees it.
+    /// Which of the three states the app is in, as the sample sees it.
     ///
     /// The dividing line every other event is read against: whether the voice is still
     /// speaking after `phase=bg` is the only evidence that background audio works at all,
     /// and it is not a question a simulator can answer.
+    ///
+    /// Three, not two. `.inactive` — a notification banner, Control Centre, the app
+    /// switcher — used to be folded in with `.background`, which was invisible until
+    /// `notePhase` learned to say `from=inactive` and the 2026-09-20 device trace put the
+    /// two a tenth of a second apart: `phase fg from=inactive` on one line and
+    /// `phase=bg` on the next. Both were describing the same moment, and a trace that
+    /// contradicts itself inside a second is worse than one that says less.
     private static var phase: String {
         #if canImport(UIKit)
-        MainActor.assumeIsolated { UIApplication.shared.applicationState == .active ? "fg" : "bg" }
+        MainActor.assumeIsolated {
+            switch UIApplication.shared.applicationState {
+            case .active: "fg"
+            case .inactive: "inactive"
+            case .background: "bg"
+            @unknown default: "?"
+            }
+        }
         #else
         "fg"
         #endif
