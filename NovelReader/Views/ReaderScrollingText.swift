@@ -128,6 +128,13 @@ struct ReaderScrollingText: UIViewRepresentable {
     /// anchor, and everything the page does about it — the band under the words, the
     /// scroll that keeps up — follows from that one value changing.
     let speaking: SpokenSentence?
+    /// Where this renderer says what it did. Off for everyone who did not ask for it.
+    ///
+    /// Handed in rather than reached for, because everything else this view needs is
+    /// handed in: the coordinator is built from the first value of this struct and the
+    /// trace lives as long as the app, so one is as good as the other and this one is
+    /// testable.
+    let trace: TraceLog
 
     func makeUIView(context: Context) -> ReaderTextScrollView {
         let view = ReaderTextScrollView()
@@ -141,7 +148,7 @@ struct ReaderScrollingText: UIViewRepresentable {
     }
 
     func makeCoordinator() -> ReaderScrollCoordinator {
-        ReaderScrollCoordinator()
+        ReaderScrollCoordinator(trace: trace)
     }
 }
 
@@ -153,6 +160,8 @@ struct ReaderScrollingText: UIViewRepresentable {
 @MainActor
 final class ReaderScrollCoordinator {
     weak var view: ReaderTextScrollView?
+
+    private let trace: TraceLog
 
     private(set) var placed: [PlacedColumn] = []
     private var config: ReaderScrollingText?
@@ -196,6 +205,24 @@ final class ReaderScrollCoordinator {
         /// Unlike the page behind it, changing script rewrites the characters themselves,
         /// so every column has to be composed and laid out again.
         let script: ChineseScript
+
+        /// Which field moved, for the trace's `relayout` line.
+        ///
+        /// The first one only. A rotation moves `width` alone and a theme moves `ink`
+        /// alone, so the first difference is the cause in every case anybody has had to
+        /// diagnose — and the case this exists for is `why=ink` arriving when the reader
+        /// did nothing at all, which is iOS snapshotting for the app switcher in the
+        /// appearance the reader is not using.
+        func changed(from old: LayoutKey) -> String {
+            if width != old.width { return "width" }
+            if fontName != old.fontName { return "font" }
+            if fontSize != old.fontSize { return "size" }
+            if lineSpacing != old.lineSpacing { return "leading" }
+            if paragraphSpacing != old.paragraphSpacing { return "paraGap" }
+            if ink != old.ink { return "ink" }
+            if script != old.script { return "script" }
+            return "none"
+        }
     }
 
     /// The gap between one chapter's last line and the next chapter's heading. The
@@ -227,6 +254,15 @@ final class ReaderScrollCoordinator {
         driver.onRanAground = { [weak self] in self?.config?.onAutoScrollEnded() }
         return driver
     }()
+
+    init(trace: TraceLog) {
+        self.trace = trace
+        // Installed here rather than by the reader screen, because what is sampled belongs
+        // to the driver this owns. Held weakly and answering nil while the page is not
+        // moving on its own, so a trace of ordinary reading carries no column of zeroes
+        // about a feature nobody switched on.
+        trace.watch("auto") { [weak self] in self?.autoScroll.traceFields() }
+    }
 
     func update(with config: ReaderScrollingText) {
         self.config = config
@@ -269,6 +305,16 @@ final class ReaderScrollCoordinator {
                     chapterIndex: keep.chapterIndex, anchor: keep.anchor
                 )
             }
+            // Before the two lines below throw the answer away: `placed` is what is being
+            // discarded and `builtFor` is what it was built for. A rebuild is the most
+            // expensive thing this renderer does and the one that has put a reader back in
+            // the wrong chapter, so both halves have to be on the line — why it happened,
+            // and whether anybody knew where to put the reader back.
+            trace.note(
+                "relayout why=\(builtFor.map(key.changed(from:)) ?? "first") "
+                    + "placed=\(placed.count) "
+                    + "restoring=\(restoring.map { String($0.chapterIndex) } ?? "none")"
+            )
             builtFor = key
             placed = []
             laying = []
@@ -340,11 +386,16 @@ final class ReaderScrollCoordinator {
                     ),
                     width: key.width
                 )
+                // Timed around the layout pass alone, not around the hop back: what the
+                // trace is asked to settle is whether the per-page layout tax came back
+                // (PITFALLS 2026-08-27), and the queue hop is not part of that.
+                let began = CACurrentMediaTime()
                 column.layOut()
+                let took = Int((CACurrentMediaTime() - began) * 1000)
                 Task { @MainActor [weak self] in
                     self?.place(
                         column, id: identity, index: index, siteChapterId: siteId,
-                        builtUnder: key
+                        builtUnder: key, tookMs: took
                     )
                 }
             }
@@ -380,7 +431,7 @@ final class ReaderScrollCoordinator {
     /// re-aim.
     private func place(
         _ column: ChapterColumn, id: String, index: Int, siteChapterId: String,
-        builtUnder key: LayoutKey
+        builtUnder key: LayoutKey, tookMs: Int
     ) {
         laying.remove(id)
         // Laid out for a measure that has since changed, or for a chapter the reader has
@@ -394,9 +445,7 @@ final class ReaderScrollCoordinator {
         let anchor = view.flatMap { chapter(atY: $0.readingOffset) }
         let anchorTop = anchor?.top
 
-        #if DEBUG
-        ColumnProbe.placed(index, report: column.layoutReport)
-        #endif
+        trace.note("col idx=\(index) ms=\(tookMs) \(column.traceFields)")
         let entry = PlacedColumn(
             chapterIndex: index, chapterId: id, siteChapterId: siteChapterId,
             column: column, top: 0
@@ -523,6 +572,17 @@ final class ReaderScrollCoordinator {
     /// reader to hold still at a pixel.
     private static let ranOutWindows: CGFloat = 0.1
 
+    /// How much content is left under the window.
+    ///
+    /// The number both gates below decide on, and the one the trace reports beside a page
+    /// turn — deliberately the same expression, because a turn that landed short at the
+    /// foot of the loaded text and one that fell short for a layout reason look identical
+    /// to the reader, and this is what tells them apart. See PITFALLS 2026-08-18.
+    private var contentBelowReader: CGFloat {
+        guard let view else { return -1 }
+        return contentHeight - (view.readingOffset + view.visibleHeight)
+    }
+
     private func askForMoreIfNeeded() {
         // Only off a stack that is all there, for the same reason `reportPlace` says
         // nothing during a rebuild: `contentHeight` is how far the columns have *landed*,
@@ -540,7 +600,7 @@ final class ReaderScrollCoordinator {
         guard let config, let view, !placed.isEmpty,
               placed.count == config.chapters.count
         else { return }
-        let below = contentHeight - (view.readingOffset + view.visibleHeight)
+        let below = contentBelowReader
         if below < view.visibleHeight * Self.leadWindows {
             config.onNeedsNext()
         }
@@ -676,7 +736,17 @@ final class ReaderScrollCoordinator {
         // moves. The tap is itself that intent, so it asks directly; the next tap has
         // somewhere to go.
         if zone == .previous, view.readingOffset <= 0 { config.onNeedsPrevious() }
-        guard let destination = pageTurnDestination(zone) else { return }
+        let began = CACurrentMediaTime()
+        guard let destination = pageTurnDestination(zone) else {
+            // A turn that decided there was nowhere to go. Worth a line of its own: the
+            // reader's experience of it is a tap that did nothing, which is the same thing
+            // they see when a turn lands short — and the two have different causes.
+            trace.note(
+                "turn dir=\(zone == .next ? "next" : "prev") nowhere "
+                    + String(format: "below=%.0f", contentBelowReader)
+            )
+            return
+        }
         // Animated, unlike a jump between chapters: this is the reader moving through
         // text they are reading, and a page that appears without moving gives them
         // nothing to tell it apart from a page that never turned.
@@ -685,6 +755,20 @@ final class ReaderScrollCoordinator {
         // survive: the driver sets an offset on the very next frame, which cancels it
         // part way and leaves the turn half made. An instant turn the reader can see the
         // end of beats an animated one they see the middle of.
+        // `got` is the clamped destination rather than the offset read back, because the
+        // turn is usually animated and has not arrived yet. It is also the exact quantity
+        // the 2026-08-18 report was about: a `UIScrollView` refuses an offset past the
+        // foot of its content without telling anybody, and a turn that lands short there
+        // is the loaded text running out, not the layout drifting.
+        let landed = view.clamped(destination)
+        trace.note(
+            "turn dir=\(zone == .next ? "next" : "prev") "
+                + String(
+                    format: "want=%.0f got=%.0f below=%.0f ms=%.0f",
+                    destination, landed, contentBelowReader,
+                    (CACurrentMediaTime() - began) * 1000
+                )
+        )
         view.setReadingOffset(destination, animated: !autoScroll.isRunning)
     }
 

@@ -191,7 +191,8 @@ struct ComicReaderView: View {
                     return true
                 },
                 onTargetReached: { model.clearScrollTarget() },
-                onAutoScrollEnded: { autoScrolling = false }
+                onAutoScrollEnded: { autoScrolling = false },
+                trace: env.trace
             )
             .ignoresSafeArea()
 

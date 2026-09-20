@@ -531,7 +531,8 @@ struct ReaderView: View {
                 // — see `SpeechReader` — so a reader who left one book listening and
                 // opened another would otherwise find a sentence of the first picked out
                 // somewhere in the second.
-                speaking: isListening ? env.speech.current : nil
+                speaking: isListening ? env.speech.current : nil,
+                trace: env.trace
             )
             .overlay(alignment: .bottom) { markBar(model) }
             .overlay(alignment: .bottom) { loadFailure(model) }

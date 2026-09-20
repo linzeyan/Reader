@@ -139,8 +139,35 @@ final class AutoScrollDriver {
     /// being dragged while something else also moves it is a page nobody is steering.
     private var isHeld = false
 
+    /// Travel asked for and travel granted since the last sample — see `traceFields`.
+    private var askedSince: CGFloat = 0
+    private var movedSince: CGFloat = 0
+
     init(step: @escaping (CGFloat) -> CGFloat) {
         self.step = step
+    }
+
+    /// What the page did over the last sampling window, or nil while nothing is moving it.
+    ///
+    /// The pair is the whole diagnosis. `asked` far above `moved` with `carry` pinned near
+    /// zero is the surface refusing to travel — the SE case, where a reading pace earns a
+    /// fraction of a point a frame and a scroll view that can only sit on whole pixels
+    /// rounds every one of them away, so the page stands still and this driver reads a
+    /// book as one that has run out. `asked ≈ moved` with `carry` cycling between zero and
+    /// a pixel is the banking working.
+    ///
+    /// Reset on read, so each line covers the window it sits at the end of rather than the
+    /// whole session.
+    func traceFields() -> String? {
+        guard speed > 0 else { return nil }
+        defer {
+            askedSince = 0
+            movedSince = 0
+        }
+        return String(
+            format: "auto=%.1f/%.1f carry=%.2f speed=%.1f",
+            askedSince, movedSince, carry, speed
+        )
     }
 
     deinit { link?.invalidate() }
@@ -177,12 +204,15 @@ final class AutoScrollDriver {
         defer { lastTick = now }
         guard let previous = lastTick, now > previous else { return }
         let elapsed = min(now - previous, Self.longestStep)
-        carry += speed * CGFloat(elapsed)
+        let earned = speed * CGFloat(elapsed)
+        askedSince += earned
+        carry += earned
         // Not yet worth a pixel. Nothing is asked of the surface, so nothing is learned
         // about it either — a frame that was never offered anywhere to go cannot count as
         // one that found nowhere.
         guard carry >= Self.smallestMove else { return }
         let moved = step(carry)
+        movedSince += moved
         guard moved < Self.smallestMove else {
             carry -= moved
             stalledSince = nil

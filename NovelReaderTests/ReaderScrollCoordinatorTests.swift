@@ -23,6 +23,8 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
     /// zero and lays nothing out at all.
     private var view: ReaderTextScrollView!
     private var coordinator: ReaderScrollCoordinator!
+    private var trace: TraceLog!
+    private var traceRoot: URL!
 
     /// A window the size of a phone, so `textWidth` and `visibleHeight` are real
     /// numbers rather than zero.
@@ -32,13 +34,24 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         defaultsName = "ReaderScrollCoordinatorTests-\(UUID().uuidString)"
         settings = ReaderSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: defaultsName)))
         view = ReaderTextScrollView(frame: window)
-        coordinator = ReaderScrollCoordinator()
+        // A trace of its own, switched off, over a directory nothing else touches: these
+        // tests are about the renderer, and a developer with diagnostics on must not find
+        // a suite's worth of relayouts in the file they were collecting.
+        traceRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("ReaderScrollCoordinatorTests-\(UUID().uuidString)")
+        trace = TraceLog(
+            directory: traceRoot,
+            defaults: try XCTUnwrap(UserDefaults(suiteName: traceRoot.lastPathComponent))
+        )
+        coordinator = ReaderScrollCoordinator(trace: trace)
         view.coordinator = coordinator
         coordinator.view = view
     }
 
     override func tearDownWithError() throws {
         UserDefaults.standard.removePersistentDomain(forName: defaultsName)
+        UserDefaults.standard.removePersistentDomain(forName: traceRoot.lastPathComponent)
+        try? FileManager.default.removeItem(at: traceRoot)
         view = nil
         coordinator = nil
     }
@@ -94,7 +107,8 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             onTouch: { _ in }, onTap: { _ in false }, onMark: { _, _ in },
             onTargetReached: {},
             autoScroll: autoScroll, onAutoScrollEnded: onAutoScrollEnded,
-            speaking: speaking
+            speaking: speaking,
+            trace: trace
         )
     }
 
@@ -509,6 +523,72 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         let stopped = view.readingOffset
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertEqual(view.readingOffset, stopped, "a page switched off has to stay put")
+    }
+
+    // MARK: - What it writes down about itself
+
+    /// The two lines somebody reads a device trace for, with the fields that make them
+    /// worth reading.
+    ///
+    /// `col … noLines=0` is the whole of the 2026-08-28 device bug: a fragment whose line
+    /// fragments TextKit has taken back leaves the copied geometry with holes in it, and
+    /// it is *always* zero here, because a simulator is never short enough of memory to
+    /// reclaim anything. The number has to be on the line so that a phone can say
+    /// otherwise.
+    ///
+    /// `relayout why=size` is the 2026-09-06 one: a rebuild throws every column away and
+    /// has to put the reader back, and the report that followed one put a reader several
+    /// chapters behind where they had been. `why` is what tells a rebuild the reader asked
+    /// for from one nobody asked for.
+    func testALaidOutChapterAndARebuildBothSayEnoughToBeJudged() async throws {
+        trace.isOn = true
+        try await show([chapter(1, paragraphs: 30)])
+
+        let columns = lines(matching: "col ")
+        XCTAssertEqual(columns.count, 1, "one chapter, one layout pass, one line")
+        let column = try XCTUnwrap(columns.first)
+        XCTAssertTrue(column.contains("idx=1"), column)
+        XCTAssertTrue(column.contains("noLines=0"), "the field the device answers: \(column)")
+        for field in ["ms=", "paras=", "chars=", "frags=", "h="] {
+            XCTAssertTrue(column.contains(field), "missing \(field) in: \(column)")
+        }
+
+        // The reader made the text bigger, which is every column describing a measure
+        // nobody is reading at.
+        settings.fontSize += 4
+        try await show([chapter(1, paragraphs: 30)])
+
+        let rebuilds = lines(matching: "relayout ")
+        XCTAssertEqual(rebuilds.count, 2, "the first build and the resize")
+        XCTAssertTrue(rebuilds[0].contains("why=first"), rebuilds[0])
+        XCTAssertTrue(
+            rebuilds[1].contains("why=size"),
+            "a rebuild has to name what moved, or nobody can tell whether the reader "
+                + "asked for it: \(rebuilds[1])"
+        )
+        XCTAssertTrue(rebuilds[1].contains("placed=1"), "what is being thrown away")
+    }
+
+    /// A tap that turns a page says where it meant to go, where it could go, and how much
+    /// was left underneath — which is the difference between the loaded text running out
+    /// and the layout drifting, and those two were confused for a fortnight in August.
+    func testATurnSaysWhatItAskedForAndWhatItCouldHave() async throws {
+        trace.isOn = true
+        try await show([chapter(1, paragraphs: 40)])
+        coordinator.turnPage(.next)
+
+        let turn = try XCTUnwrap(lines(matching: "turn ").last)
+        XCTAssertTrue(turn.contains("dir=next"), turn)
+        for field in ["want=", "got=", "below=", "ms="] {
+            XCTAssertTrue(turn.contains(field), "missing \(field) in: \(turn)")
+        }
+    }
+
+    private func lines(matching event: String) -> [String] {
+        String(data: trace.contents(), encoding: .utf8)?
+            .split(separator: "\n")
+            .filter { $0.contains(event) }
+            .map(String.init) ?? []
     }
 
     // MARK: - Keeping up with the voice

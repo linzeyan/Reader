@@ -378,19 +378,23 @@ final class ChapterColumn {
         layoutManager.invalidateLayout(for: contentStorage.documentRange)
     }
 
-    #if DEBUG
-    /// What the one layout pass actually produced. A chapter is laid out once, so this
-    /// is a handful of lines a session — see `ColumnProbe`.
-    var layoutReport: String {
+    /// What the one layout pass produced, for the trace's `col` line.
+    ///
+    /// A chapter is laid out once, so this is a handful of lines a session and can be
+    /// built unconditionally — unlike anything in the draw path.
+    ///
+    /// `noLines` is the field to read. A fragment whose line fragments the layout manager
+    /// has taken back leaves the copied geometry with holes in it, and marks drawn from
+    /// that geometry land on text the reader never touched. It is **always zero on a
+    /// simulator**, where memory is never tight enough for TextKit to reclaim anything,
+    /// which is exactly why it is worth a line in a file that comes back from a phone.
+    var traceFields: String {
         String(
-            format: "chars=%d width=%.0f height=%.0f fragments=%d(noLines=%d) "
-                + "lines=%d paragraphs=%d lastMaxY=%.0f",
-            text.attributed.length, width, height, fragments.count,
-            fragments.filter(\.lineFragments.isEmpty).count,
-            lines.count, paragraphFrames.count, fragments.last?.maxY ?? -1
+            format: "paras=%d chars=%d frags=%d noLines=%d h=%.0f",
+            paragraphFrames.count, text.attributed.length, fragments.count,
+            fragments.filter(\.lineFragments.isEmpty).count, height
         )
     }
-    #endif
 
     // MARK: - Offsets
 

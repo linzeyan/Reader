@@ -268,4 +268,84 @@ final class AutoScrollTests: XCTestCase {
         driver.tick(at: 12)
         XCTAssertEqual(ended, 1)
     }
+
+    // MARK: - What the trace is told about it
+
+    /// The pair is the whole diagnosis, and this is the shape that says nothing is wrong:
+    /// the surface was given very nearly everything it was asked for.
+    ///
+    /// Over the same SE grid `testFractionsOfAPointAddUpInsteadOfRoundingAway` uses,
+    /// because a line reading `asked=99.8 moved=99.5` on a phone where the page is visibly
+    /// moving is the reference somebody needs in front of them before they can call a
+    /// different one a fault.
+    func testASampleOfAHealthyPageSaysItGotWhatItAskedFor() throws {
+        let driver = makeDriver()
+        surfaceMoves = { ($0 / 0.5).rounded(.down) * 0.5 }
+        driver.setSpeed(10)
+
+        var now: CFTimeInterval = 0
+        for _ in 0..<600 {
+            driver.tick(at: now)
+            now += 1.0 / 60
+        }
+
+        let (asked, moved) = try autoPair(driver.traceFields())
+        XCTAssertEqual(asked, 100, accuracy: 1, "ten seconds at ten points a second")
+        XCTAssertEqual(
+            moved, asked, accuracy: 1,
+            "a page nobody would complain about gets what it was promised"
+        )
+    }
+
+    /// And the shape that says something is: asked for, never granted.
+    ///
+    /// Then the driver gives up, and from that moment the trace goes *quiet* rather than
+    /// logging zeroes — which is the same rule the whole file follows. A silence where
+    /// `auto` lines used to be is a page that stopped moving, and it takes nothing working
+    /// to be readable.
+    func testAPageThatWillNotMoveSaysSoAndThenStopsSayingAnything() throws {
+        let driver = makeDriver()
+        surfaceMoves = { _ in 0 }
+        driver.setSpeed(60)
+
+        driver.tick(at: 0)
+        driver.tick(at: 1)
+        driver.tick(at: 2)
+
+        let (asked, moved) = try autoPair(driver.traceFields())
+        XCTAssertGreaterThan(asked, 0)
+        XCTAssertEqual(moved, 0, "the page was offered somewhere to go and went nowhere")
+
+        driver.tick(at: 8)
+        XCTAssertFalse(driver.isRunning)
+        XCTAssertNil(
+            driver.traceFields(),
+            "a driver that switched itself off has nothing to report, and its silence is"
+                + " the report"
+        )
+    }
+
+    /// Each line covers the window it sits at the end of. Counters that were never reset
+    /// would turn a rate into a running total, and an hour in, every line would look alike.
+    func testReadingTheSampleStartsTheNextWindow() throws {
+        let driver = makeDriver()
+        driver.setSpeed(60)
+        driver.tick(at: 0)
+        driver.tick(at: 1)
+        XCTAssertGreaterThan(try autoPair(driver.traceFields()).asked, 0)
+
+        XCTAssertEqual(
+            try autoPair(driver.traceFields()).asked, 0,
+            "nothing happened between the two reads, so the second window is empty"
+        )
+    }
+
+    /// The `asked=…/moved=…` pair out of one sample line.
+    private func autoPair(_ fields: String?) throws -> (asked: Double, moved: Double) {
+        let field = try XCTUnwrap(
+            XCTUnwrap(fields).split(separator: " ").first { $0.hasPrefix("auto=") }
+        )
+        let pair = field.dropFirst("auto=".count).split(separator: "/")
+        return (try XCTUnwrap(Double(pair[0])), try XCTUnwrap(Double(pair[1])))
+    }
 }

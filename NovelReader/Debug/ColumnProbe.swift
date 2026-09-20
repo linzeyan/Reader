@@ -25,11 +25,6 @@ enum ColumnProbe {
     /// Four a second: enough to watch a boundary move, few enough to read.
     private static let interval: Double = 0.25
 
-    /// One chapter, once, as its layout pass left it.
-    static func placed(_ index: Int, report: String) {
-        NSLog("[DEBUG-col] placed idx=%d %@", index, report)
-    }
-
     /// One drawn window, throttled.
     ///
     /// `drawn` against `of` says whether the draw list was short; `lastY` against the

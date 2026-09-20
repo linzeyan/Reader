@@ -60,6 +60,8 @@ struct ComicScrollingPages: UIViewRepresentable {
     /// has stopped: the end of the book, or a chapter that will not load. The owner holds
     /// the switch, so the owner is who has to be told it went off.
     let onAutoScrollEnded: () -> Void
+    /// Where this renderer says what it did. Off for everyone who did not ask for it.
+    let trace: TraceLog
 
     func makeUIView(context: Context) -> ComicScrollView {
         let view = ComicScrollView()
@@ -73,7 +75,7 @@ struct ComicScrollingPages: UIViewRepresentable {
     }
 
     func makeCoordinator() -> ComicScrollCoordinator {
-        ComicScrollCoordinator()
+        ComicScrollCoordinator(trace: trace)
     }
 }
 
@@ -140,6 +142,13 @@ final class ComicScrollCoordinator {
         driver.onRanAground = { [weak self] in self?.config?.onAutoScrollEnded() }
         return driver
     }()
+
+    init(trace: TraceLog) {
+        // Under a name of its own, so a trace can say which reader the page was moving in.
+        // The two drivers are the same type and the comic one is the one with a second way
+        // to stand still — a magnified page has less room to travel through.
+        trace.watch("autoComic") { [weak self] in self?.autoScroll.traceFields() }
+    }
 
     // MARK: - Updating
 
