@@ -966,10 +966,18 @@ final class AppEnvironment {
         guard downloader.isBusy else { return }
         resumeWhenActive = true
         let reason = String(localized: "downloads.paused.background")
+        // Weak on the *outer* closure, which is the one UIKit holds. Written on the inner
+        // `Task` alone it said nothing: forming a weak reference needs `self` in scope, so
+        // the expiration handler captured it strongly to hand it over, and UIKit keeps that
+        // handler alive for the whole background task — the one stretch the `weak` was
+        // there to cover. Nothing leaked, because this object outlives the app either way;
+        // the line simply did not mean what it said. See the compiler's own
+        // `#ImplicitStrongCapture`.
         backgroundAssertion = UIApplication.shared.beginBackgroundTask(withName: "FinishChapter") {
+            [weak self] in
             // Out of time. Stop now, saved or not: the alternative is iOS killing
             // the process, which teaches the user nothing.
-            Task { @MainActor [weak self] in
+            Task { @MainActor in
                 self?.downloader.pause(reason: reason)
                 self?.endBackgroundAssertion()
             }
