@@ -504,14 +504,28 @@ final class NewChapterTests: XCTestCase {
         let repo = try makeRepo()
         let feed = try makeFeed(in: repo, articles: ["a", "b"])
         let before = try XCTUnwrap(repo.book(id: feed.id)).updatedAt
+        // Stated rather than taken off the clock. GRDB stores a `Date` to the millisecond,
+        // and bookmarking the feed above and marking an article below are microseconds
+        // apart on a machine doing nothing else — so both stamps round-tripped to the same
+        // stored instant and `GreaterThan` became a coin toss, red in three runs out of
+        // five. Nothing about what this test claims involves how fast the machine is.
+        let marked = before.addingTimeInterval(1)
 
-        try repo.setArticlesRead(true, bookId: feed.id, siteChapterIds: ["a"])
+        try repo.setArticlesRead(true, bookId: feed.id, siteChapterIds: ["a"], now: marked)
         XCTAssertGreaterThan(try XCTUnwrap(repo.book(id: feed.id)).updatedAt, before)
 
         // And a mark that changes nothing must not: a swipe on an already-read article is
         // a gesture readers make constantly, and each one would otherwise publish a record.
+        // Offered a *later* stamp than the one it is holding, so what is being pinned is
+        // that nothing changed — not that there was nothing newer to write.
         let stamped = try XCTUnwrap(repo.book(id: feed.id)).updatedAt
-        XCTAssertEqual(try repo.setArticlesRead(true, bookId: feed.id, siteChapterIds: ["a"]), 0)
+        XCTAssertEqual(
+            try repo.setArticlesRead(
+                true, bookId: feed.id, siteChapterIds: ["a"],
+                now: marked.addingTimeInterval(1)
+            ),
+            0
+        )
         XCTAssertEqual(try XCTUnwrap(repo.book(id: feed.id)).updatedAt, stamped)
     }
 
