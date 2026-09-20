@@ -13,15 +13,28 @@ import XCTest
 @MainActor
 final class SpeechReaderTests: XCTestCase {
     private var reader: SpeechReader!
+    private var traceRoot: URL!
 
     override func setUp() {
         super.setUp()
-        reader = SpeechReader()
+        // A trace of its own, over a directory nothing else touches, so that a developer
+        // with diagnostics switched on does not have these tests writing into the trace
+        // they are collecting.
+        traceRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("SpeechReaderTests-\(UUID().uuidString)")
+        reader = SpeechReader(
+            trace: TraceLog(
+                directory: traceRoot,
+                defaults: UserDefaults(suiteName: traceRoot.lastPathComponent)!
+            )
+        )
     }
 
     override func tearDown() {
         reader.stop()
         reader = nil
+        UserDefaults.standard.removePersistentDomain(forName: traceRoot.lastPathComponent)
+        try? FileManager.default.removeItem(at: traceRoot)
         super.tearDown()
     }
 

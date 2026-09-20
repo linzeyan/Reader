@@ -222,7 +222,21 @@ final class SpeechReader {
     /// pause and then took a phone call must not find the book reading itself afterwards.
     private var pausedBySystem = false
 
-    init() {
+    // What the trace counts between roll-ups — see `speechFields`.
+    private var countedSince = Date()
+    private var utterances = 0
+    private var characters = 0
+    private var voiceMisses = 0
+    private var pauses = 0
+    private var interruptions = 0
+
+    /// The diagnostics trace, held because this is the one part of the app whose
+    /// behaviour cannot be observed where it matters: a locked phone in a pocket draws no
+    /// frames, answers no test, and is the only place the heat question is real.
+    private let trace: TraceLog
+
+    init(trace: TraceLog) {
+        self.trace = trace
         let listener = Delegate(
             started: { [weak self] in self?.began($0) },
             saying: { [weak self] in self?.saying($0, at: $1) },
@@ -231,6 +245,40 @@ final class SpeechReader {
         self.listener = listener
         synthesiser.delegate = listener
         watchTheAudioSession()
+        // Fields for the trace's five-second sample, plus a rate once a minute. See
+        // `speechFields`.
+        trace.watch("voice") { [weak self] in self?.speechFields() }
+    }
+
+    /// What the sample says about the voice, and once a minute what it has been costing.
+    ///
+    /// The rate is the whole of the heat question and five seconds is too short a window
+    /// to state one — a paragraph takes twenty. So the counts accumulate and a minute's
+    /// worth is handed over at a time, measured by the clock rather than by counting
+    /// calls, so that changing the sample interval cannot silently change what `/min`
+    /// means.
+    ///
+    /// Read it against 2026-09-19: `utt` about 9/min with `chars` about 58 is the shape
+    /// after paragraph utterances and a cached voice. Back at 15/min with `chars` near 30
+    /// is a sentence per utterance again, and any `miss` at all after the first is the
+    /// voice lookup happening per sentence — which is what a phone that will not cool
+    /// down is made of.
+    private func speechFields() -> String? {
+        guard state != .idle else { return nil }
+        var fields = "speak=\(state == .speaking ? 1 : 0)"
+        let window = Date().timeIntervalSince(countedSince)
+        guard window >= 60 else { return fields }
+        let minutes = window / 60
+        fields += String(format: " utt=%.1f/min", Double(utterances) / minutes)
+        fields += " chars=\(utterances > 0 ? characters / utterances : 0)/utt"
+        fields += " miss=\(voiceMisses) pause=\(pauses) intr=\(interruptions)"
+        countedSince = Date()
+        utterances = 0
+        characters = 0
+        voiceMisses = 0
+        pauses = 0
+        interruptions = 0
+        return fields
     }
 
     /// Starts reading where the reader is standing.
@@ -268,6 +316,7 @@ final class SpeechReader {
     /// restarts. The reader pressed pause, not rewind.
     func pause() {
         guard state == .speaking else { return }
+        pauses += 1
         pausedBySystem = false
         state = .paused
         synthesiser.pauseSpeaking(at: .word)
@@ -310,6 +359,11 @@ final class SpeechReader {
         try? AVAudioSession.sharedInstance().setActive(
             false, options: .notifyOthersOnDeactivation
         )
+        // Only `stop` hands the session back. A trace showing `aud idle` after a *pause*
+        // would mean that changed; a trace never showing one at all means this app is
+        // sitting on the audio over somebody's music. Both are worth seeing, and neither
+        // is visible from inside the app.
+        trace.note("aud idle")
     }
 
     /// A new pace, applied to what is in the voice's mouth as well as to what follows it.
@@ -363,7 +417,19 @@ final class SpeechReader {
         let (text, starts) = SpeechScript.spoken(run)
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = Float(pace.rate)
-        utterance.voice = voice(for: language(of: text))
+        let language = language(of: text)
+        let missesBefore = voiceMisses
+        utterance.voice = voice(for: language)
+        utterances += 1
+        characters += text.count
+        // One line per utterance, which is nine a minute rather than the fifteen it used
+        // to be — and the difference between those two numbers is the whole finding. The
+        // roll-up states the rate; these say when, which is what tells a voice that went
+        // quiet at `phase bg` from one that carried on.
+        trace.note(
+            "say n=\(run.count) chars=\(text.count) lang=\(language) "
+                + "voice=\(voiceMisses > missesBefore ? "miss" : "hit")"
+        )
         // A breath between paragraphs, which is where one belongs — inside a paragraph
         // the punctuation being read is already doing it. Prose read with no gap at all
         // is the one thing that makes a synthesised voice tiring to follow for an hour.
@@ -388,6 +454,10 @@ final class SpeechReader {
 
     private func voice(for language: String) -> AVSpeechSynthesisVoice? {
         if let held = voices[language] { return held }
+        // Counted, not logged here: this is the miss the cache exists to prevent, and one
+        // or two of them per book is the cache working. It is the *rate* that is the
+        // finding, so it belongs in the roll-up.
+        voiceMisses += 1
         let found = AVSpeechSynthesisVoice(language: language)
         voices[language] = found
         return found
@@ -400,8 +470,16 @@ final class SpeechReader {
         // reported as a feature that does not work. `.spokenAudio` is what tells the
         // system this is a book rather than music — it is the difference between other
         // audio ducking under it and being stopped by it.
-        try? session.setCategory(.playback, mode: .spokenAudio)
-        try? session.setActive(true)
+        // Reported rather than swallowed. A failure here is "pressed play, nothing
+        // happened" — the one speech bug with no visible symptom to describe, because
+        // everything on screen says the book is being read.
+        do {
+            try session.setCategory(.playback, mode: .spokenAudio)
+            try session.setActive(true)
+            trace.note("aud active cat=playback mode=spokenAudio")
+        } catch {
+            trace.note("aud active failed err=\((error as NSError).code)")
+        }
     }
 
     /// Whether the sleep timer has rung.
@@ -522,6 +600,11 @@ final class SpeechReader {
     /// Internal rather than private, and stated as two flags rather than as a
     /// notification, so the rule can be asserted without an interruption to arrange.
     func interrupted(began: Bool, mayResume: Bool) {
+        trace.note(
+            began
+                ? "aud interrupt began"
+                : "aud interrupt ended resume=\(pausedBySystem && mayResume ? 1 : 0)"
+        )
         guard began else {
             // Only a voice the system itself stopped may be started again by the system
             // handing the audio back. A reader who pressed pause and then took a call did
@@ -530,6 +613,7 @@ final class SpeechReader {
             resume()
             return
         }
+        interruptions += 1
         guard state == .speaking else { return }
         pause()
         pausedBySystem = true
@@ -541,6 +625,7 @@ final class SpeechReader {
     /// behaviour nobody wants, and it is what happens by default. Not marked as the
     /// system's pause: nothing is going to hand this back, and going on is a tap.
     func unplugged() {
+        trace.note("aud route reason=oldDeviceUnavailable speaking=\(state == .speaking ? 1 : 0)")
         guard state == .speaking else { return }
         pause()
     }
