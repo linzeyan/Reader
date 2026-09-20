@@ -222,6 +222,10 @@ struct ReaderView: View {
             // real session grows by, so the state is the real state, not a mock of
             // it. See `ReaderLongSessionTapTests`.
             let stressChapters = UserDefaults.standard.integer(forKey: "reader.stressPreload")
+            // The window the walk is asking for, which is the whole point of the switch:
+            // left at its own reach the routine trim would hand every chapter back as
+            // fast as this loop loaded it, and the inflated session would never inflate.
+            if stressChapters > 0 { created.loadedReach = stressChapters }
             while created.loaded.count < stressChapters, created.hasMore {
                 let before = created.loaded.count
                 await created.loadNext()
@@ -247,7 +251,10 @@ struct ReaderView: View {
                 for: UIApplication.didReceiveMemoryWarningNotification
             )
         ) { _ in
-            model?.dropDistantChapters()
+            // Down to the reader's own chapter and its neighbours, which is a long way
+            // past what `trimLoadedWindow` keeps: under real pressure the trade is
+            // everything for staying alive.
+            model?.dropDistantChapters(keeping: 1)
         }
         // Applied on the way in *and* on the toggle: set only in `onAppear`, turning
         // the setting off mid-session changed nothing until the reader was left and
@@ -1445,6 +1452,16 @@ final class ReaderModel {
 
     private(set) var chapters: [Chapter] = []
     private(set) var loaded: [LoadedChapter] = []
+    /// How many chapters either side of the one being read the window keeps — see
+    /// `dropDistantChapters(keeping:)`, where the megabyte a chapter is measured.
+    ///
+    /// Seven, so fifteen chapters of a real serial is about twenty-five megabytes: wide
+    /// enough that a reader turning back to check something never waits for a fetch,
+    /// narrow enough that an evening of it cannot grow without bound.
+    ///
+    /// A variable only because the stress preload raises it — see `ReaderView`, where
+    /// that switch is read. Nothing in the app writes it.
+    var loadedReach = 7
     private(set) var isLoading = false
     private(set) var error: String?
     /// A failure the look-ahead walked into, held back rather than shown.
@@ -1893,6 +1910,9 @@ final class ReaderModel {
         pendingPrevious = nil
         loaded.insert(pending, at: 0)
         probe("insertAbove idx=\(pending.chapter.index) rows=\(pending.paragraphs.count)")
+        // Reading backwards grows the far end the same way reading forwards grows this
+        // one, and it is the same window either way.
+        trimLoadedWindow()
     }
 
     /// Whether the reader's own gesture is still playing out — a finger on the glass, or
@@ -1933,6 +1953,7 @@ final class ReaderModel {
             // failure of something they are not yet waiting on.
             ranOut = false
             probe("append idx=\(chapter.index) rows=\(content.paragraphs.count)")
+            trimLoadedWindow()
             startReadingAhead()
         } catch {
             guard mine == generation else { return }
@@ -2336,27 +2357,47 @@ final class ReaderModel {
         persistProgress(.reading)
     }
 
-    /// Gives back every chapter but the one being read and its two neighbours.
+    /// Gives back every chapter more than `reach` either side of the one being read.
     ///
-    /// The scroll gains chapters in both directions and nothing takes them out again:
-    /// `jump` empties the array, but a reader who simply keeps scrolling never calls
-    /// it, so one session in the reader holds every chapter it crossed. Measured on a
-    /// real book that is about seventy kilobytes a chapter — small enough that trimming
-    /// as a matter of course would be paying a price for nothing. Under real pressure
-    /// giving them back is a good trade and being killed is not.
+    /// The scroll gains chapters in both directions, and until this was called routinely
+    /// nothing took them out again: `jump` empties the array, but a reader who simply
+    /// keeps going never calls it, so one session held every chapter it had crossed.
     ///
-    /// Both neighbours are kept because both are wanted: the one ahead is what the
-    /// prefetch just paid for, and the one behind is where a reader turning back goes.
-    func dropDistantChapters() {
+    /// The comment this replaces said a chapter was about seventy kilobytes, and
+    /// therefore too cheap to be worth trimming as a matter of course. That was the size
+    /// of the *text*. Measured on the stress book (STATUS, 2026-09-20): the window grew
+    /// to thirty-five chapters over thirty-three minutes of continuous reading and
+    /// resident memory tracked it exactly, at **1.65 MB a chapter** — because what a
+    /// loaded chapter really costs is its laid-out column, and the text is four per cent
+    /// of it. An evening of listening is a couple of hundred megabytes that nothing ever
+    /// gives back, in the one case where nobody is looking at the screen to notice.
+    ///
+    /// - Parameter reach: how many chapters either side survive. One under real memory
+    ///   pressure, where the trade is everything for staying alive; `loadedReach` as a
+    ///   matter of course, which is wide enough that turning back to re-read never costs
+    ///   a fetch.
+    func dropDistantChapters(keeping reach: Int) {
         guard let current = loaded.firstIndex(where: {
             $0.chapter.index == currentChapterIndex
         }) else { return }
-        let keep = max(0, current - 1)...min(loaded.count - 1, current + 1)
+        let keep = max(0, current - reach)...min(loaded.count - 1, current + reach)
         guard keep.count < loaded.count else { return }
         loaded = Array(loaded[keep])
         probe("drop keeping=\(keep.count)")
-        // Nothing to re-aim: the renderer keeps the reader's own chapter where it is
-        // and restacks around it, so shortening the text above them is exact.
+        // The renderer takes care of where the reader ends up: it records their anchor,
+        // restacks what is left and puts them back on it — see
+        // `ReaderScrollCoordinator.dropChaptersNoLongerLoaded`.
+    }
+
+    /// Trims the window as it grows, rather than waiting for the system to ask.
+    ///
+    /// Not while a finger is on the glass. A pan and its deceleration both carry a
+    /// destination computed before the content above the reader got shorter, which is the
+    /// same reason `showPreviousChapter` waits for the same moment — and a trim is never
+    /// urgent enough to argue with a gesture.
+    private func trimLoadedWindow() {
+        guard !isTouching else { return }
+        dropDistantChapters(keeping: loadedReach)
     }
 
     /// Re-aims the scrolling reader at the current position without re-fetching.
