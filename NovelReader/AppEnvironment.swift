@@ -162,6 +162,10 @@ final class AppEnvironment {
         self.downloads = DownloadStore(database: database, files: files)
         let fetcher = WebFetcher()
         self.fetcher = fetcher
+        // Watched for the whole life of the app, unlike the reader's own sources: the
+        // engine is built here, at launch, and outlives every screen — which is the
+        // reason it is worth a field at all.
+        trace.watch("web") { MainActor.assumeIsolated { fetcher.traceFields() } }
         let images = ImageFetcher()
         self.images = images
         self.covers = CoverService(

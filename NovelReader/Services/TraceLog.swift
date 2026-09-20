@@ -169,9 +169,35 @@ final class TraceLog {
         lastSampleAt = now
         bodiesAtLastSample = bodies
         note(
-            "sample rss=\(Self.residentMB()) phase=\(Self.phase) "
+            "sample rss=\(Self.residentMB()) foot=\(Self.footprintMB()) phase=\(Self.phase) "
                 + String(format: "body=%.1f/s ", rate) + extra.joined(separator: " ")
         )
+    }
+
+    /// What iOS actually charges the app, in megabytes.
+    ///
+    /// `rss` is resident size, and resident counts every page mapped into the process —
+    /// including the shared, read-only text of UIKit, WebKit and CoreText, which every
+    /// app on the phone maps and none of them is billed for. `phys_footprint` is the
+    /// number jetsam decides by and the one Xcode's memory gauge shows; it is dirty and
+    /// compressed memory, which is to say the memory this app is responsible for.
+    ///
+    /// Recorded beside `rss` rather than instead of it because the *gap* is a reading in
+    /// its own right: a large one says the resident number was never the app's to answer
+    /// for, and the 2026-09-20 device trace's 190 MB was read as a problem before anyone
+    /// had asked which of the two it was.
+    static func footprintMB() -> Int {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return -1 }
+        return Int(info.phys_footprint / (1024 * 1024))
     }
 
     /// Resident size in megabytes.

@@ -146,6 +146,26 @@ final class TraceLogTests: XCTestCase {
         let after = try XCTUnwrap(String(data: log.contents(), encoding: .utf8))
         XCTAssertTrue(after.contains("loaded=4"))
         XCTAssertTrue(after.contains("rss="), "a sample with no memory in it answers nothing")
+        XCTAssertTrue(after.contains("foot="), "and resident alone is not what iOS charges")
+    }
+
+    /// The two memory numbers are different questions, and the gap between them is the
+    /// answer to a third.
+    ///
+    /// `rss` counts every page mapped into the process, shared framework text included;
+    /// `foot` is `phys_footprint`, which is what jetsam decides by. Reading a 190 MB `rss`
+    /// as "this app is holding 190 MB" — which is how the 2026-09-20 device trace was
+    /// first read, by me — is only safe if somebody has checked they are the same number,
+    /// and in a WebKit-linked app they are not.
+    func testTheFootprintIsTheAppsOwnMemoryAndIsNotTheResidentSize() throws {
+        let resident = TraceLog.residentMB()
+        let footprint = TraceLog.footprintMB()
+        XCTAssertGreaterThan(resident, 0, "the resident reading failed outright")
+        XCTAssertGreaterThan(footprint, 0, "the footprint reading failed outright")
+        XCTAssertLessThan(
+            footprint, resident,
+            "a process that maps UIKit cannot be charged for every page it can see"
+        )
     }
 
     /// A source with nothing to say right now is the same as no source. The reader

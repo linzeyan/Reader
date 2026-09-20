@@ -159,6 +159,27 @@ final class WebFetcher: NSObject {
         webView.customUserAgent = Self.mobileSafariUserAgent
     }
 
+    /// What the web engine is holding, for the periodic sample.
+    ///
+    /// A `WKWebView` is a whole browser — its own content process, its own caches, and a
+    /// document it keeps parsed and laid out until something tells it otherwise. This app
+    /// builds one at launch, before anybody has asked for a page, and never lets go of
+    /// it; a reader who only ever opens downloaded books pays for an engine they never
+    /// use. None of that is visible from outside the process, which is why a 2026-09-20
+    /// device trace could show 190 MB against a plain text novel with nothing in the log
+    /// to attribute it to.
+    ///
+    /// `held=page` is the state that costs: a real document still resident after whatever
+    /// wanted it has finished. `blank` is parked. Never nil — "the engine is idle" is
+    /// exactly the reading worth having on a line.
+    func traceFields() -> String {
+        let held = switch webView.url?.absoluteString {
+        case .none, .some("about:blank"): "blank"
+        default: webView.isLoading ? "loading" : "page"
+        }
+        return "web=\(held) views=\(importView == nil ? 1 : 2)"
+    }
+
     /// The identity every request this app makes goes out under: page loads here, and the
     /// `URLSession` fetches that shadow them (see `ImageFetcher`).
     ///
