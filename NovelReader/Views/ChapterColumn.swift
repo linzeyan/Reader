@@ -329,6 +329,7 @@ final class ChapterColumn {
     /// line fragment draws itself and asks nobody anything.
     func draw(_ columnRect: CGRect, in context: CGContext) {
         let list = drawList(in: columnRect.minY..<columnRect.maxY)
+        reportIfNothingWasDrawn(list, in: columnRect)
         #if DEBUG
         ColumnProbe.drew(
             window: columnRect, drawn: list.count, of: fragments.count,
@@ -346,6 +347,40 @@ final class ChapterColumn {
                 )
             }
         }
+    }
+
+    /// Told when a draw of this column produced nothing, at most once.
+    ///
+    /// Set by whoever puts the column into the stack, because drawing is the one thing
+    /// here with no owner to report to — it happens inside a frame, for a caller that only
+    /// knows whether it asked. Nothing is reported on a healthy column, so a trace with a
+    /// `draw` line in it has already said everything.
+    var onNothingDrawn: ((String) -> Void)?
+    private var reportedNothingDrawn = false
+
+    /// The 2026-08-28 device failure, and only that.
+    ///
+    /// The caller draws a column only when it overlaps the window, and `height` is the
+    /// bottom of the last *line* — never past the last fragment — so a window inside this
+    /// column always has at least one fragment in it. Nothing drawn therefore means the
+    /// window handed down does not describe this column at all, which is what the same
+    /// offset being applied twice produces: correct at the top of a chapter, and a whole
+    /// window out once the reader is one screen into it. On the phone it read as every
+    /// chapter showing its first page and then going black.
+    ///
+    /// Once per column. Drawing runs at frame rate, and a fault that survives one frame
+    /// survives thousands — the first line says everything the ten-thousandth would.
+    private func reportIfNothingWasDrawn(
+        _ list: ArraySlice<PlacedFragment>, in rect: CGRect
+    ) {
+        guard list.isEmpty, !fragments.isEmpty, !reportedNothingDrawn else { return }
+        reportedNothingDrawn = true
+        onNothingDrawn?(
+            String(
+                format: "win=%.0f..%.0f h=%.0f frags=%d lastY=%.0f",
+                rect.minY, rect.maxY, height, fragments.count, fragments.last?.maxY ?? -1
+            )
+        )
     }
 
     /// The fragments with any part inside a vertical range, in reading order.

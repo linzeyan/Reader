@@ -2154,7 +2154,39 @@ final class ReaderModel {
     /// The one place that decides what a chapter *is*: an article's stored blocks where
     /// there are any, prose everywhere else. Every path that puts a chapter on screen goes
     /// through here, so structure is either available to both renderers or to neither.
+    /// One chapter's text, and the trace's record that it was asked for.
+    ///
+    /// Wrapped around the whole of getting a chapter rather than around the network call,
+    /// because what a log has to settle is whether every `fetch` got an answer. A
+    /// look-ahead that failed is remembered and said nothing (see `append`), so an
+    /// unanswered `fetch` is the shape of the failure that used to leave a reader
+    /// watching a spinner that was never coming back.
     private func content(of chapter: Chapter) async throws -> LoadedChapter {
+        let began = CACurrentMediaTime()
+        env.trace.note("fetch idx=\(chapter.index)")
+        do {
+            let content = try await gotContent(of: chapter)
+            env.trace.note(
+                String(
+                    format: "fetchOK idx=%d src=%@ paras=%d after=%.1f",
+                    chapter.index, chapter.isDownloaded ? "disk" : "net",
+                    content.paragraphs.count, CACurrentMediaTime() - began
+                )
+            )
+            return content
+        } catch {
+            env.trace.note(
+                String(
+                    format: "fetchFail idx=%d err=%@ after=%.1f",
+                    chapter.index, WebFetcher.traceName(of: error),
+                    CACurrentMediaTime() - began
+                )
+            )
+            throw error
+        }
+    }
+
+    private func gotContent(of chapter: Chapter) async throws -> LoadedChapter {
         if let stored = await storedContent(of: chapter) { return stored }
         return LoadedChapter(
             chapter: chapter,

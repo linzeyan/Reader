@@ -446,6 +446,11 @@ final class ReaderScrollCoordinator {
         let anchorTop = anchor?.top
 
         trace.note("col idx=\(index) ms=\(tookMs) \(column.traceFields)")
+        // Installed here because this is where a column acquires an owner. It fires at
+        // most once, and only for the failure that cannot be seen from anywhere else.
+        column.onNothingDrawn = { [trace] report in
+            trace.note("draw nothing idx=\(index) \(report)")
+        }
         let entry = PlacedColumn(
             chapterIndex: index, chapterId: id, siteChapterId: siteChapterId,
             column: column, top: 0

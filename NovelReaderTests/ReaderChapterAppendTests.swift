@@ -18,6 +18,7 @@ final class ReaderChapterAppendTests: XCTestCase {
     private var env: AppEnvironment!
     private var files: ChapterFileStore!
     private var book: Book!
+    private var trace: TraceLog!
 
     private let siteId = "alpha"
     private let siteBookId = "1"
@@ -27,6 +28,10 @@ final class ReaderChapterAppendTests: XCTestCase {
         tempRoot = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("NovelReaderTests-\(UUID().uuidString)")
         files = ChapterFileStore(root: tempRoot.appendingPathComponent("files"))
+        trace = TraceLog(
+            directory: tempRoot.appendingPathComponent("trace"),
+            defaults: try XCTUnwrap(UserDefaults(suiteName: tempRoot.lastPathComponent))
+        )
         env = AppEnvironment(
             database: try AppDatabase.makeInMemory(),
             files: files,
@@ -35,7 +40,8 @@ final class ReaderChapterAppendTests: XCTestCase {
             ),
             coverFiles: CoverStore(root: tempRoot.appendingPathComponent("covers")),
             sites: SiteStore(directory: tempRoot.appendingPathComponent("sites")),
-            queueStore: DownloadQueueStore(url: tempRoot.appendingPathComponent("queue.json"))
+            queueStore: DownloadQueueStore(url: tempRoot.appendingPathComponent("queue.json")),
+            trace: trace
         )
         book = try env.repo.bookmark(siteId: siteId, siteBookId: siteBookId, title: "A")
         try env.repo.replaceCatalog(bookId: book.id, entries: [
@@ -53,7 +59,61 @@ final class ReaderChapterAppendTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        UserDefaults.standard.removePersistentDomain(forName: tempRoot.lastPathComponent)
         try? FileManager.default.removeItem(at: tempRoot)
+    }
+
+    /// Every chapter asked for has to be accounted for, one way or the other.
+    ///
+    /// That single rule is what the `fetch` section of TRACE.md is: a look-ahead that
+    /// failed is deliberately silent on screen — remembered and surfaced only if the
+    /// reader scrolls down to where it should have been — so a phone with a spinner that
+    /// never stops has nothing to show for it anywhere *except* an unanswered `fetch`.
+    ///
+    /// `c3` is in the catalog, on no disk, and behind no site rule this environment holds,
+    /// which is the shape a frontier failure has. `err` has to name the kind and nothing
+    /// else: this file leaves the phone through a share sheet, and half of what a fetch
+    /// failure carries is the address it failed at.
+    func testEveryChapterAskedForIsAccountedForOneWayOrTheOther() async throws {
+        trace.isOn = true
+        let model = ReaderModel(book: book, env: env)
+        await model.start(at: .chapterStart("c1"))
+        await model.loadNext()
+        await model.loadNext()
+
+        let asked = traceLines("fetch idx=")
+        let succeeded = traceLines("fetchOK idx=")
+        let failed = traceLines("fetchFail idx=")
+        XCTAssertEqual(asked.count, 3, "the opening chapter and the two asked for: \(dump())")
+        XCTAssertEqual(
+            asked.count, succeeded.count + failed.count,
+            "an unanswered fetch is the spinner that never stopped:\n\(dump())"
+        )
+
+        XCTAssertTrue(
+            succeeded.allSatisfy { $0.contains("src=disk") },
+            "both readable chapters are on the device: a network fetch here would mean "
+                + "offline reading is not working: \(dump())"
+        )
+        // `c3`, which no rule here can reach.
+        XCTAssertEqual(failed.count, 1, dump())
+        let failure = try XCTUnwrap(failed.first)
+        XCTAssertTrue(failure.contains("err="), failure)
+        XCTAssertFalse(
+            failure.contains("alpha"),
+            "the site is not the trace's business, and this file gets shared: \(failure)"
+        )
+    }
+
+    private func dump() -> String {
+        String(data: trace.contents(), encoding: .utf8) ?? ""
+    }
+
+    private func traceLines(_ event: String) -> [String] {
+        String(data: trace.contents(), encoding: .utf8)?
+            .split(separator: "\n")
+            .filter { $0.contains(event) }
+            .map(String.init) ?? []
     }
 
     /// A jump replaces the world, and a load that was in flight when it happened must

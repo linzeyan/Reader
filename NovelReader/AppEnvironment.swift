@@ -137,15 +137,19 @@ final class AppEnvironment {
     /// import runs, and the file picker cannot be reopened.
     private var importTask: Task<Book, any Error>?
 
+    /// - Parameter trace: the shared one in the app. Tests that record hand in their own,
+    ///   for the reason every other store here is handed in: the shared one writes into
+    ///   the reader's own diagnostics file, and a suite that appended a thousand chapter
+    ///   loads to the evening somebody was collecting would have ruined it.
     init(
         database: AppDatabase,
         files: ChapterFileStore,
         cache: ChapterCache,
         coverFiles: CoverStore,
         sites: SiteStore,
-        queueStore: DownloadQueueStore
+        queueStore: DownloadQueueStore,
+        trace: TraceLog = .makeShared()
     ) {
-        let trace = TraceLog.makeShared()
         self.trace = trace
         self.speech = SpeechReader(trace: trace)
         self.database = database

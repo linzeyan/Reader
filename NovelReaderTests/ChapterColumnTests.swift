@@ -314,6 +314,65 @@ final class ChapterColumnTests: XCTestCase {
         }
     }
 
+    // MARK: - Saying when a draw came out empty
+
+    /// The one thing a device can tell us about drawing that a simulator cannot, and the
+    /// reason it is worth a line in a shippable trace at all.
+    ///
+    /// The window is in column coordinates, and the caller has already placed the column;
+    /// applying the offset at both ends pushes the text a whole window off once the reader
+    /// is one screen into a chapter. On the phone that read as every chapter showing its
+    /// first page and then going black. Nothing about the drawn output says so — it is
+    /// simply empty — so the column has to notice and say it itself.
+    func testAWindowThatMissesTheTextEntirelySaysSo() throws {
+        let column = column(paragraphs())
+        var reports: [String] = []
+        column.onNothingDrawn = { reports.append($0) }
+
+        // Where a doubled offset puts the window: past the foot of the column.
+        let lost = CGRect(x: 0, y: column.height + 700, width: 350, height: 600)
+        _ = render(column, window: lost)
+
+        XCTAssertEqual(reports.count, 1)
+        let report = try XCTUnwrap(reports.first)
+        XCTAssertTrue(report.contains("win="), report)
+        XCTAssertTrue(
+            report.contains("frags="),
+            "the window alone does not say it should have drawn something: \(report)"
+        )
+        XCTAssertTrue(report.contains("lastY="), "nor where the text actually ends: \(report)")
+    }
+
+    /// Once per column, whatever happens afterwards. Drawing runs at frame rate, and a
+    /// fault that survives one frame survives thousands — the first line says everything
+    /// the ten-thousandth would, and the other 9,999 would fill the trace instead.
+    func testAColumnSaysItOnceNoMatterHowManyFramesItIsDrawnWrongFor() {
+        let column = column(paragraphs())
+        var reports = 0
+        column.onNothingDrawn = { _ in reports += 1 }
+
+        let lost = CGRect(x: 0, y: column.height + 700, width: 350, height: 600)
+        for _ in 0..<200 { _ = render(column, window: lost) }
+
+        XCTAssertEqual(reports, 1)
+    }
+
+    /// And a healthy column says nothing at all, which is what makes the line above worth
+    /// reading: a trace with a `draw` event in it has already told you there is a fault.
+    func testDrawingAWindowWithTextInItReportsNothing() {
+        let column = column(paragraphs())
+        var reports: [String] = []
+        column.onNothingDrawn = { reports.append($0) }
+
+        var top: CGFloat = 0
+        while top < column.height {
+            _ = render(column, window: CGRect(x: 0, y: top, width: 350, height: 600))
+            top += 200
+        }
+
+        XCTAssertTrue(reports.isEmpty, "every window in this column has text in it: \(reports)")
+    }
+
     // MARK: - Degenerate input
 
     /// A column is built before the reader's window has been measured, and a zero width

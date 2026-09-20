@@ -78,6 +78,30 @@ final class WebFetcher: NSObject {
         }
     }
 
+    /// A failure named in one short word, for the diagnostics trace.
+    ///
+    /// Deliberately not `errorDescription`: half of these carry a URL or a message from
+    /// the site, and the trace leaves the phone through a share sheet. What survives here
+    /// is the *kind* of failure, which is the whole of what reading a log needs — "this
+    /// reader's chapters time out" and "this reader is being asked to sign in" are
+    /// different reports and nothing else distinguishes them.
+    ///
+    /// The fallback is a framework domain and code, never a message: `NSURLErrorDomain`
+    /// and a number say enough and cannot contain anybody's address.
+    nonisolated static func traceName(of error: any Error) -> String {
+        switch error {
+        case FetchError.challengePresented: return "challenge"
+        case FetchError.signInRequired: return "signIn"
+        case FetchError.navigationFailed: return "navigation"
+        case FetchError.timedOut: return "timeout"
+        case FetchError.extractionFailed: return "extraction"
+        case FetchError.documentIsolationUnavailable: return "isolation"
+        default:
+            let wrapped = error as NSError
+            return "\(wrapped.domain)/\(wrapped.code)"
+        }
+    }
+
     /// Hosted off-screen by the app shell, and re-parented into a sheet when a
     /// challenge needs the user. A web view with no window never finishes
     /// layout-dependent work, so it must be in the hierarchy either way.

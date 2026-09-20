@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import QuartzCore
 
 /// Which chapters of a comic are loaded, where the reader is in them, and when that is
 /// written down.
@@ -192,7 +193,10 @@ final class ComicReaderModel {
     /// sheet can show; everything else becomes the reader's own inline failure, which
     /// has a retry and a way out on it.
     private func fetch(_ chapter: Chapter, generation mine: Int) async -> LoadedChapter? {
+        let began = CACurrentMediaTime()
+        env.trace.note("fetch idx=\(chapter.index) kind=comic")
         guard let page = URL(string: chapter.url) else {
+            env.trace.note("fetchFail idx=\(chapter.index) err=badURL after=0.0")
             error = String(localized: "reader.error.badURL")
             return nil
         }
@@ -206,15 +210,30 @@ final class ComicReaderModel {
         let stored = await storedPages(of: chapter)
         guard mine == generation else { return nil }
         if !stored.isEmpty {
-            return await opening(chapter, from: stored, page: page, generation: mine)
+            let opened = await opening(chapter, from: stored, page: page, generation: mine)
+            env.trace.note(
+                String(
+                    format: "fetchOK idx=%d src=disk pages=%d after=%.1f",
+                    chapter.index, opened?.imageURLs.count ?? -1,
+                    CACurrentMediaTime() - began
+                )
+            )
+            return opened
         }
         guard let rule = env.sites.rule(id: book.siteId) else {
+            env.trace.note("fetchFail idx=\(chapter.index) err=noRule after=0.0")
             error = String(localized: "book.missingRule")
             return nil
         }
         do {
             let urls = try await env.bookService.chapterImageURLs(rule: rule, chapter: chapter)
             guard mine == generation else { return nil }
+            env.trace.note(
+                String(
+                    format: "fetchOK idx=%d src=net pages=%d after=%.1f",
+                    chapter.index, urls.count, CACurrentMediaTime() - began
+                )
+            )
             // Every page read online is kept, and looked for before it is asked for
             // again. That is what makes scrolling back through a chapter — or opening it
             // again tomorrow — a disk read rather than fifty more requests, and what lets
@@ -235,6 +254,13 @@ final class ComicReaderModel {
             )
         } catch {
             guard mine == generation else { return nil }
+            env.trace.note(
+                String(
+                    format: "fetchFail idx=%d err=%@ after=%.1f",
+                    chapter.index, WebFetcher.traceName(of: error),
+                    CACurrentMediaTime() - began
+                )
+            )
             report(error)
             return nil
         }
