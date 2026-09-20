@@ -55,6 +55,10 @@ final class AppEnvironment {
     /// one thing this app does that a reader expects to go on while the phone is in
     /// their pocket — see `SpeechReader`.
     let speech = SpeechReader()
+    /// The diagnostics trace: off for everyone who was not asked to turn it on, and the
+    /// only way a device nobody here can touch gets to answer a question about itself.
+    /// See `TraceLog`.
+    let trace = TraceLog.makeShared()
     /// Owned but not exposed: nothing on screen asks about a queue read back from
     /// disk, it simply appears as the paused download it was when the app died.
     private let queueRestorer: DownloadQueueRestorer

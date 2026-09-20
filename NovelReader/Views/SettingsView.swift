@@ -94,6 +94,12 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("settings.version", value: Self.version)
+                    // Beside the version rather than among the five reading topics.
+                    // Nobody goes looking for a diagnostic; they are pointed at one, and
+                    // when they are, what they have been asked for is this build — which
+                    // is the row directly above it.
+                    NavigationLink("trace.title") { DiagnosticsView() }
+                        .accessibilityIdentifier("settings.diagnostics")
                 }
             }
             .navigationTitle("tab.settings")

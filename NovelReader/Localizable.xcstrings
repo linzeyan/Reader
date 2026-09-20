@@ -10522,6 +10522,246 @@
           }
         }
       }
+    },
+    "trace.export" : {
+      "comment" : "Hands the trace to the share sheet.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Log"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯出日誌"
+          }
+        }
+      }
+    },
+    "trace.privacy.footer" : {
+      "comment" : "What a trace may not contain, since the file leaves the phone.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The log holds numbers only: times, counts, sizes, chapter numbers. No titles, authors, addresses, searches, or a single line of what you are reading."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日志里只有数字：时间、次数、大小、章节编号。没有书名、作者、网址、搜索内容，也没有任何一行书的正文。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日誌裡只有數字：時間、次數、大小、章節編號。沒有書名、作者、網址、搜尋內容，也沒有任何一行書的內文。"
+          }
+        }
+      }
+    },
+    "trace.record" : {
+      "comment" : "Toggle that starts and stops the trace.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record Log"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记录日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記錄日誌"
+          }
+        }
+      }
+    },
+    "trace.record.footer" : {
+      "comment" : "What the trace records, and that stopping deletes it.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn this on only when you have been asked to. The app writes performance numbers to a file — memory while reading, the pace of reading aloud, whether the screen sleeps when you told it to. Turning it off deletes the file."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在我们请你打开的时候打开。App 会把性能数字写成一个文件——阅读时的内存、朗读的节奏、屏幕有没有按设置休眠。关闭记录时文件会被删除。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在我們請你打開的時候打開。App 會把效能數字寫成一個檔案——閱讀時的記憶體、朗讀的節奏、螢幕有沒有照設定休眠。關閉記錄時檔案會被刪除。"
+          }
+        }
+      }
+    },
+    "trace.size" : {
+      "comment" : "How much has been recorded so far.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Log Size"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日志大小"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日誌大小"
+          }
+        }
+      }
+    },
+    "trace.stop.discard" : {
+      "comment" : "Stop question: stop and lose it.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete and Stop"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除并关闭"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除並關閉"
+          }
+        }
+      }
+    },
+    "trace.stop.export" : {
+      "comment" : "Stop question: export, then stop.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export First"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先导出"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先匯出"
+          }
+        }
+      }
+    },
+    "trace.stop.message" : {
+      "comment" : "Why stopping is worth a question: the session cannot be recorded again.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What has been recorded will be deleted, and it cannot be recorded again — that stretch of reading only happened once. Export it first?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已经记录的内容会被删除，而且无法重来——那一段阅读不会再发生第二次。要先导出吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已經記錄的內容會被刪除，而且無法重來——那一段閱讀不會再發生第二次。要先匯出嗎？"
+          }
+        }
+      }
+    },
+    "trace.stop.title" : {
+      "comment" : "Asked before stopping, because stopping deletes what was recorded.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopping Deletes the Log"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭记录会删除日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉記錄會刪除日誌"
+          }
+        }
+      }
+    },
+    "trace.title" : {
+      "comment" : "Diagnostics screen, linked from the bottom of Settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostic Log"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "诊断日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診斷日誌"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
