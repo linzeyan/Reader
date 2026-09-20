@@ -194,6 +194,11 @@ extension ReaderTextScrollView: UIScrollViewDelegate {
     // `DragGesture` watching every touch to find it out.
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         coordinator?.handleTouch(down: true)
+        // A finger taking the page away from a running turn cancels that animation
+        // outright, and a cancelled one never reports itself as finished. Left unsaid,
+        // the turn would be held to be in the air for the rest of the session and
+        // nothing would ever trim the window again.
+        coordinator?.turnLanded()
     }
 
     /// Still "touching" while the flick coasts: a deceleration carries an absolute
@@ -205,6 +210,14 @@ extension ReaderTextScrollView: UIScrollViewDelegate {
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         coordinator?.handleTouch(down: false)
+    }
+
+    /// The one moment this view could say when its own animated scroll finished, and
+    /// until 2026-09-20 it did not implement it at all — so a tapped page turn was an
+    /// absolute offset put into the air that nothing ever reported the landing of. See
+    /// `ReaderScrollCoordinator.turnLanded`.
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        coordinator?.turnLanded()
     }
 }
 

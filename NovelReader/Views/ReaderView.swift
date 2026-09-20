@@ -512,6 +512,7 @@ struct ReaderView: View {
                     // only thing that can tell the two apart: a drag has begun.
                     if down, markChoice != nil { markChoice = nil }
                 },
+                onTurning: { model.turning($0) },
                 onTap: { handleTap($0, model: model) },
                 onMark: { chapterIndex, paragraph in
                     guard let chapter = model.loaded.first(where: {
@@ -1657,6 +1658,11 @@ final class ReaderModel {
     private var wantsPreviousBehindLanding = false
     /// Whether a finger is on the glass right now. Set by the reader's drag recogniser.
     private var isTouching = false
+    /// Whether a page turn the reader tapped for is still animating to where it is going.
+    ///
+    /// The second way an absolute destination can be in flight, and until 2026-09-20 the
+    /// unwatched one: a tap turn animates, and no finger is on the glass while it does.
+    private var isTurning = false
     /// When the trace last recorded a position — see `tracePlace`.
     private var lastTracedPlaceAt: Double = 0
 
@@ -1674,15 +1680,21 @@ final class ReaderModel {
     /// the common case is a release build with the trace off, where this whole function
     /// is one boolean read.
     ///
-    /// `loaded` and `touch` are added here rather than at the four call sites because
-    /// every one of them wants both: how big the window got, and whether a finger was on
-    /// the glass while it changed. A `touch=1` beside an `insertAbove` is PITFALLS
-    /// 2026-08-22 come back — the correction cannot win against a running gesture.
+    /// `loaded`, `touch` and `turn` are added here rather than at the four call sites
+    /// because every one of them wants all three: how big the window got, and whether
+    /// anything was carrying an absolute destination while it changed. A `touch=1` beside
+    /// an `insertAbove` is PITFALLS 2026-08-22 come back — the correction cannot win
+    /// against a running gesture. A `turn=1` beside a `drop` is PITFALLS 2026-09-20, the
+    /// same failure with no finger involved; both are now held off rather than reported,
+    /// so either one appearing again means the gate that holds them off has a hole.
     private func probe(_ what: @autoclosure () -> String) {
         #if DEBUG
         if ReaderProbe.isArmed { ReaderProbe.mutated(what(), loaded: loaded.count) }
         #endif
-        env.trace.note("win \(what()) loaded=\(loaded.count) touch=\(isTouching ? 1 : 0)")
+        env.trace.note(
+            "win \(what()) loaded=\(loaded.count) "
+                + "touch=\(isTouching ? 1 : 0) turn=\(isTurning ? 1 : 0)"
+        )
     }
 
     /// Where the reader is, at most once every ten seconds.
@@ -1949,11 +1961,12 @@ final class ReaderModel {
     /// for the finger to lift. The insert itself is exact now: the renderer moves the
     /// content and the scroll offset together, so nothing has to be corrected
     /// afterwards. What a running gesture would still undo is the *offset* — a pan and
-    /// a deceleration both carry an absolute destination computed before the insert —
-    /// which is why this waits for the reader's gesture to finish playing out rather
-    /// than for a quiet screen.
+    /// a deceleration both carry an absolute destination computed before the insert, and
+    /// so does a tapped turn, with no finger on the glass at all — which is why this
+    /// waits for whatever is moving the page to finish playing out rather than for a
+    /// quiet screen.
     func showPreviousChapter() {
-        guard !isTouching, let pending = pendingPrevious else { return }
+        guard !isTouching, !isTurning, let pending = pendingPrevious else { return }
         // The world can have moved on while the fetch waited — a jump empties `loaded`,
         // and a chapter fetched for a place the reader has left belongs nowhere.
         guard let first = loaded.first, first.chapter.index == pending.chapter.index + 1
@@ -1979,6 +1992,23 @@ final class ReaderModel {
         guard isTouching != down else { return }
         isTouching = down
         if !down { showPreviousChapter() }
+    }
+
+    /// Whether a tapped page turn is still travelling to where it was aimed.
+    ///
+    /// The same question `touch(down:)` answers, asked about the other way a destination
+    /// gets into the air. A turn hands `setContentOffset` an absolute number computed
+    /// against the stack as it stands, and then takes a quarter of a second to get there;
+    /// anything that restacks the content in between moves the ground under a number that
+    /// can no longer be re-aimed. Kept apart from `isTouching` rather than folded into it
+    /// so the trace can still say which of the two a window change happened under.
+    func turning(_ flag: Bool) {
+        guard isTurning != flag else { return }
+        isTurning = flag
+        if !flag {
+            showPreviousChapter()
+            trimLoadedWindow()
+        }
     }
 
     private func append(_ chapter: Chapter) async {
@@ -2491,8 +2521,16 @@ final class ReaderModel {
     /// destination computed before the content above the reader got shorter, which is the
     /// same reason `showPreviousChapter` waits for the same moment — and a trim is never
     /// urgent enough to argue with a gesture.
+    ///
+    /// Nor while a tapped turn is still travelling, which the 2026-09-20 device trace
+    /// showed was *every* trim rather than an unlucky few: the turn is what asks for the
+    /// next chapter, the chapter arriving is what trims, so the trim lands inside the
+    /// turn's own animation by construction — seven times out of seven, 0.1 to 0.3s after
+    /// a `turn` line, all of them `touch=0`. Taking a chapter out from above the reader
+    /// moves ten thousand points of content under an absolute offset that is already in
+    /// the air and cannot be re-aimed.
     private func trimLoadedWindow() {
-        guard !isTouching else { return }
+        guard !isTouching, !isTurning else { return }
         dropDistantChapters(keeping: loadedReach)
     }
 

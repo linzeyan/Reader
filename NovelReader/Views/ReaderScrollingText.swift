@@ -104,6 +104,12 @@ struct ReaderScrollingText: UIViewRepresentable {
     /// reader — see `ReaderModel.showPreviousChapter` — and, going down, the one signal
     /// that tells a deliberate press apart from a thumb that rested before it dragged.
     let onTouch: (Bool) -> Void
+    /// Whether a tapped page turn is still animating to where it was aimed, which holds
+    /// back the same two things a finger does — see `ReaderModel.turning(_:)`. Separate
+    /// from `onTouch` because the two overlap freely: a reader can put a finger down
+    /// mid-turn, and a single flag toggled by both would be cleared by whichever ended
+    /// first while the other was still in the air.
+    let onTurning: (Bool) -> Void
     /// - Returns: whether the tap should go on to turn a page.
     let onTap: (ReaderTap) -> Bool
     let onMark: (Int, Int) -> Void
@@ -774,7 +780,30 @@ final class ReaderScrollCoordinator {
                     (CACurrentMediaTime() - began) * 1000
                 )
         )
-        view.setReadingOffset(destination, animated: !autoScroll.isRunning)
+        // Said before the offset is set, not after: `setContentOffset` reports its first
+        // frame synchronously, and a chapter that arrives on the back of that frame would
+        // otherwise trim the window before anybody had been told a turn was in the air.
+        //
+        // Only when the page will actually travel. An animated scroll to where the reader
+        // already is — the foot of the book, where `destination` is clamped back onto the
+        // current offset — need never report that it finished, and a claim nothing
+        // releases would hold the window open for the rest of the session. The failure
+        // this fixes must not be swapped for a quieter one.
+        let animated = !autoScroll.isRunning
+        if animated, abs(landed - view.readingOffset) > Self.visibleTurn {
+            config.onTurning(true)
+        }
+        view.setReadingOffset(destination, animated: animated)
+    }
+
+    /// The turn has arrived, or something took the page away from it.
+    ///
+    /// Both endings are the same answer to the only question anyone asks: there is no
+    /// longer an offset in the air that was computed against a stack which may since have
+    /// changed. Idempotent, because the two ways a turn can end are not exclusive — a
+    /// finger landing mid-animation cancels it *and* reports itself.
+    func turnLanded() {
+        config?.onTurning(false)
     }
 
     /// A move shorter than this is one the reader cannot see, which is the same to them

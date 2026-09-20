@@ -120,6 +120,35 @@ final class ReaderLoadedWindowTests: XCTestCase {
         )
     }
 
+    /// Nor with a page turn the reader tapped for and that is still on its way.
+    ///
+    /// The device trace of 2026-09-20 caught this seven times out of seven: a turn is what
+    /// asks for the next chapter, the chapter arriving is what trims the window, and the
+    /// trim therefore always lands inside the turn's own quarter-second animation. The
+    /// turn carries an absolute offset computed against the taller stack, so the trim took
+    /// a chapter — ten thousand points — out from under a destination that could no longer
+    /// be re-aimed, and the reader got half a screen of the page they had just left.
+    func testATurnStillInTheAirHoldsTheTrimOff() async throws {
+        let model = ReaderModel(book: book, env: env)
+        await model.start(at: .chapterStart("c1"))
+        model.turning(true)
+        await readForward(model, chapters: chapterCount - 1)
+
+        XCTAssertEqual(
+            model.loaded.count, chapterCount,
+            "the ground may not move while a turn is still travelling across it"
+        )
+
+        // Deferred, not cancelled — asserted here rather than in a test of its own
+        // because on its own it passes with the bug still in: the trim it is meant to be
+        // waiting for has already happened by then.
+        model.turning(false)
+        XCTAssertLessThanOrEqual(
+            model.loaded.count, model.loadedReach * 2 + 1,
+            "and the turn landing is what releases the chapters it held on to"
+        )
+    }
+
     // MARK: - Helpers
 
     /// Reads on the way a reader does: the next chapter arrives, and the reader is in it.

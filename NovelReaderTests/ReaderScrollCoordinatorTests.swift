@@ -92,6 +92,7 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         onPlaceChange: @escaping (ReaderPlace) -> Void = { _ in },
         onNeedsNext: @escaping () -> Void = {},
         onRanOut: @escaping () -> Void = {},
+        onTurning: @escaping (Bool) -> Void = { _ in },
         autoScroll: CGFloat = 0,
         onAutoScrollEnded: @escaping () -> Void = {},
         speaking: SpokenSentence? = nil
@@ -104,7 +105,8 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             target: nil, footer: .none,
             onPlaceChange: onPlaceChange, onNeedsNext: onNeedsNext, onNeedsPrevious: {},
             onRanOut: onRanOut,
-            onTouch: { _ in }, onTap: { _ in false }, onMark: { _, _ in },
+            onTouch: { _ in }, onTurning: onTurning,
+            onTap: { _ in false }, onMark: { _, _ in },
             onTargetReached: {},
             autoScroll: autoScroll, onAutoScrollEnded: onAutoScrollEnded,
             speaking: speaking,
@@ -120,10 +122,13 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
     private func show(
         _ chapters: [ReaderModel.LoadedChapter],
         onNeedsNext: @escaping () -> Void = {},
-        onRanOut: @escaping () -> Void = {}
+        onRanOut: @escaping () -> Void = {},
+        onTurning: @escaping (Bool) -> Void = { _ in }
     ) async throws {
         coordinator.update(
-            with: text(chapters, onNeedsNext: onNeedsNext, onRanOut: onRanOut)
+            with: text(
+                chapters, onNeedsNext: onNeedsNext, onRanOut: onRanOut, onTurning: onTurning
+            )
         )
         let deadline = ContinuousClock.now.advanced(by: .seconds(10))
         while coordinator.placed.count < chapters.count {
@@ -582,6 +587,52 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
         for field in ["want=", "got=", "below=", "ms="] {
             XCTAssertTrue(turn.contains(field), "missing \(field) in: \(turn)")
         }
+    }
+
+    /// A turn that animates says so before it moves, and says so again when it lands.
+    ///
+    /// The window trim and the insert above the reader both wait on this, and the device
+    /// trace of 2026-09-20 is what it costs when nobody says it: every trim in a fifty
+    /// minute session landed inside a turn's own animation. Said *before* the offset is
+    /// set because the first scrolled frame is reported synchronously, and the chapter
+    /// that frame asks for can arrive before the call returns.
+    func testAnAnimatedTurnSaysItIsInTheAirBeforeItMoves() async throws {
+        // Where the reader stood when each half of the claim arrived. A boolean alone
+        // would pass with the claim made *after* the page had already moved, which is the
+        // ordering the whole fix is about: the first scrolled frame is reported
+        // synchronously, so a chapter can arrive — and trim — inside `setReadingOffset`.
+        var claimedAt: CGFloat?
+        var landedAt: CGFloat?
+        try await show([chapter(1, paragraphs: 40)], onTurning: { [weak self] inTheAir in
+            guard let self else { return }
+            if inTheAir { claimedAt = view.readingOffset } else { landedAt = view.readingOffset }
+        })
+        let before = view.readingOffset
+
+        coordinator.turnPage(.next)
+
+        XCTAssertGreaterThan(view.readingOffset, before, "the turn has to have travelled")
+        XCTAssertEqual(
+            claimedAt, before,
+            "the claim has to be made before the page moves, not after it arrives"
+        )
+        XCTAssertNotNil(landedAt, "and a turn that is never released holds the window open")
+    }
+
+    /// A turn made while the page is already moving on its own does not animate — see
+    /// `turnPage` — so there is no destination in the air and nothing to hold anything
+    /// off. Claiming one would stop the window ever being trimmed while auto-scrolling,
+    /// which is the session the trimming exists for.
+    func testATurnThatCannotAnimateClaimsNothing() async throws {
+        var said: [Bool] = []
+        try await show([chapter(1, paragraphs: 40)], onTurning: { said.append($0) })
+        coordinator.update(
+            with: text([chapter(1, paragraphs: 40)], onTurning: { said.append($0) },
+                       autoScroll: 40)
+        )
+
+        coordinator.turnPage(.next)
+        XCTAssertEqual(said, [], "an instant turn has nothing in flight to report")
     }
 
     private func lines(matching event: String) -> [String] {
