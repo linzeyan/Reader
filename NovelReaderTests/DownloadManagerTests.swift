@@ -6,7 +6,7 @@ import XCTest
 /// tolerate the queue changing underneath a fetch that is still in flight.
 @MainActor
 final class DownloadManagerTests: XCTestCase {
-    private func makeManager() throws -> DownloadManager {
+    private func makeManager(trace: TraceLog = .makeShared()) throws -> DownloadManager {
         let database = try AppDatabase.makeInMemory()
         let files = ChapterFileStore(root: URL.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         return DownloadManager(
@@ -20,8 +20,36 @@ final class DownloadManagerTests: XCTestCase {
             // `DownloadQueuePersistenceTests`.
             queueStore: DownloadQueueStore(
                 url: URL.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
-            )
+            ),
+            trace: trace
         )
+    }
+
+    /// A `TraceLog` of its own, recording, writing nowhere anything else reads.
+    private func makeTrace() -> TraceLog {
+        let root = URL.temporaryDirectory.appendingPathComponent(
+            "DownloadManagerTests-\(UUID().uuidString)"
+        )
+        let trace = TraceLog(
+            directory: root, defaults: UserDefaults(suiteName: root.lastPathComponent)!
+        )
+        trace.isOn = true
+        return trace
+    }
+
+    /// Polls, because `note` hands the line to a writer queue rather than blocking the
+    /// caller — the whole point of the instrument being safe to put in a download loop.
+    private func waitForTrace(
+        _ event: String, in trace: TraceLog, within seconds: Double = 5
+    ) -> String? {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            let lines = String(data: trace.contents(), encoding: .utf8)?
+                .split(separator: "\n").map(String.init) ?? []
+            if let line = lines.first(where: { $0.contains(event) }) { return line }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        return nil
     }
 
     private func makeRule() -> SiteRule {
@@ -228,5 +256,46 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertFalse(manager.completeIfStillQueued(makeChapter("1")))
         XCTAssertEqual(manager.progress?.completed, 0, "A rejected chapter must not count as progress")
         manager.cancel()
+    }
+
+    /// The queue writes down what it did, where somebody can read it afterwards.
+    ///
+    /// Downloading is the one thing this app does that nobody is watching, and every
+    /// other test here inspects state that exists only while the process does. The
+    /// question this instrument was added for — "I asked for a download last night and
+    /// woke up to nothing" — can only be answered by a file, and before these lines
+    /// existed a window that was never granted and a window that ran and achieved
+    /// nothing left the same empty record.
+    ///
+    /// Both counts are asserted rather than the lines merely being present: `n` and `of`
+    /// are what separate "the tap queued nothing because it was all on disk already"
+    /// from "the tap queued work that then stopped somewhere", which is the distinction
+    /// the whole line exists to draw.
+    func testAQueueWritesItsControlPointsToTheTrace() throws {
+        let trace = makeTrace()
+        let manager = try makeManager(trace: trace)
+
+        // One already on disk, so the pair of numbers cannot both be the same value and
+        // a line that reported either one twice would still pass.
+        manager.start(
+            book: makeBook(), rule: makeRule(),
+            chapters: [makeChapter("1"), makeChapter("2"), downloadedChapter("3")]
+        )
+        XCTAssertEqual(
+            waitForTrace("dl start", in: trace)?
+                .contains("dl start n=2 of=3"), true,
+            "the queue has to record how much was asked for against how much was queued"
+        )
+
+        // Read rather than assumed: waiting for the line above spins the run loop, which
+        // is the one thing that lets the run task make progress. Pinning a literal here
+        // would be pinning how far it happened to get.
+        let left = manager.remainingCount
+        XCTAssertGreaterThan(left, 0, "the queue has to still owe something for this to mean anything")
+        manager.cancel()
+        XCTAssertEqual(
+            waitForTrace("dl cancel", in: trace)?.contains("dl cancel left=\(left)"), true,
+            "a queue abandoned with work still in it is exactly what has to be readable later"
+        )
     }
 }

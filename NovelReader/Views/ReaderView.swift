@@ -397,10 +397,10 @@ struct ReaderView: View {
 
     /// The listening control's one action.
     ///
-    /// Three states behind two glyphs: not reading this book, reading it, and stopped
-    /// mid-sentence. Resuming is not starting — it carries on inside the sentence the
-    /// reader stopped, which is why pausing does not simply throw the voice away and
-    /// start again from wherever the page happens to be.
+    /// Three states behind two glyphs: not reading this book, reading it, and paused.
+    /// Resuming is not starting — it carries on from the sentence the reader stopped in,
+    /// which is why pausing does not simply throw the voice away and start again from
+    /// wherever the page happens to be.
     private func toggleSpeech(_ model: ReaderModel) {
         switch env.speech.state {
         case .speaking: env.speech.pause()
@@ -423,6 +423,7 @@ struct ReaderView: View {
             anchor: model.currentAnchor,
             script: script,
             pace: settings.speechPace,
+            voices: settings.speechVoices,
             supply: { [weak model] index in
                 guard let model else { return nil }
                 if let loaded = model.loaded.first(where: { $0.chapter.index == index }) {
@@ -480,6 +481,9 @@ struct ReaderView: View {
                 chapters: model.loaded,
                 metrics: metrics,
                 palette: palette,
+                // `.inactive` is still on screen: a pulled-down notification centre leaves
+                // the page in view, and a change made then has to be seen.
+                isOnScreen: scenePhase != .background,
                 highlights: model.highlightsByChapter,
                 marked: markChoice.flatMap(\.beingMarked),
                 // The outline's jump goes first: it names a place inside the chapter on
@@ -531,8 +535,10 @@ struct ReaderView: View {
                 // Only what is being said *in this book*. The voice outlives this screen
                 // — see `SpeechReader` — so a reader who left one book listening and
                 // opened another would otherwise find a sentence of the first picked out
-                // somewhere in the second.
-                speaking: isListening ? env.speech.current : nil,
+                // somewhere in the second. And only while it is being said: the band is
+                // drawn in the selection's ink, so on a paused book it reads as text the
+                // reader selected and did not.
+                speaking: isListening && env.speech.isSpeaking ? env.speech.current : nil,
                 trace: env.trace
             )
             .overlay(alignment: .bottom) { markBar(model) }
@@ -647,7 +653,8 @@ struct ReaderView: View {
                 // Only what is being said *in this chapter*: the page draws one chapter at
                 // a time, and a voice that has read on into the next one moves this
                 // renderer by changing which chapter that is — see `ReaderModel.noteSpoken`.
-                speaking: isListening
+                // Not while paused, for the scrolling renderer's reason above.
+                speaking: isListening && env.speech.isSpeaking
                     ? env.speech.current.flatMap {
                         $0.chapterIndex == current.chapter.index ? $0 : nil
                     }

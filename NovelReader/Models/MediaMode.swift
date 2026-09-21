@@ -21,20 +21,11 @@ extension MediaMode: Identifiable {
         }
     }
 
-    /// Whether this medium is read through installed rule files.
-    ///
-    /// False for exactly one mode, and every screen that offers to add something has to
-    /// ask: a novel or a comic address is useless without a rule that reads that site,
-    /// while a feed address is complete on its own. Screens that gate their "add" button
-    /// on having a source would otherwise gate the feed shelf on rules it never uses.
-    var needsRules: Bool { self != .feed }
-
-    /// What a screen says when this medium has no sources installed, and where to get
-    /// one. On the shared type because two screens ask — the shelf and the search — and
-    /// one of them answering "尚未加入來源" while the other says "尚未加入漫畫來源"
-    /// would read as two different problems with two different fixes.
-    /// Never asked of `.feed`, which has no sources to be missing — `needsRules` is the
-    /// guard, and the empty feed shelf says "subscribe to something" instead.
+    /// What the search screen says when this medium has no sources installed, and where
+    /// to get one. The shelf no longer asks: pasting an address there works out a source
+    /// on the spot, while a search has nothing to send the query to until one exists.
+    /// Per medium because "尚未加入來源" on the comic shelf, with novel sources
+    /// installed, would read as a different problem with a different fix.
     var noSourcesTitleKey: LocalizedStringKey {
         switch self {
         case .novel: return "library.empty.title"

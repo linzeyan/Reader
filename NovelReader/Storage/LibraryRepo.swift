@@ -396,13 +396,23 @@ struct LibraryRepo {
     ///   holds the moment it first arrived — which is the only honest thing known about
     ///   when it appeared, and, unlike re-stamping it, does not march it up the list on
     ///   every refresh.
+    /// - Returns: the ids this merge *inserted*, as against the ones it updated.
+    ///
+    ///   Load-bearing for the caller that fetches an arriving article's text. That
+    ///   caller cannot recover the distinction from the rows afterwards: an article
+    ///   whose text the reader deleted looks exactly like one that never had any —
+    ///   both are a row with a null `downloadedAt` — so a refresh that went by the
+    ///   column fetched the deleted article back, every time, for ever. See
+    ///   `FeedService.store`.
+    @discardableResult
     func mergeCatalog(
         bookId: String,
         entries: [(siteChapterId: String, title: String, url: String, publishedAt: Date?)],
         now: Date = Date()
-    ) throws {
-        try writer.write { db in
+    ) throws -> Set<String> {
+        try writer.write { db -> Set<String> in
             let stored = try Book.fetchOne(db, key: bookId)
+            var inserted: Set<String> = []
 
             // Everything already here moves into the negative range *before* a single
             // article is written, and every new one is parked below that. This is
@@ -436,6 +446,7 @@ struct LibraryRepo {
                     try existing.update(db)
                 } else {
                     parking -= 1
+                    inserted.insert(entry.siteChapterId)
                     // Stamped on every insert, the first fetch included. A subscription's
                     // unread count is a matter of `readAt` alone — see `Chapter.isUnread`
                     // — so this column is not what decides it here, and the honest thing
@@ -468,6 +479,7 @@ struct LibraryRepo {
                 book.catalogUpdatedAt = now
                 try book.update(db)
             }
+            return inserted
         }
     }
 

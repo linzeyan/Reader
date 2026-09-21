@@ -120,6 +120,10 @@ struct SpeechSession {
     let anchor: TextAnchor
     let script: ChineseScript
     let pace: SpeechPace
+    /// Which voice says each language, keyed by `SpeechReader.voiceKey(for:)` — see
+    /// `ReaderSettings.speechVoices`. Empty for the system's own answer, which is what
+    /// every device starts on.
+    let voices: [String: String]
     let supply: SpeechSequence.Supply
     /// Called as each sentence begins.
     ///
@@ -214,6 +218,11 @@ final class SpeechReader {
     /// the main thread fifteen times a minute — measured, and the reason this exists; see
     /// `ReaderListeningProbeTests`. A book is read in two languages at the most.
     private var voices: [String: AVSpeechSynthesisVoice] = [:]
+    /// Which voice the reader picked for each language, keyed by `voiceKey(for:)` — see
+    /// `ReaderSettings.speechVoices`. An identifier rather than a voice, because it is
+    /// stored across launches and a voice is a download that can be deleted between two of
+    /// them; resolving it is `voice(for:)`'s job, and failing to is not an error.
+    private var chosen: [String: String] = [:]
     private var note: (@MainActor (SpokenSentence) -> Void)?
     /// The cover, decoded once for the lock screen.
     private var artwork: MPMediaItemArtwork?
@@ -221,6 +230,10 @@ final class SpeechReader {
     /// flag is set for may be undone by the system handing it back — a reader who pressed
     /// pause and then took a phone call must not find the book reading itself afterwards.
     private var pausedBySystem = false
+    /// Whether the reader paused from the page itself — see `pause()`. The synthesiser
+    /// holds nothing and the lock screen shows nothing, so resuming has to say the
+    /// sentence again rather than continue it.
+    private var putDown = false
 
     // What the trace counts between roll-ups — see `speechFields`.
     private var countedSince = Date()
@@ -293,6 +306,7 @@ final class SpeechReader {
         book = session.book
         script = session.script
         pace = session.pace
+        chosen = session.voices
         note = session.note
         let sequence = SpeechSequence(supply: session.supply)
         self.sequence = sequence
@@ -318,9 +332,36 @@ final class SpeechReader {
         }
     }
 
-    /// Stops at the end of the word being said, so a sentence resumes rather than
-    /// restarts. The reader pressed pause, not rewind.
+    /// The reader's own pause, pressed on the book in front of them.
+    ///
+    /// Puts the book down rather than holding it mid-word: the synthesiser is emptied, the
+    /// lock screen is let go of and the audio handed back. A reader who stopped listening
+    /// with the page open has not asked to be offered the book again from outside it, and
+    /// a player left on the lock screen — reported from a device — is this app claiming a
+    /// book is playing that they put down. The price is that resuming says the interrupted
+    /// sentence again from its head; it also means a voice or pace chosen in between is
+    /// the one that resumes.
+    ///
+    /// A pause from anywhere else — the lock screen, headphones, a phone call — is
+    /// `holdMidWord`, because there the lock screen is where the reader resumes from.
     func pause() {
+        guard state == .speaking else { return }
+        pauses += 1
+        pausedBySystem = false
+        state = .paused
+        putDown = true
+        // Immediate rather than at the end of the word: the sentence is said again from
+        // its head anyway, and a word still sounding is audio the session cannot be
+        // handed back over.
+        synthesiser.stopSpeaking(at: .immediate)
+        releaseTheAudio(by: "pause")
+    }
+
+    /// Stops at the end of the word being said, so a sentence resumes rather than
+    /// restarts, and leaves the book on the lock screen with a play button — which is
+    /// where a pause from the lock screen, a pair of headphones or a phone call is
+    /// resumed from.
+    private func holdMidWord() {
         guard state == .speaking else { return }
         pauses += 1
         pausedBySystem = false
@@ -337,8 +378,15 @@ final class SpeechReader {
         // handed the session back with it, and continuing into a session this app no
         // longer holds is a voice nobody can hear.
         beginSession()
-        synthesiser.continueSpeaking()
-        publishNowPlaying()
+        if putDown {
+            putDown = false
+            takeRemoteControl()
+            publishNowPlaying()
+            resayFromCurrent()
+        } else {
+            synthesiser.continueSpeaking()
+            publishNowPlaying()
+        }
         fill()
     }
 
@@ -354,22 +402,40 @@ final class SpeechReader {
         // Dropped with everything else about the book: the voice a language resolves to is
         // the reader's own setting, and leaving is the moment they could have changed it.
         voices = [:]
+        chosen = [:]
         sleepsAt = nil
         pausedBySystem = false
+        let wasPutDown = putDown
+        putDown = false
         synthesiser.stopSpeaking(at: .immediate)
-        guard wasReading else { return }
-        publishNowPlaying()
+        // A book already put down has handed everything back.
+        guard wasReading, !wasPutDown else { return }
+        releaseTheAudio(by: "stop")
+    }
+
+    /// Takes the book off the lock screen and hands the audio back.
+    ///
+    /// Handed back rather than held: an app that keeps the session active is one that
+    /// stays paused over the music somebody put on after they stopped listening.
+    ///
+    /// Only `stop` and the reader's own `pause` get here. A trace showing `aud idle` after
+    /// a pause from the lock screen would mean that changed; a trace never showing one at
+    /// all means this app is sitting on the audio over somebody's music. Both are worth
+    /// seeing, and neither is visible from inside the app — and a failed hand-back is the
+    /// one that leaves a player on the lock screen, so it is written down too.
+    private func releaseTheAudio(by reason: String) {
+        let centre = MPNowPlayingInfoCenter.default()
+        centre.nowPlayingInfo = nil
+        centre.playbackState = .stopped
         releaseRemoteControl()
-        // Handed back rather than held: an app that keeps the session active is one that
-        // stays paused over the music somebody put on after they stopped listening.
-        try? AVAudioSession.sharedInstance().setActive(
-            false, options: .notifyOthersOnDeactivation
-        )
-        // Only `stop` hands the session back. A trace showing `aud idle` after a *pause*
-        // would mean that changed; a trace never showing one at all means this app is
-        // sitting on the audio over somebody's music. Both are worth seeing, and neither
-        // is visible from inside the app.
-        trace.note("aud idle")
+        do {
+            try AVAudioSession.sharedInstance().setActive(
+                false, options: .notifyOthersOnDeactivation
+            )
+            trace.note("aud idle by=\(reason)")
+        } catch {
+            trace.note("aud idle failed by=\(reason) err=\((error as NSError).code)")
+        }
     }
 
     /// A new pace, applied to what is in the voice's mouth as well as to what follows it.
@@ -383,6 +449,31 @@ final class SpeechReader {
     func setPace(_ pace: SpeechPace) {
         guard pace != self.pace else { return }
         self.pace = pace
+        resayFromCurrent()
+    }
+
+    /// New voices, applied to the paragraph being said as well as to the ones after it.
+    ///
+    /// `setPace`'s reason and `setPace`'s method: an utterance's voice, like its rate, is
+    /// fixed when it is handed to the synthesiser, so the only way to say the rest of it in
+    /// another voice is to hand it over again. Which also makes choosing a voice its own
+    /// audition for a reader who is listening as they choose — the book itself changes
+    /// voice under them, in the sentence they are on.
+    func setVoices(_ voices: [String: String]) {
+        guard voices != chosen else { return }
+        chosen = voices
+        // The resolved cache is keyed by language and not by what it was resolved from, so
+        // leaving it would go on answering with the voice that was just replaced.
+        self.voices = [:]
+        resayFromCurrent()
+    }
+
+    /// Hands what is queued back to the synthesiser, starting at the sentence being said.
+    ///
+    /// The only way to change anything about how the words come out, and it starts from
+    /// `current` rather than from the head of the paragraph that sentence is inside: a
+    /// touch of a control must not take the reader back several sentences.
+    private func resayFromCurrent() {
         // Nothing to re-say while paused, and re-saying it would start the voice up
         // under a reader who has stopped it.
         guard state == .speaking else { return }
@@ -441,6 +532,10 @@ final class SpeechReader {
         // is the one thing that makes a synthesised voice tiring to follow for an hour.
         utterance.postUtteranceDelay = 0.15
         queue.append(Chunk(utterance: utterance, sentences: run, starts: starts))
+        // A paragraph whose chapter finished loading after the reader put the book down:
+        // kept for `resume` to say, and not said now. The synthesiser is empty rather than
+        // paused, so handing it this would start the voice under a reader who stopped it.
+        guard !putDown else { return }
         synthesiser.speak(utterance)
     }
 
@@ -464,7 +559,16 @@ final class SpeechReader {
         // or two of them per book is the cache working. It is the *rate* that is the
         // finding, so it belongs in the roll-up.
         voiceMisses += 1
-        let found = AVSpeechSynthesisVoice(language: language)
+        let found = Self.voice(for: language, chosen: chosen)
+        // A line rather than a count, because unlike the miss above this is not a rate —
+        // it is one fact about one device, and it is the only trace of the failure this
+        // feature can actually have. A voice is a download and downloads get deleted, so
+        // a reader can come back to a book that is read in a voice they did not choose,
+        // with nothing on screen connecting it to the storage they cleared last week.
+        // `none` is the worse half: no voice at all for this language means silence.
+        if let wanted = chosen[Self.voiceKey(for: language)], found?.identifier != wanted {
+            trace.note("voice gone lang=\(language) using=\(found == nil ? "none" : "other")")
+        }
         voices[language] = found
         return found
     }
@@ -503,7 +607,9 @@ final class SpeechReader {
     /// What is playing, for the lock screen, the control centre and a car's dashboard.
     private func publishNowPlaying() {
         let centre = MPNowPlayingInfoCenter.default()
-        guard let book else {
+        // A book the reader put down is off the lock screen until they pick it up again,
+        // however late its cover arrives.
+        guard let book, !putDown else {
             centre.nowPlayingInfo = nil
             centre.playbackState = .stopped
             return
@@ -547,7 +653,7 @@ final class SpeechReader {
             return .success
         }
         centre.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.pause() }
+            Task { @MainActor in self?.holdMidWord() }
             return .success
         }
         // What a pair of headphones sends, and what a steering wheel sends. Handled
@@ -556,7 +662,7 @@ final class SpeechReader {
         centre.togglePlayPauseCommand.addTarget { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if self.state == .speaking { self.pause() } else { self.resume() }
+                if self.state == .speaking { self.holdMidWord() } else { self.resume() }
             }
             return .success
         }
@@ -621,7 +727,7 @@ final class SpeechReader {
         }
         interruptions += 1
         guard state == .speaking else { return }
-        pause()
+        holdMidWord()
         pausedBySystem = true
     }
 
@@ -633,7 +739,7 @@ final class SpeechReader {
     func unplugged() {
         trace.note("aud route reason=oldDeviceUnavailable speaking=\(state == .speaking ? 1 : 0)")
         guard state == .speaking else { return }
-        pause()
+        holdMidWord()
     }
 
     // MARK: - What the synthesiser says back
@@ -728,6 +834,65 @@ final class SpeechReader {
         ) {
             Task { @MainActor in finished(utterance) }
         }
+    }
+}
+
+extension SpeechReader {
+    /// Which voice says a language: the reader's own, for as long as the device still has
+    /// it, and the system's answer otherwise.
+    ///
+    /// A voice is a download, and one removed in iOS Settings resolves to nil — so without
+    /// the fallback a reader who tidied up their storage would press play on a book that
+    /// says nothing, with no way to connect the silence to what they deleted. The fallback
+    /// is what this app did before anybody could choose, so the worst case is the voice
+    /// they used to have.
+    ///
+    /// Nothing is written back when a choice fails to resolve: the setting stays on disk,
+    /// because the voice is usually a re-download away, and forgetting it would make
+    /// deleting a voice for the afternoon cost the reader the choice for good.
+    ///
+    /// Separate from the cache that calls it because it is the *decision* — the cache is
+    /// keyed by language and cannot tell a resolved choice from a resolved fallback, which
+    /// is exactly the difference worth asserting.
+    static func voice(for language: String, chosen: [String: String])
+        -> AVSpeechSynthesisVoice? {
+        chosen[voiceKey(for: language)].flatMap(AVSpeechSynthesisVoice.init(identifier:))
+            ?? AVSpeechSynthesisVoice(language: language)
+    }
+
+    /// What a chosen voice is filed under: the language, not the region — `zh` for every
+    /// Mandarin and Cantonese, `en` for every English.
+    ///
+    /// Not the region, for two reasons. Filed by region, a reader of Traditional text was
+    /// only ever offered `zh-TW` voices — on most phones one voice at two qualities — when
+    /// a Mainland voice reads the same characters. And the choice was filed under whichever
+    /// Mandarin the *global* script setting named, while a book with a script setting of
+    /// its own can be read in the other one, where the choice was looked up under a key it
+    /// had never been written to and quietly did nothing.
+    static func voiceKey(for language: String) -> String {
+        String(language.prefix { $0 != "-" && $0 != "_" })
+    }
+
+    /// Every language a book on this device can be read out in, in the order a reader
+    /// meets them.
+    ///
+    /// Two at the most, and it is the whole list a voice can usefully be chosen for — which
+    /// is why the picker does not offer the seventy languages iOS has voices for. A sentence
+    /// resolves to the reader's own Mandarin or, with no Han character in it, to the
+    /// device's language; see `language(of:)`, whose two answers these are. One per
+    /// `voiceKey`, since that is what a choice is filed under: a device whose own language
+    /// is Chinese has one Chinese list, not one per script.
+    ///
+    /// Here rather than in the picker because `spokenLanguage` is private to this file, and
+    /// a second copy of "which Mandarin" is a picker whose system row auditions a voice the
+    /// reader will never hear.
+    static func spokenLanguages(script: ChineseScript) -> [String] {
+        var languages: [String] = []
+        for language in [script.spokenLanguage, AVSpeechSynthesisVoice.currentLanguageCode()]
+        where !languages.contains(where: { voiceKey(for: $0) == voiceKey(for: language) }) {
+            languages.append(language)
+        }
+        return languages
     }
 }
 

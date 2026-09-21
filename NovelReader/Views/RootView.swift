@@ -123,6 +123,13 @@ struct RootView: View {
         // moment the app is on screen, and the iCloud merge it starts used to run
         // between the launch and the first frame.
         .task {
+            // First, and before anything that awaits: a reader who pressed "continue
+            // reading" on a cold app is asking to be in their book, and the feed refresh
+            // below is a network round trip. The history it reads was loaded in
+            // `AppEnvironment.init`, so there is nothing to wait for. See
+            // `ContinueReadingIntent`, which leaves the ask here when it arrives before
+            // any scene has built an object graph to honour it.
+            if ContinueReadingRequest.take() { env.continueReading(deferred: true) }
             env.cloud.startSyncing()
             // Subscriptions are checked when the app is opened and at no other time:
             // no timer, no background schedule. A feed reader that polls is a feed
@@ -133,6 +140,10 @@ struct RootView: View {
             // After the refresh, because what the publisher still lists is the line
             // retention will not delete past, and the refresh is what re-draws it.
             env.purgeExpiredArticles()
+            // Last, and on its own thread: this is the one piece of launch work nobody is
+            // waiting for, and it must not delay the two above it, which decide what the
+            // shelf shows.
+            env.indexDownloadedText()
         }
         // Only the two ends of the transition. `.inactive` also arrives for a
         // pulled-down notification centre, and stopping a download for that

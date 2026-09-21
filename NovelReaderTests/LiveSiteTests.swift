@@ -138,6 +138,56 @@ final class LiveSiteTests: XCTestCase {
         print("\n=== cancel-mid-download: survived, status=\(manager.status) ===\n")
     }
 
+    /// A book pasted on the shelf from a site with no source: the source is worked
+    /// out, installed, and the book is on the shelf under it — one paste, no trip to
+    /// settings. Through the whole environment, because what is being claimed is the
+    /// wiring: derivation reading the book is `testDerivesWorkingRulesFromScratch`'s
+    /// job, and this is about the paste ending in a source *and* a bookmark.
+    ///
+    /// hjwzw for the reason the cancel test gives. Its hand rule is only used to find
+    /// a book to paste; the environment under test has no rules at all.
+    func testPastingABookFromASiteWithNoSourceInstallsOne() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["NOVELREADER_LIVE"] == "1",
+            "Live site tests are opt-in: run `make test-live`."
+        )
+        guard let known = try loadSeededRules().first(where: { $0.id.contains("hjwzw") }) else {
+            throw XCTSkip("No hjwzw rule seeded")
+        }
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let env = AppEnvironment(
+            database: try AppDatabase.makeInMemory(),
+            files: ChapterFileStore(root: root.appendingPathComponent("files")),
+            cache: ChapterCache(files: ChapterFileStore(root: root.appendingPathComponent("cache"))),
+            coverFiles: CoverStore(root: root.appendingPathComponent("covers")),
+            sites: SiteStore(directory: root.appendingPathComponent("sites")),
+            queueStore: DownloadQueueStore(url: root.appendingPathComponent("queue.json"))
+        )
+        let host = HeadlessHost(webView: env.fetcher.webView)
+        defer { host.tearDown() }
+        let discovered = try await discoverBookId(rule: known, fetcher: env.fetcher)
+        let id = try XCTUnwrap(discovered)
+        let address = try XCTUnwrap(known.bookURL(bookId: id))
+
+        env.additions.start(AddBookLine.pasted(address.absoluteString), as: .book)
+        await env.additions.settle()
+
+        let line = try XCTUnwrap(env.additions.lines.first)
+        print("\n=== paste with no source: \(address) → \(line.status.note ?? "—") ===\n")
+        XCTAssertTrue(line.status.isAdded, line.status.note ?? "no note")
+        // Found by id rather than as the store's only rule: a Debug build's
+        // `SiteStore.load` re-seeds the development rules on every import, so the store
+        // holds those too once anything is installed. A derived rule's id is its host.
+        let siteHost = try XCTUnwrap(address.host())
+        let source = try XCTUnwrap(env.sites.rule(id: siteHost), "the derived source is installed")
+        XCTAssertEqual(
+            env.books.map(\.siteId), [source.id],
+            "the book is on the shelf under the source that was just made"
+        )
+        XCTAssertEqual(env.books.first?.siteBookId, source.bookId(from: address))
+    }
+
     /// Derives a rule for each known site *from nothing but a book URL*, and
     /// checks the result actually reads that book.
     ///

@@ -64,9 +64,23 @@ SHOT_PHONES ?= iPhone 17 Pro Max=iphone-6.9,iPhone 11 Pro Max=iphone-6.5,iPhone 
 SHOT_IPADS  ?= iPad Pro 13-inch (M5)=ipad-13
 SHOT_LANGS  ?= zh-Hant zh-Hans en
 SHOTS       ?= screenshots
+# The status bar every shot and preview is taken under. Left alone it shows the
+# hour the run happened to start and a simulator's empty signal dots — a detail
+# nobody reads until it is the top of the first screenshot on the listing.
+STATUS_BAR  ?= --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+	--cellularMode active --cellularBars 4 --operatorName '' \
+	--batteryState discharging --batteryLevel 100
+
+# The App Store preview is recorded on a simulator of its own: the walk changes a
+# book's type settings, which would otherwise follow the screenshot run around. The
+# 6.9" type because one 886x1920 video serves every iPhone slot, and the largest
+# phone scales down to it with the least loss.
+PREVIEW_SIM_NAME ?= Preview iPhone 17 Pro Max
+PREVIEW_SIM_TYPE ?= iPhone 17 Pro Max
+PREVIEWS         ?= previews
 
 .DEFAULT_GOAL := help
-.PHONY: help setup generate build test test-ui test-ui-live test-soak test-probe test-live test-live-feeds test-device run run-iphone run-ipad run-device open release archive ipa package clean screenshots shots-device
+.PHONY: help setup generate build test test-ui test-ui-live test-soak test-probe test-live test-live-feeds test-device run run-iphone run-ipad run-device open release archive ipa package clean screenshots shots-device previews
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -243,18 +257,23 @@ shots-device:
 	@rm -rf "$(DERIVED)/shots.xcresult" "$(OUT)"
 	@mkdir -p "$(OUT)"
 	@# Xcode only creates simulators for the devices it currently ships, while the
-	@# store still has slots for smaller screens. Create the missing one from the
-	@# device type of the same name — once; later runs find it already there.
-	@xcrun simctl list devices available | grep -qF "$(DEVICE) (" \
-		|| xcrun simctl create "$(DEVICE)" "$(DEVICE)" > /dev/null
-	@echo "→ $(DEVICE) [$(LANG_ID)]"
-	@TEST_RUNNER_NOVELREADER_SCREENSHOTS=1 \
+	@# store still has slots for smaller screens — and a name can exist on one
+	@# runtime and not the next. The script picks the newest runtime that runs the
+	@# device, creates the simulator there if it is missing, and hands back its
+	@# UDID, so the destination cannot resolve to a runtime it is not on.
+	@# Booted here rather than by xcodebuild, because the status bar can only be
+	@# overridden on a running simulator, and the override outlives app launches.
+	@udid=$$(python3 scripts/simulator_udid.py "$(DEVICE)") || exit 1; \
+	echo "→ $(DEVICE) [$(LANG_ID)] $$udid"; \
+	xcrun simctl bootstatus "$$udid" -b > /dev/null \
+		&& xcrun simctl status_bar "$$udid" override $(STATUS_BAR) || exit 1; \
+	TEST_RUNNER_NOVELREADER_SCREENSHOTS=1 \
 	TEST_RUNNER_NOVELREADER_SHOT_LANG=$(LANG_ID) \
 	xcodebuild test -project $(PROJECT) -scheme $(SCHEME) \
 		-configuration $(CONFIGURATION) \
 		-derivedDataPath $(DERIVED) \
 		-resultBundlePath "$(DERIVED)/shots.xcresult" \
-		-destination 'platform=iOS Simulator,name=$(DEVICE)' \
+		-destination "id=$$udid" \
 		-only-testing:NovelReaderUITests/ScreenshotTests \
 		> "$(DERIVED)/shots.log" 2>&1 \
 		|| { tail -40 "$(DERIVED)/shots.log"; exit 1; }
@@ -263,6 +282,21 @@ shots-device:
 	@xcrun xcresulttool export attachments \
 		--path "$(DERIVED)/shots.xcresult" --output-path "$(OUT)" >/dev/null
 	@python3 scripts/name_screenshots.py "$(OUT)"
+
+previews: generate ## Record the App Store preview per SHOT_LANGS, and the product page's copy in site/img
+	@# Built once for every language: each take is a `test-without-building`, so the
+	@# recording holds the walk and not a compile.
+	@xcodebuild build-for-testing -project $(PROJECT) -scheme $(SCHEME) \
+		-configuration $(CONFIGURATION) -derivedDataPath $(DERIVED) \
+		-destination 'generic/platform=iOS Simulator' \
+		> "$(DERIVED)/previews-build.log" 2>&1 \
+		|| { tail -40 "$(DERIVED)/previews-build.log"; exit 1; }
+	@for lang in $(SHOT_LANGS); do \
+		SIM_NAME='$(PREVIEW_SIM_NAME)' SIM_TYPE='$(PREVIEW_SIM_TYPE)' STATUS_BAR="$(STATUS_BAR)" \
+		PROJECT=$(PROJECT) SCHEME=$(SCHEME) CONFIGURATION=$(CONFIGURATION) DERIVED=$(DERIVED) \
+		python3 scripts/app_preview.py $$lang "$(PREVIEWS)/$$lang" --site "site/img/$$lang" || exit 1; \
+	done
+	@echo "previews → $(PREVIEWS)/ and site/img/*/preview.{mp4,webp}"
 
 open: generate ## Open the project in Xcode
 	open $(PROJECT)

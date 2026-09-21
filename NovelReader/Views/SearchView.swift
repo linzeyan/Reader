@@ -1,11 +1,18 @@
 import SwiftUI
 
-/// Requirement 4: search one source, or every source at once.
+/// Requirement 4: search one source, or every source at once — and, on the other half of
+/// the switch, the text of the books already on this device.
 ///
 /// The all-sites mode fills in site by site as results land, because the fetcher
 /// can only drive one page at a time and the slowest source must not hold up the
 /// first four. Sites that fail — a challenge, no search support — are shown as
 /// such rather than silently omitted, so the result list is never quietly wrong.
+///
+/// The second mode is `LibraryTextSearchView`, and it is here rather than on the shelf
+/// because this is the tab a reader comes to in order to look for something. The two
+/// modes share the search field: the word being looked for is often the same one, and
+/// making someone retype it to change which question they are asking would be a tax on
+/// the most common way this screen is used.
 struct SearchView: View {
     @Environment(AppEnvironment.self) private var env
 
@@ -16,9 +23,30 @@ struct SearchView: View {
     @State private var task: Task<Void, Never>?
     @State private var hasSearched = false
 
+    @State private var mode: Mode = .sites
+
     private enum Scope: Hashable {
         case all
         case site(String)
+    }
+
+    /// Which question the search field is asking.
+    ///
+    /// The two are not variations of one search: one goes to the network for books the
+    /// reader does not have, the other reads the device for a passage inside books they
+    /// do. They share this tab because a reader looking for anything comes here, and they
+    /// share the field because the word being looked for is often the same one.
+    private enum Mode: String, CaseIterable, Identifiable {
+        case sites, library
+
+        var id: String { rawValue }
+
+        var nameKey: LocalizedStringKey {
+            switch self {
+            case .sites: return "search.mode.sites"
+            case .library: return "search.mode.library"
+            }
+        }
     }
 
     /// This mode's searchable sources. Searching novel sites for a comic title
@@ -30,6 +58,52 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack {
+            // Above the list rather than inside it, the way `ReadingMarksView` places its
+            // switch and for the same reason: the empty states below cover the whole list,
+            // and a control buried under one would strand a reader with no sources on a
+            // screen that cannot reach the books they already have.
+            VStack(spacing: 0) {
+                Picker("search.mode", selection: $mode) {
+                    ForEach(Mode.allCases) { mode in
+                        Text(mode.nameKey).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("search.mode")
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+
+                content
+            }
+            .navigationTitle("tab.search")
+            // The same switch the shelf has, setting the same app-wide value: someone
+            // who came here to look for a comic should not have to go back to the
+            // shelf to say so.
+            .toolbar { ToolbarItem(placement: .topBarLeading) { MediaModePicker() } }
+            .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
+            .searchable(text: $query, prompt: Text(prompt))
+            .onSubmit(of: .search) { start() }
+            // Results name the sites they came from, and those sites are all of the
+            // other medium now. Cleared rather than re-run: the query was typed for
+            // the shelf the reader has just left, and re-running it would spend every
+            // comic source on a novel title nobody asked them about.
+            .onChange(of: env.mediaMode) { _, _ in clear() }
+            .onDisappear { task?.cancel() }
+        }
+    }
+
+    /// What the search field is asking for, which differs by mode — site search takes a
+    /// book's name, library search takes words out of a sentence.
+    private var prompt: LocalizedStringKey {
+        mode == .library ? "library.text.search.prompt" : "search.prompt"
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch mode {
+        case .library:
+            LibraryTextSearchView(query: query)
+        case .sites:
             Group {
                 if env.sites.rules(of: env.mediaMode).isEmpty {
                     ContentUnavailableView(
@@ -47,20 +121,6 @@ struct SearchView: View {
                     resultList
                 }
             }
-            .navigationTitle("tab.search")
-            // The same switch the shelf has, setting the same app-wide value: someone
-            // who came here to look for a comic should not have to go back to the
-            // shelf to say so.
-            .toolbar { ToolbarItem(placement: .topBarLeading) { MediaModePicker() } }
-            .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
-            .searchable(text: $query, prompt: Text("search.prompt"))
-            .onSubmit(of: .search) { start() }
-            // Results name the sites they came from, and those sites are all of the
-            // other medium now. Cleared rather than re-run: the query was typed for
-            // the shelf the reader has just left, and re-running it would spend every
-            // comic source on a novel title nobody asked them about.
-            .onChange(of: env.mediaMode) { _, _ in clear() }
-            .onDisappear { task?.cancel() }
         }
     }
 

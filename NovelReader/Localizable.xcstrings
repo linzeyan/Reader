@@ -3471,6 +3471,30 @@
         }
       }
     },
+    "library.add.derived %@ %@" : {
+      "comment" : "A pasted book whose site had no source: the book's title, then the name of the source that was created for it. Said on the row so the reader knows a source now exists, and where to remove it if it reads the site badly.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · created the source “%@”"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 已自动创建来源「%@」"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 已自動建立來源「%@」"
+          }
+        }
+      }
+    },
     "library.add.error.busy" : {
       "comment" : "Shown when a subscription list is picked while another batch is still being added.",
       "extractionState" : "stale",
@@ -3495,6 +3519,30 @@
         }
       }
     },
+    "library.add.error.derivationFailed %@" : {
+      "comment" : "A pasted address had no source, and working one out from the page failed. The argument is the derivation's own reason, which already says what to try next.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No source for this site, and one could not be created automatically: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个网站没有来源，自动创建也失败了：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個網站沒有來源，自動建立也失敗了：%@"
+          }
+        }
+      }
+    },
     "library.add.error.noBookId" : {
       "comment" : "The URL matched a site but no book id could be read.",
       "extractionState" : "manual",
@@ -3515,30 +3563,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法從這個網址辨識書籍，請改用書籍頁的網址。"
-          }
-        }
-      }
-    },
-    "library.add.error.noRule" : {
-      "comment" : "No installed rule matches the pasted URL.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No installed source can read this URL. Add one in Settings first."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有可处理该网址的来源，请先在设置中添加来源。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "沒有可處理這個網址的來源，請先在設定中加入來源。"
           }
         }
       }
@@ -3601,19 +3625,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "One URL per line. Novels and comics can be mixed — each is matched against your installed sources."
+            "value" : "One URL per line. Novels and comics can be mixed. For a site with no source yet, the app tries to create one."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一行一个网址，小说与漫画可以混贴；App 会逐一比对已安装的来源。"
+            "value" : "一行一个网址，小说与漫画可以混贴。还没有来源的网站，App 会尝试自动创建来源。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一行一個網址，小說與漫畫可以混貼；App 會逐一比對已安裝的來源。"
+            "value" : "一行一個網址，小說與漫畫可以混貼。還沒有來源的網站，App 會試著自動建立來源。"
           }
         }
       }
@@ -3807,7 +3831,7 @@
       }
     },
     "library.empty.books" : {
-      "comment" : "Empty library, but sources exist.",
+      "comment" : "The novel shelf is empty.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -3970,30 +3994,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "還沒有訂閱"
-          }
-        }
-      }
-    },
-    "library.empty.gotoSettings" : {
-      "comment" : "Points at the settings tab.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Settings → Sources"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "设置 → 来源"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "設定 → 來源"
           }
         }
       }
@@ -5220,6 +5220,102 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "章節已不在目錄中"
+          }
+        }
+      }
+    },
+    "marks.export" : {
+      "comment" : "Hands one book's bookmarks and highlights to the share sheet, as a Markdown document.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Marks"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出标记"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯出標記"
+          }
+        }
+      }
+    },
+    "marks.export.bookmark" : {
+      "comment" : "In an exported marks document: a saved position with no text beside it, because the chapter was read online and never downloaded.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bookmark"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "书签"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書籤"
+          }
+        }
+      }
+    },
+    "marks.export.bookmark %@" : {
+      "comment" : "In an exported marks document: a saved position, followed by the opening of the paragraph it sits on. Labelled rather than quoted, because the reader chose the place and not those words.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bookmark: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "书签：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書籤：%@"
+          }
+        }
+      }
+    },
+    "marks.export.summary %lld %lld %@" : {
+      "comment" : "The one line of metadata under the book title in an exported marks document: how many marks of each kind it holds, and the day it was taken.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Highlights: %1$lld · Bookmarks: %2$lld · Exported %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "划线：%1$lld · 书签：%2$lld · 导出于 %3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "劃線：%1$lld · 書籤：%2$lld · 匯出於 %3$@"
           }
         }
       }
@@ -8916,25 +9012,25 @@
       }
     },
     "settings.background.footer" : {
-      "comment" : "Explains when background downloads run and the two things that stop them.",
+      "comment" : "Says what actually happens to a download when the app leaves the screen: it pauses, resumes on return, and iOS may or may not catch up while the phone is idle. Worded as a maybe on purpose — two days of device traces showed the catch-up window granted zero times out of four requests.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "iOS looks for a spare moment to continue unfinished chapters while the app is off screen. Under Wi-Fi only it never falls back to cellular in the background. Needs Background App Refresh allowed for this app in Settings."
+            "value" : "Downloads need the app on screen: leaving finishes the chapter in progress, then pauses, and coming back carries on. iOS may fetch the rest while the iPhone is idle — usually overnight on the charger — but when, and whether, is up to iOS. Under Wi-Fi only it never falls back to cellular in the background. That catch-up needs Background App Refresh allowed for this app in Settings."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "App 不在屏幕上时，系统会找空闲时间继续未下载完的章节。“仅 Wi-Fi”在后台不会改用移动网络。需要在“设置 › 通用 › 后台 App 刷新”中允许本 App。"
+            "value" : "下载需要 App 留在屏幕上：离开时会先下载完正在下载的这一章再暂停，回到 App 自动继续。系统可能在 iPhone 空闲时（通常是夜间充电）补下剩下的章节，但何时执行由系统决定，不一定会发生。“仅 Wi-Fi”在后台不会改用移动网络。补下需要在“设置 › 通用 › 后台 App 刷新”中允许本 App。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "App 不在畫面上時，系統會找空檔繼續未下載完的章節。「僅 Wi-Fi」在背景不會改用行動網路。需要在「設定 › 一般 › 背景 App 重新整理」中允許本 App。"
+            "value" : "下載需要 App 留在畫面上：離開時會先抓完手上這一章再暫停，回到 App 自動繼續。系統可能在 iPhone 閒置時（通常是夜間充電）補抓剩下的章節，但何時執行由系統決定，不一定會發生。「僅 Wi-Fi」在背景不會改用行動網路。補抓需要在「設定 › 一般 › 背景 App 重新整理」中允許本 App。"
           }
         }
       }
@@ -9971,6 +10067,30 @@
         }
       }
     },
+    "settings.speech" : {
+      "comment" : "Settings row leading to the voice picker for reading aloud.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speech voice"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "朗读声音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "朗讀聲音"
+          }
+        }
+      }
+    },
     "settings.start" : {
       "comment" : "Header of the section deciding what the app opens on.",
       "extractionState" : "manual",
@@ -10255,6 +10375,102 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本機檔案"
+          }
+        }
+      }
+    },
+    "speech.voice.enhanced" : {
+      "comment" : "Badge on a voice iOS ships at its enhanced quality.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhanced"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "增强"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加強"
+          }
+        }
+      }
+    },
+    "speech.voice.footer" : {
+      "comment" : "Where more and better voices come from: they are an iOS download, not this app's.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voices come from iOS. To get more of them, or better ones, download them in Settings › Accessibility › Spoken Content › Voices."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "声音由 iOS 提供。想要更多或音质更好的声音，请到「设置 › 辅助功能 › 朗读内容 › 声音」下载。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聲音由 iOS 提供。想要更多或音質更好的聲音，請到「設定 › 輔助使用 › 朗讀內容 › 聲音」下載。"
+          }
+        }
+      }
+    },
+    "speech.voice.premium" : {
+      "comment" : "Badge on a voice iOS ships at its premium quality.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Premium"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高品质"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高品質"
+          }
+        }
+      }
+    },
+    "speech.voice.system" : {
+      "comment" : "The voice row meaning no choice at all: whatever iOS offers for that language.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System default"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统默认"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系統預設"
           }
         }
       }
@@ -10761,6 +10977,246 @@
             "value" : "診斷日誌"
           }
         }
+      }
+    },
+    "search.mode" : {
+      "comment" : "Switches the search tab between asking sites and asking this device.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search in"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索范围"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜尋範圍"
+          }
+        }
+      }
+    },
+    "search.mode.sites" : {
+      "comment" : "Search mode: the installed sources, over the network.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sources"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "站点"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "站台"
+          }
+        }
+      }
+    },
+    "search.mode.library" : {
+      "comment" : "Search mode: the text of chapters already downloaded to this device.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "My Books"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的书"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的書"
+          }
+        }
+      }
+    },
+    "library.text.search.prompt" : {
+      "comment" : "Search field prompt when searching downloaded chapter text.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A phrase from the text"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正文中的一段话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "內文中的一段話"
+          }
+        }
+      }
+    },
+    "library.text.search.title" : {
+      "comment" : "Shown before the first search of downloaded chapter text.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find a passage"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在书里找一段话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在書裡找一段話"
+          }
+        }
+      }
+    },
+    "library.text.search.hint" : {
+      "comment" : "Explains what library text search covers, before the first search.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Type two or more characters to find a passage in the chapters you have downloaded, and jump to it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入两个字以上，从已下载的章节里找出那一段，并跳到那一章。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入兩個字以上，從已下載的章節裡找出那一段，並跳到那一章。"
+          }
+        }
+      }
+    },
+    "library.text.search.none" : {
+      "comment" : "Shown when a search of downloaded chapter text finds nothing.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing found"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到这段文字"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到這段文字"
+          }
+        }
+      }
+    },
+    "library.text.search.none.hint" : {
+      "comment" : "Explains that only downloaded chapters are searched, so an empty result is not a claim about the whole book.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only downloaded chapters are searched, so chapters you have not downloaded yet are not included."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有已下载的章节会被搜索。还没下载的章节不在里面。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有已下載的章節會被搜尋。還沒下載的章節不在裡面。"
+          }
+        }
+      }
+    },
+    "intent.continueReading" : {
+      "comment" : "Title of the Shortcuts/Action Button action that reopens the last book.",
+      "extractionState" : "manual",
+      "localizations" : {
+          "en" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "Continue Reading"
+            }
+          },
+          "zh-Hans" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "继续阅读"
+            }
+          },
+          "zh-Hant" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "繼續閱讀"
+            }
+          }
+      }
+    },
+    "intent.continueReading.description" : {
+      "comment" : "Explains the continue-reading action where Shortcuts lists it.",
+      "extractionState" : "manual",
+      "localizations" : {
+          "en" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "Opens the book you were last reading, where you left off."
+            }
+          },
+          "zh-Hans" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "打开上次在读的书，回到停下来的地方。"
+            }
+          },
+          "zh-Hant" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "開啟上次在讀的書，回到停下來的地方。"
+            }
+          }
       }
     }
   },

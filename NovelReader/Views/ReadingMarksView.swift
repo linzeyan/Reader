@@ -39,6 +39,10 @@ struct ReadingMarksView: View {
     @State private var kind: Kind = .bookmarks
     @State private var bookmarks: [ReadingBookmark] = []
     @State private var highlights: [TextHighlight] = []
+    /// The book's catalog, in reading order — what the export walks to put the marks in
+    /// the order the book runs in. Kept beside the lookup below rather than folded into
+    /// it: a dictionary has no order, and here the order is the point.
+    @State private var chapters: [Chapter] = []
     /// Chapter titles by chapter id, so a row can name its chapter. Read from the stored
     /// catalog rather than denormalised into the mark: a title the site has since
     /// corrected should read correctly here too.
@@ -72,6 +76,9 @@ struct ReadingMarksView: View {
         }
         .navigationTitle("marks.title")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { exportButton }
+        }
         .task { load() }
     }
 
@@ -144,6 +151,32 @@ struct ReadingMarksView: View {
         }
     }
 
+    // MARK: - Taking them away
+
+    /// Hands the whole book's marks to the share sheet.
+    ///
+    /// Both kinds at once, whichever list is on screen. The switch above divides one
+    /// book's marks into two views of them; a reader asking for what they left in this
+    /// book means all of it, which is the same reading that put the two on one screen in
+    /// the first place.
+    ///
+    /// In the toolbar, where the book's own export is, and for the same reason: this is
+    /// an action on the whole list rather than on the row under the thumb.
+    ///
+    /// Disabled with nothing to write rather than hidden, also as the book's export is:
+    /// the empty state right underneath already says there is nothing here, and it is the
+    /// only place in the app that says how a mark is made at all.
+    private var exportButton: some View {
+        let export = MarksExport(
+            book: book, chapters: chapters, bookmarks: bookmarks, highlights: highlights
+        )
+        return ShareLink(item: export, preview: SharePreview(book.shownName)) {
+            Label("marks.export", systemImage: "square.and.arrow.up")
+        }
+        .accessibilityIdentifier("marks.export")
+        .disabled(export.isEmpty)
+    }
+
     // MARK: - Shared parts
 
     /// The chapter's own title, or a note that it is gone — a mark can outlive a chapter
@@ -201,9 +234,9 @@ struct ReadingMarksView: View {
     private func load() {
         bookmarks = (try? env.repo.readingBookmarks(bookId: book.id)) ?? []
         highlights = (try? env.repo.highlights(bookId: book.id)) ?? []
+        chapters = (try? env.repo.chapters(bookId: book.id)) ?? []
         chapterTitles = Dictionary(
-            uniqueKeysWithValues: ((try? env.repo.chapters(bookId: book.id)) ?? [])
-                .map { ($0.siteChapterId, $0.title) }
+            uniqueKeysWithValues: chapters.map { ($0.siteChapterId, $0.title) }
         )
     }
 }

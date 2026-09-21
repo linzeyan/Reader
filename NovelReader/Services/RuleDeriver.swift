@@ -10,10 +10,12 @@ import Foundation
 /// largest-text-block heuristic, and id recovery from URLs. This wires them
 /// together.
 ///
-/// Nothing is saved without confirmation. The derivation is a guess, so it ends
-/// by running the *derived rule* against a real chapter and handing the result
-/// back as a preview: the user judges a book title, a chapter count and an
-/// opening paragraph, not a pile of CSS selectors.
+/// The derivation is a guess, so it ends by running the *derived rule* against a
+/// real chapter and handing the result back as a preview. The settings screen
+/// shows that preview and saves nothing until the user confirms it — a book title,
+/// a chapter count and an opening paragraph, not a pile of CSS selectors. Pasting a
+/// book on the shelf skips the preview and installs the rule once it has also
+/// found that book; see `AppEnvironment.addPastedBook`.
 @MainActor
 final class RuleDeriver {
     enum DeriveError: LocalizedError {

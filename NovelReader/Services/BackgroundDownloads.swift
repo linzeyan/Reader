@@ -113,6 +113,13 @@ final class BackgroundDownloads {
     private let connection: @MainActor () -> NetworkMonitor.Connection
     private let scheduler: any BackgroundTaskScheduling
     private let defaults: UserDefaults
+    /// The diagnostics trace.
+    ///
+    /// `lastRun` already answers "what did the last window do", but only the last one, and
+    /// only once it has run. The trace answers the question before that — whether a window
+    /// was ever asked for — and it keeps every attempt rather than the newest, which is
+    /// what turns "it never downloads overnight" into a sequence somebody can read.
+    private let trace: TraceLog
 
     /// The window in flight. Held because two paths end one — the queue coming to
     /// rest and iOS taking the time back — and `setTaskCompleted` raises the
@@ -136,13 +143,15 @@ final class BackgroundDownloads {
         settings: DownloadSettings,
         connection: @escaping @MainActor () -> NetworkMonitor.Connection,
         scheduler: any BackgroundTaskScheduling = SystemBackgroundTaskScheduler(),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        trace: TraceLog = .makeShared()
     ) {
         self.downloader = downloader
         self.settings = settings
         self.connection = connection
         self.scheduler = scheduler
         self.defaults = defaults
+        self.trace = trace
         lastRun = Self.loadRun(from: defaults)
         lastScheduleError = defaults.string(forKey: Keys.scheduleError)
     }
@@ -159,16 +168,41 @@ final class BackgroundDownloads {
     /// budget.
     func scheduleIfNeeded() {
         guard downloader.canResume, downloader.pendingChallenge == nil else {
+            // The commonest reason there is no overnight download: nothing was ever
+            // asked for. Both halves of the refusal, because "the queue is empty" and
+            // "the queue is stuck behind a wall" call for opposite things from the user.
+            trace.note(
+                "bg sched skip can=\(downloader.canResume ? 1 : 0) "
+                    + "wall=\(downloader.pendingChallenge == nil ? 0 : 1)"
+            )
             scheduler.cancel(identifier: Self.identifier)
             store(scheduleError: nil)
             return
         }
         do {
             try scheduler.submitProcessingRequest(identifier: Self.identifier)
+            trace.note("bg sched ok left=\(downloader.remainingCount)")
             store(scheduleError: nil)
         } catch {
+            // Almost always Background App Refresh being switched off for the app, which
+            // no amount of correct code downstream can work around.
+            trace.note("bg sched err=\((error as NSError).code)")
             store(scheduleError: error.localizedDescription)
         }
+    }
+
+    /// Takes back any window still being asked for: the app is on screen, and the queue
+    /// is the foreground's again.
+    ///
+    /// A request is made on the way out, for a queue the app stopped by leaving, and it is
+    /// only right while that is still what the queue is. Left standing past the return, it
+    /// wakes the app for whatever the queue has become since — finished in the foreground,
+    /// which one device trace caught 22 seconds after coming back, so iOS spends a wake-up
+    /// on nothing; or paused by the reader, which the window would resume behind their
+    /// back, because `run` asks only whether the queue *can* go on. Leaving again with the
+    /// queue running asks afresh, so a queue that still needs a window gets one.
+    func withdrawRequest() {
+        scheduler.cancel(identifier: Self.identifier)
     }
 
     // MARK: - Using one
@@ -177,6 +211,12 @@ final class BackgroundDownloads {
     func run(task: any BackgroundTaskHandle) {
         let startedAt = Date()
         let connection = connection()
+        // The line that says a window was actually granted. Its absence, against a
+        // `bg sched ok` earlier in the same file, is iOS never having woken the app —
+        // which is a different problem from every one this class can report.
+        trace.note(
+            "bg run left=\(downloader.remainingCount) conn=\(String(describing: connection))"
+        )
 
         guard downloader.canResume else {
             complete(
@@ -250,6 +290,13 @@ final class BackgroundDownloads {
     /// the next window, so a run that was cut short or refused must not claim to
     /// have done what it was woken for.
     private func complete(_ task: any BackgroundTaskHandle, run: BackgroundDownloadRun) {
+        // Every ending passes through here, so one line covers all seven outcomes. `left`
+        // is what `lastRun` cannot say: whether the window ran out with the queue nearly
+        // done or barely started.
+        trace.note(
+            "bg end outcome=\(run.outcome.rawValue) n=\(run.chapters) "
+                + "left=\(downloader.remainingCount)"
+        )
         store(run: run)
         scheduleIfNeeded()
         task.setTaskCompleted(success: run.outcome == .completed || run.outcome == .nothingToDo)
@@ -280,6 +327,11 @@ final class BackgroundDownloads {
     /// is the point — otherwise this case is indistinguishable from the window
     /// never having been granted, and the two call for opposite reactions.
     static func recordDeferredToLaunch(defaults: UserDefaults = .standard, now: Date = Date()) {
+        // Its own `TraceLog`, because there is no object graph in this process to take one
+        // from — the same reason this function is static at all. Writing to the same file
+        // is the point: the launch that reads it back needs this window in sequence with
+        // the ones a running app recorded.
+        TraceLog.makeShared().note("bg deferred")
         store(
             BackgroundDownloadRun(
                 startedAt: now, connection: .unknown, chapters: 0, outcome: .deferredToLaunch
@@ -295,6 +347,7 @@ final class BackgroundDownloads {
     /// the download I asked for not happen — and a second place to look would mean
     /// the answer is in whichever one the user does not check.
     func recordQueueLost(now: Date = Date()) {
+        trace.note("bg queueLost")
         store(
             run: BackgroundDownloadRun(
                 startedAt: now, connection: connection(), chapters: 0, outcome: .queueLost

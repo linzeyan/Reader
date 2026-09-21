@@ -223,6 +223,19 @@ final class ReaderSettings {
     var speechPace: SpeechPace {
         didSet { defaults.set(speechPace.rate, forKey: Keys.speechPace) }
     }
+    /// Which voice reads each language out loud, keyed by the language and not its region
+    /// — `zh`, not `zh-TW`; see `SpeechReader.voiceKey(for:)`.
+    ///
+    /// Per language rather than one voice for the book, because the language is already
+    /// decided per sentence: a novel from a Chinese site and an English feed are read off
+    /// the same shelf, and one voice reading the other's text is not a slight accent, it is
+    /// unintelligible. So a single choice would have to be wrong for one of them.
+    ///
+    /// No entry means the system's own answer for that language, which is where every
+    /// device starts and what a voice the reader has since deleted falls back to.
+    var speechVoices: [String: String] {
+        didSet { defaults.set(speechVoices, forKey: Keys.speechVoices) }
+    }
 
     // MARK: - Writing one book's own layer
     //
@@ -329,6 +342,7 @@ final class ReaderSettings {
         static let autoScrollPace = "reader.autoScrollPace"
         static let comicScrollPace = "reader.comicScrollPace"
         static let speechPace = "reader.speechPace"
+        static let speechVoices = "reader.speechVoices"
     }
 
     private let defaults: UserDefaults
@@ -419,6 +433,10 @@ final class ReaderSettings {
         speechPace = SpeechPace(
             rate: defaults.object(forKey: Keys.speechPace) as? Double ?? SpeechPace.standard.rate
         )
+        // Stored as a plain dictionary rather than through `write`: both halves are strings,
+        // which `UserDefaults` holds natively, and a JSON blob would be a decode step for a
+        // value that never needed one.
+        speechVoices = defaults.dictionary(forKey: Keys.speechVoices) as? [String: String] ?? [:]
         // `didSet` does not run for the value an initializer assigns, and the dictionaries
         // are wanted before the first chapter is composed rather than during it.
         ChineseText.prewarm(chineseScript)

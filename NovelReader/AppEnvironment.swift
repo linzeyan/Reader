@@ -34,6 +34,10 @@ final class AppEnvironment {
     /// rule, the other reads a document off `URLSession` that describes itself.
     let feeds: FeedService
     let search: SearchService
+    /// Searching the text of the chapters already on this device — the one search in the
+    /// app that asks the device rather than a site, and the only one that can answer
+    /// "which chapter was that passage in".
+    let librarySearch: LibrarySearch
     let downloader: DownloadManager
     /// Shared by every unattended fetch — downloads and the reader's read-ahead.
     let pacer: RequestPacer
@@ -177,12 +181,13 @@ final class AppEnvironment {
             repo: repo, downloads: self.downloads, fetcher: fetcher
         )
         self.search = SearchService(fetcher: fetcher)
+        self.librarySearch = LibrarySearch(database: database, files: files, repo: repo)
         let pacer = RequestPacer()
         self.pacer = pacer
         self.additions = BookAdditions(pacer: pacer)
         let downloader = DownloadManager(
             service: bookService, downloads: self.downloads, images: images, pacer: pacer,
-            queueStore: queueStore
+            queueStore: queueStore, trace: trace
         )
         self.downloader = downloader
         self.localImporter = LocalBookImporter(
@@ -203,7 +208,8 @@ final class AppEnvironment {
         let backgroundDownloads = BackgroundDownloads(
             downloader: downloader,
             settings: downloadSettings,
-            connection: { monitor.connection }
+            connection: { monitor.connection },
+            trace: trace
         )
         self.backgroundDownloads = backgroundDownloads
         self.queueRestorer = DownloadQueueRestorer(
@@ -439,16 +445,49 @@ final class AppEnvironment {
     /// life. A novel address and a comic address can therefore be pasted together and each
     /// lands where it belongs.
     ///
+    /// An address no installed rule claims gets a rule worked out from its own page, and
+    /// that rule is installed without the preview the settings screen asks the reader to
+    /// confirm. The book stands in for the preview: the derivation has already read a real
+    /// chapter through the rule, and nothing is installed until the same rule has also
+    /// found this book's id in the address and its details on the site. What that cannot
+    /// catch is a guess that fits this book and no other on the site — which is why the
+    /// row names the source it made, so the reader knows there is one to remove.
+    ///
     /// - Returns: the title the site published, which is the confirmation that the address
     ///   led where the reader thought it did.
     private func addPastedBook(_ address: String) async throws -> String {
-        guard let url = URL(string: address), let rule = sites.rule(matching: url) else {
-            throw AddBookError.noRule
+        guard let url = URL(string: address) else {
+            throw AddBookError.derivationFailed(RuleDeriver.DeriveError.badURL.localizedDescription)
         }
+        let installed = sites.rule(matching: url)
+        let rule: SiteRule
+        if let installed { rule = installed } else { rule = try await derivedRule(for: url) }
         guard let siteBookId = rule.bookId(from: url) else { throw AddBookError.noBookId }
         let info = try await bookService.info(rule: rule, siteBookId: siteBookId)
-        try await addBook(rule: rule, siteBookId: siteBookId, info: info)
-        return info.title
+        guard installed == nil else {
+            try await addBook(rule: rule, siteBookId: siteBookId, info: info)
+            return info.title
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let source = try sites.importRule(data: encoder.encode(rule))
+        try await addBook(rule: source, siteBookId: siteBookId, info: info)
+        return String(localized: "library.add.derived \(info.title) \(source.name)")
+    }
+
+    /// A rule for a site with none, or the reason there cannot be one.
+    ///
+    /// A challenge or a sign-in wall is passed through untouched rather than folded into
+    /// the failure: the batch recognises those by type and stops to put them in front of
+    /// the reader, and one wrapped as "could not create a source" would instead be
+    /// recorded against this line while the rest of the batch ran into the same wall.
+    private func derivedRule(for url: URL) async throws -> SiteRule {
+        do {
+            return try await RuleDeriver(fetcher: fetcher, installed: sites.rules)
+                .derive(from: url).rule
+        } catch let error where !WebFetcher.needsTheUser(error) {
+            throw AddBookError.derivationFailed(error.localizedDescription)
+        }
     }
 
     /// Puts a subscription on the shelf whose own document would not answer.
@@ -470,15 +509,18 @@ final class AppEnvironment {
     }
 
     enum AddBookError: LocalizedError {
-        /// No installed rule claims the address's host.
-        case noRule
+        /// No installed rule claims the address's host, and none could be worked out
+        /// from the page. Carries the derivation's own reason, which is the part that
+        /// says what to try instead.
+        case derivationFailed(String)
         /// The rule claims the host but cannot find a book id in the path — a search
         /// page, or a chapter link pasted instead of the book's own.
         case noBookId
 
         var errorDescription: String? {
             switch self {
-            case .noRule: return String(localized: "library.add.error.noRule")
+            case .derivationFailed(let reason):
+                return String(localized: "library.add.error.derivationFailed \(reason)")
             case .noBookId: return String(localized: "library.add.error.noBookId")
             }
         }
@@ -761,6 +803,82 @@ final class AppEnvironment {
         if purged > 0 { reloadLibrary() }
     }
 
+    /// Reads the chapters already on this device into the search index.
+    ///
+    /// Only ever does work once per library: every chapter downloaded from here on is
+    /// indexed as it is written (`DownloadStore.save`), so this is for the shelf that was
+    /// already there when the index arrived. On a library that is caught up the first
+    /// batch comes back empty and the loop ends, which is what makes it safe to start on
+    /// every launch rather than remembering whether it has run.
+    ///
+    /// Detached and at utility priority because it is nobody's errand: the reader did not
+    /// ask for it, it reads a few hundred files, and the only thing waiting on it is a
+    /// search they have not made yet.
+    func indexDownloadedText() {
+        let downloads = self.downloads
+        let trace = self.trace
+        Task.detached(priority: .utility) {
+            let started = Date()
+            var indexed = 0
+            while true {
+                do {
+                    let batch = try downloads.indexPendingText()
+                    indexed += batch
+                    // A short batch means the library is caught up. Anything else would
+                    // need a second way of knowing when to stop, and the count already
+                    // says it.
+                    guard batch == DownloadStore.indexBatch else { break }
+                    await Task.yield()
+                } catch {
+                    // The one line that tells a backfill which gave up from one that
+                    // finished. It still resumes at the next launch — nothing is lost —
+                    // but a library that fails here every time is a reader whose search
+                    // quietly covers half their shelf, and there is no other way to see
+                    // that from a phone.
+                    trace.note("index stopped at=\(indexed) err=\((error as NSError).code)")
+                    return
+                }
+            }
+            // Silent on a library that was already caught up, which is every launch
+            // after the first: a line per launch saying nothing happened would be the
+            // bulk of the file by morning.
+            guard indexed > 0 else { return }
+            trace.note(
+                "index n=\(indexed) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
+            )
+        }
+    }
+
+    /// Aims the app at the book the reader was last in, and says whether there was one.
+    ///
+    /// The answer to "continue reading", asked either by `ContinueReadingIntent` against
+    /// a running app or by `RootView` on behalf of one that was still cold when the ask
+    /// arrived. The top *openable* entry rather than the top entry: a history whose first
+    /// row is a book the site has dropped has to continue with the one under it, not
+    /// refuse — see `ReadingTarget.init(continuing:)`.
+    ///
+    /// False means there is nowhere to go — a fresh install, or a history the reader has
+    /// cleared. The caller decides what that looks like; from outside the app it is the
+    /// shelf, which is where the app opens anyway.
+    ///
+    /// - Parameter deferred: whether the ask had to wait for a launch. Recorded because
+    ///   this feature's failure is silent by construction — the reader presses a button
+    ///   and the app either opens their book or does not, with nothing to look at either
+    ///   way. Which of the two paths ran, and whether the history had anything openable
+    ///   in it, are the only two questions worth asking afterwards, and neither can be
+    ///   asked from a phone without this line.
+    @discardableResult
+    func continueReading(deferred: Bool) -> Bool {
+        let target = ReadingTarget.continuing(recentReads)
+        trace.note(
+            "cont deferred=\(deferred ? 1 : 0) found=\(target == nil ? 0 : 1) "
+                + "history=\(recentReads.count)"
+        )
+        guard let target else { return false }
+        readingHandoff = target
+        return true
+    }
+
     /// Imports a `.txt` or `.epub` the user picked as a book.
     ///
     /// Not pushed to iCloud, unlike every other way a book enters the library —
@@ -963,6 +1081,12 @@ final class AppEnvironment {
         // is read against, and it must not depend on whether a download happened to be
         // running.
         trace.notePhase(false)
+        // Before the guard as well, because this guard is the whole reason a background
+        // window may never have been asked for: `scheduleIfNeeded` is reached only
+        // through the drain below, so leaving with the queue merely *paused* rather than
+        // running arms nothing at all. A trace that only recorded the armed case could
+        // never show that.
+        trace.note("bg enter busy=\(downloader.isBusy ? 1 : 0) left=\(downloader.remainingCount)")
         guard downloader.isBusy else { return }
         resumeWhenActive = true
         let reason = String(localized: "downloads.paused.background")
@@ -1001,6 +1125,9 @@ final class AppEnvironment {
     /// Wi-Fi-only check earns its keep.
     func becomeActive() {
         trace.notePhase(true)
+        // Unconditionally, not only when this process left a queue running: a request can
+        // outlive the process that made it, and a launch finds it standing just the same.
+        backgroundDownloads.withdrawRequest()
         // Coming back to the app is opening it, as far as a subscription is concerned —
         // an app left in the background for a day and returned to is the commonest way
         // this one is "opened" at all. Gated on staleness like the launch sweep, so

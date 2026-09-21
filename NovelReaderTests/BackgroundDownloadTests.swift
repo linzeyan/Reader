@@ -64,6 +64,32 @@ final class BackgroundDownloadTests: XCTestCase {
         XCTAssertEqual(harness.scheduler.cancelled, 1)
     }
 
+    /// A window asked for on the way out does not outlive the app coming back.
+    ///
+    /// From a device trace: a queue left with twelve chapters, a window asked for, the app
+    /// back 23 seconds later and the queue finished in the foreground 22 seconds after
+    /// that — with the request still standing, to wake the app for nothing. The worse
+    /// case is the one made here: a queue the reader pauses once they are back, which a
+    /// standing window would resume behind their back, because `run` asks only whether
+    /// the queue can go on.
+    func testAWindowAskedForOnTheWayOutIsWithdrawnOnTheWayBack() throws {
+        let harness = try makeHarness(policy: .wifiOnly, connection: .wifi)
+        queueTwoChapters(harness.downloader)
+        harness.background.scheduleIfNeeded()
+        XCTAssertTrue(harness.scheduler.standing, "leaving with work left has to ask for a window")
+
+        harness.background.withdrawRequest()
+        harness.downloader.resume()
+        harness.downloader.pause()
+
+        XCTAssertTrue(harness.downloader.canResume, "the queue itself is kept, only paused")
+        XCTAssertFalse(
+            harness.scheduler.standing,
+            "a queue the reader paused in the foreground must have no window waiting to resume it"
+        )
+        harness.downloader.cancel()
+    }
+
     /// The most common reason this feature never runs is Background App Refresh
     /// being switched off for the app, and there is nothing the app can do about it
     /// — so the refusal has to reach the settings screen instead of being eaten.
@@ -331,14 +357,19 @@ private final class FakeScheduler: BackgroundTaskScheduling {
     var submitted = 0
     var cancelled = 0
     var failure: (any Error)?
+    /// Whether a request is queued with iOS right now — the state the real scheduler
+    /// keeps, which the two counts cannot say once both have moved.
+    private(set) var standing = false
 
     func submitProcessingRequest(identifier: String) throws {
         if let failure { throw failure }
         submitted += 1
+        standing = true
     }
 
     func cancel(identifier: String) {
         cancelled += 1
+        standing = false
     }
 }
 

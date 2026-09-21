@@ -18,10 +18,12 @@
 - 不內建任何內容網站。來源由使用者貼上書籍頁網址自動建立，或匯入規則檔（JSON）。
 - 小說：TXT（自動判斷 UTF-8、Big5、GB18030 並依章名分章）與 EPUB 匯入，可匯出成 TXT 或 EPUB。
 - 漫畫：與小說相同的來源流程；ZIP 匯入與匯出。
+- 閱讀：捲動或分頁；系統語音朗讀（可自選聲音，鎖定螢幕照樣聽）；在已下載章節的內文中搜尋一段話；劃線與書籤可匯出成 Markdown。
 - 訂閱：RSS、Atom、JSON Feed；清單可用 OPML 匯入。
 - 資料：書籤、自訂書名與閱讀進度經使用者自己的 iCloud 同步；章節內文留在裝置。開發者沒有伺服器。
 - 介面語言：正體中文、簡體中文、英文。
 - Platform: iPhone and iPad, iOS 17 or later. Free; no ads, no in-app purchases, no account.
 - Ships with no content sites. Sources are created by the user from a book-page URL, or imported as rule files (JSON).
 - Novels: TXT (UTF-8 / Big5 / GB18030 detected, split into chapters) and EPUB import; export to TXT or EPUB. Comics: ZIP import and export. Feeds: RSS, Atom, JSON Feed; OPML import.
+- Reading: scrolling or paged; read aloud in a system voice of your choice, with the screen locked; search the text of downloaded chapters; export highlights and bookmarks as Markdown.
 - Data: bookmarks, custom titles and reading progress sync through the user's own iCloud; chapter text stays on the device. The developer runs no server.

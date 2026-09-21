@@ -79,6 +79,17 @@ struct ReaderScrollingText: UIViewRepresentable {
     /// because the system's own light-or-dark answer is a trait of the view tree and
     /// this view's owner is the one holding it.
     let palette: ReaderPalette
+    /// Whether the scene this page is in can be seen at all — false once the app has gone
+    /// to the background.
+    ///
+    /// What lets a rebuild wait. iOS photographs an app for the switcher in both
+    /// appearances on its way out, so a reader on the system theme has the ink flipped and
+    /// flipped back with nobody looking, and each flip was a rebuild of every loaded
+    /// chapter: about eighteen column layouts per departure, 2.7 seconds of them at worst
+    /// on an XR, for a stack that ended exactly as it began. Held until the page can be
+    /// seen again, the pair cancels out and nothing is laid out at all; a change that
+    /// really happened is rebuilt by the update that brings the page back.
+    let isOnScreen: Bool
     /// This book's highlights, by site chapter id — looked up per chapter as it is drawn.
     let highlights: [String: [TextHighlight]]
     /// The paragraph being asked about right now, drawn in the selection colour.
@@ -171,6 +182,16 @@ final class ReaderScrollCoordinator {
 
     private(set) var placed: [PlacedColumn] = []
     private var config: ReaderScrollingText?
+
+    /// The size the body is set at, for the scroll view to settle its measure by.
+    ///
+    /// Exposed rather than the whole config because this is the one thing the view
+    /// itself has to decide with — how wide to set the line — and it cannot ask the
+    /// settings: the metrics reaching this coordinator are the ones resolved for the
+    /// book on screen, which a per-book font size makes different from the global one.
+    /// Zero before the first config arrives, which `textWidth(in:fontSize:)` reads as
+    /// "not said yet".
+    var textPointSize: CGFloat { CGFloat(config?.metrics.fontSize ?? 0) }
     /// The layout key the current columns were built under. Anything in it changing
     /// means every column describes text nobody is reading — a rotation, a font, a size.
     private var builtFor: LayoutKey?
@@ -185,14 +206,19 @@ final class ReaderScrollCoordinator {
     ///
     /// Held here rather than carried by the layout jobs a rebuild starts, because a
     /// second key change can arrive while the first rebuild is still in flight and
-    /// `currentPlace()` has nothing to answer with once `placed` has been emptied. iOS
-    /// makes that happen every time the app leaves the screen: it snapshots for the app
-    /// switcher in both appearances, so a reader on the system theme gets two ink
-    /// changes back to back. Carried by the jobs, the second one captured nil, nothing
-    /// aimed the scroll, and the reader came back at the head of the loaded window —
-    /// several chapters behind where they were, and written down as their position by
-    /// the report at the end of `place`.
+    /// `currentPlace()` has nothing to answer with once `placed` has been emptied. A type
+    /// size dragged through several steps does exactly that. So did iOS snapshotting for
+    /// the app switcher in both appearances — two ink changes back to back, on 9 of 25
+    /// departures in one device trace — until a rebuild off screen learned to wait; see
+    /// `ReaderScrollingText.isOnScreen`. Carried by the jobs, the second one captured nil,
+    /// nothing aimed the scroll, and the reader came back at the head of the loaded
+    /// window — several chapters behind where they were, and written down as their
+    /// position by the report at the end of `place`.
     private var restoring: ReaderModel.ScrollTarget?
+    /// The key a rebuild is waiting on while the page is off screen. Kept only so the
+    /// trace says so once per key: a voice reading in the background brings an update per
+    /// sentence.
+    private var held: LayoutKey?
     /// The spoken sentence the page has already been moved for, so the same one is not
     /// chased on every frame the voice spends saying it.
     private var followed: SpokenSentence?
@@ -283,7 +309,18 @@ final class ReaderScrollCoordinator {
             script: config.metrics.script
         )
         guard key.width > 0 else { return }
-        view?.apply(palette: config.palette)
+        // Off screen, with a stack worth keeping: wait instead of rebuilding. See
+        // `isOnScreen` for the pair of changes this is for — the second puts the key back,
+        // and then there was never anything to do.
+        let holding = builtFor.map { $0 != key && !config.isOnScreen } ?? false
+        if holding, held != key, let builtFor {
+            trace.note("relayout held why=\(key.changed(from: builtFor))")
+        }
+        held = holding ? key : nil
+        // The page keeps the look it was built in while it waits, background and all. The
+        // snapshot iOS is taking is of this page, and old ink on a new page is the one
+        // combination that can come out unreadable — near-black on near-black.
+        if !holding { view?.apply(palette: config.palette) }
         // Before the rebuild check below, which returns early: a reader who changes the
         // type size while the page is moving on its own must not find it stopped, and the
         // driver reads nothing about the columns — it moves an offset and asks what
@@ -298,7 +335,7 @@ final class ReaderScrollCoordinator {
             self.restoring = nil
         }
 
-        if builtFor != key {
+        if builtFor != key, !holding {
             // Everything on screen describes a measure nobody is reading at. Keep the
             // reader's place as an anchor — a point in the old layout means nothing in
             // the new one — and rebuild.
@@ -328,7 +365,9 @@ final class ReaderScrollCoordinator {
             layOutMissing(for: config)
             return
         }
-        layOutMissing(for: config)
+        // Not while holding: a column laid out now would carry the new ink into a stack
+        // built in the old one, and keep it after the key flips back.
+        if !holding { layOutMissing(for: config) }
         dropChaptersNoLongerLoaded(config)
         applyTargetIfNeeded(config)
         followSpeech(config)
@@ -728,9 +767,6 @@ final class ReaderScrollCoordinator {
                 result.append(ReaderTapZone.VisibleParagraph(
                     chapterIndex: chapter.chapterIndex,
                     paragraph: frame.paragraph,
-                    id: TextAnchor.paragraphID(
-                        chapterId: chapter.chapterId, paragraph: frame.paragraph
-                    ),
                     minY: chapter.top + frame.minY - top,
                     maxY: chapter.top + frame.maxY - top
                 ))
@@ -855,23 +891,13 @@ final class ReaderScrollCoordinator {
     private func aimedTurn(_ zone: ReaderTapZone.Zone, in view: ReaderTextScrollView) -> CGFloat? {
         guard let scroll = ReaderTapZone.pageScroll(
             zone, over: visibleParagraphs(), viewport: view.visibleHeight
-        ), let (chapter, frame) = paragraph(withID: scroll.id) else { return nil }
+        ), let chapter = placed.first(where: { $0.chapterIndex == scroll.chapterIndex }),
+           let frame = chapter.column.paragraphFrames.first(where: {
+               $0.paragraph == scroll.paragraph
+           })
+        else { return nil }
         let height = frame.maxY - frame.minY
         return chapter.top + frame.minY - scroll.anchor.y * (view.visibleHeight - height)
-    }
-
-    private func paragraph(
-        withID id: String
-    ) -> (chapter: PlacedColumn, frame: ChapterColumn.ParagraphFrame)? {
-        for chapter in placed {
-            guard let frame = chapter.column.paragraphFrames.first(where: {
-                TextAnchor.paragraphID(
-                    chapterId: chapter.chapterId, paragraph: $0.paragraph
-                ) == id
-            }) else { continue }
-            return (chapter, frame)
-        }
-        return nil
     }
 
     // MARK: - Touching text
@@ -891,6 +917,14 @@ final class ReaderScrollCoordinator {
     func handleTap(at point: CGPoint) {
         guard let config, let view else { return }
         let hit = hit(point)
+        // The chapter under the finger, which is not the same question as the paragraph
+        // under it. An article's title has no `ParagraphFrame` — `buildParagraphFrames`
+        // maps over the body's paragraph ranges and the title is composed before the
+        // first of them — so `hit` is nil for a finger on the title and the link lookup
+        // never ran. That is the whole of why tapping a title did nothing here while it
+        // worked in the paginated renderer, which looks a link up over the page rather
+        // than over a paragraph.
+        let column = hit?.chapter ?? chapter(atY: point.y + view.readingOffset)
         let tap = ReaderTap(
             zone: ReaderTapZone.zone(
                 at: point, in: CGSize(width: view.bounds.width, height: view.visibleHeight)
@@ -898,7 +932,7 @@ final class ReaderScrollCoordinator {
             chapterIndex: hit?.chapter.chapterIndex,
             paragraph: hit?.paragraph,
             highlight: hit.flatMap { highlight(at: point, in: $0.chapter) },
-            link: hit.flatMap { link(at: point, in: $0.chapter, paragraph: $0.paragraph) }
+            link: column.flatMap { link(at: point, in: $0, paragraph: hit?.paragraph) }
         )
         guard config.onTap(tap) else { return }
         turnPage(tap.zone)
@@ -924,7 +958,7 @@ final class ReaderScrollCoordinator {
         let marks = config.highlights[chapter.siteChapterId] ?? []
         guard !marks.isEmpty else { return nil }
         let inColumn = CGPoint(
-            x: point.x - ReaderTextScrollView.textMargin,
+            x: point.x - view.textInset,
             y: point.y + view.readingOffset - chapter.top
         )
         let slack = (config.metrics.lineSpacing + config.metrics.paragraphSpacing) / 2
@@ -943,15 +977,29 @@ final class ReaderScrollCoordinator {
     /// whole chapter, and asking where each of them was drawn would be a layout question
     /// per link per tap. The paragraph under the finger is already known, and a link
     /// cannot cross one.
-    private func link(at point: CGPoint, in chapter: PlacedColumn, paragraph: Int) -> URL? {
-        guard let view, !chapter.column.text.links.isEmpty,
-              chapter.column.text.paragraphRanges.indices.contains(paragraph)
-        else { return nil }
+    ///
+    /// Nil `paragraph` is a tap that landed on no paragraph at all, which is what the
+    /// title is: composed ahead of the first paragraph range, so it has no frame to be
+    /// found by. The span is then everything before the body — the title and its
+    /// subtitle, carrying one link between them — so the narrowing this method exists
+    /// for costs nothing on that path either.
+    private func link(at point: CGPoint, in chapter: PlacedColumn, paragraph: Int?) -> URL? {
+        guard let view, !chapter.column.text.links.isEmpty else { return nil }
+        let ranges = chapter.column.text.paragraphRanges
+        let span: NSRange
+        if let paragraph {
+            guard ranges.indices.contains(paragraph) else { return nil }
+            span = ranges[paragraph]
+        } else {
+            // `first.location > 0` is the head being non-empty. A chapter whose text
+            // starts at its first paragraph has no title to have been tapped.
+            guard let first = ranges.first, first.location > 0 else { return nil }
+            span = NSRange(location: 0, length: first.location)
+        }
         let inColumn = CGPoint(
-            x: point.x - ReaderTextScrollView.textMargin,
+            x: point.x - view.textInset,
             y: point.y + view.readingOffset - chapter.top
         )
-        let span = chapter.column.text.paragraphRanges[paragraph]
         for link in chapter.column.text.links
         where NSIntersectionRange(link.range, span).length > 0 {
             // A couple of words in the middle of a sentence is a smaller target than

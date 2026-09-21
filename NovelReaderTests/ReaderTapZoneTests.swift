@@ -14,13 +14,14 @@ final class ReaderTapZoneTests: XCTestCase {
         ReaderTapZone.zone(at: CGPoint(x: x, y: y), in: window)
     }
 
-    /// Frames only: the geometry rules do not care which text a frame names, so the
-    /// chapter and paragraph indices are noise the assertions should not have to carry.
+    /// One chapter throughout: the geometry rules do not care which chapter a frame is
+    /// in, so only the paragraph number — which is how a turn names what it aims at — is
+    /// given.
     private func paragraph(
-        _ id: String, minY: CGFloat, maxY: CGFloat
+        _ number: Int, minY: CGFloat, maxY: CGFloat
     ) -> ReaderTapZone.VisibleParagraph {
         ReaderTapZone.VisibleParagraph(
-            chapterIndex: 0, paragraph: 0, id: id, minY: minY, maxY: maxY
+            chapterIndex: 0, paragraph: number, minY: minY, maxY: maxY
         )
     }
 
@@ -59,12 +60,14 @@ final class ReaderTapZoneTests: XCTestCase {
     /// page instead of being cut in half by the turn.
     func testGoingOnPutsTheLastParagraphThatStartedOnScreenAtTheTop() {
         let visible = [
-            paragraph("a", minY: -100, maxY: 200),
-            paragraph("b", minY: 200, maxY: 600),
-            paragraph("c", minY: 600, maxY: 900),
+            paragraph(0, minY: -100, maxY: 200),
+            paragraph(1, minY: 200, maxY: 600),
+            paragraph(2, minY: 600, maxY: 900),
         ]
         let scroll = ReaderTapZone.pageScroll(.next, over: visible, viewport: 800)
-        XCTAssertEqual(scroll, ReaderTapZone.PageScroll(id: "c", anchor: .top))
+        XCTAssertEqual(
+            scroll, ReaderTapZone.PageScroll(chapterIndex: 0, paragraph: 2, anchor: .top)
+        )
     }
 
     /// Going back aims the top paragraph at the bottom of the window, which lands a page
@@ -72,26 +75,29 @@ final class ReaderTapZoneTests: XCTestCase {
     /// one nobody has to double-check.
     func testGoingBackPutsTheTopParagraphAtTheBottom() {
         let visible = [
-            paragraph("a", minY: -100, maxY: 200),
-            paragraph("b", minY: 200, maxY: 600),
+            paragraph(0, minY: -100, maxY: 200),
+            paragraph(1, minY: 200, maxY: 600),
         ]
         let scroll = ReaderTapZone.pageScroll(.previous, over: visible, viewport: 800)
-        XCTAssertEqual(scroll, ReaderTapZone.PageScroll(id: "a", anchor: .bottom))
+        XCTAssertEqual(
+            scroll, ReaderTapZone.PageScroll(chapterIndex: 0, paragraph: 0, anchor: .bottom)
+        )
     }
 
     /// Paragraphs scrolled past are still reported by the preference key that collects
     /// them; a turn that counted those would jump backwards through text already read.
     func testParagraphsOffScreenAreNotCandidates() {
         let visible = [
-            paragraph("gone", minY: -900, maxY: -100),
-            paragraph("here", minY: 100, maxY: 400),
-            paragraph("later", minY: 900, maxY: 1200),
+            paragraph(0, minY: -900, maxY: -100),
+            paragraph(1, minY: 100, maxY: 400),
+            paragraph(2, minY: 900, maxY: 1200),
         ]
         XCTAssertEqual(
-            ReaderTapZone.pageScroll(.next, over: visible, viewport: 800)?.id, "here"
+            ReaderTapZone.pageScroll(.next, over: visible, viewport: 800)?.paragraph, 1,
+            "the one on screen, not the one scrolled past or the one still below"
         )
         XCTAssertEqual(
-            ReaderTapZone.pageScroll(.previous, over: visible, viewport: 800)?.id, "here"
+            ReaderTapZone.pageScroll(.previous, over: visible, viewport: 800)?.paragraph, 1
         )
     }
 
@@ -101,13 +107,13 @@ final class ReaderTapZoneTests: XCTestCase {
     /// window: for a paragraph of 2400 in a window of 800, a window's travel is a third
     /// of the way through what can be scrolled.
     func testATallParagraphIsWalkedThroughFromInside() {
-        let tall = [paragraph("tall", minY: 0, maxY: 2400)]
+        let tall = [paragraph(7, minY: 0, maxY: 2400)]
         let onwards = ReaderTapZone.pageScroll(.next, over: tall, viewport: 800)
-        XCTAssertEqual(onwards?.id, "tall")
+        XCTAssertEqual(onwards?.paragraph, 7)
         XCTAssertEqual(onwards?.anchor.y ?? 0, 0.5, accuracy: 0.0001)
 
         // And it stops at the paragraph's own ends rather than walking off them.
-        let atTheTop = [paragraph("tall", minY: 0, maxY: 2400)]
+        let atTheTop = [paragraph(7, minY: 0, maxY: 2400)]
         XCTAssertEqual(
             ReaderTapZone.pageScroll(.previous, over: atTheTop, viewport: 800)?.anchor.y, 0
         )
@@ -116,7 +122,7 @@ final class ReaderTapZoneTests: XCTestCase {
     /// The controls band is not a page turn, and an empty screen is not a page turn
     /// either — a scroll view mid-rebuild reports nothing visible.
     func testNothingToTurnIsNoScroll() {
-        let visible = [paragraph("a", minY: 0, maxY: 400)]
+        let visible = [paragraph(0, minY: 0, maxY: 400)]
         XCTAssertNil(ReaderTapZone.pageScroll(.controls, over: visible, viewport: 800))
         XCTAssertNil(ReaderTapZone.pageScroll(.next, over: [], viewport: 800))
     }

@@ -62,6 +62,14 @@ final class DownloadManager {
     /// one person turning pages rather than two processes taking turns.
     private let pacer: RequestPacer
     private let queueStore: DownloadQueueStore
+    /// The diagnostics trace.
+    ///
+    /// Held because downloading is the one thing this app does that nobody is watching:
+    /// it runs with the phone in a pocket, and once the moment has passed there is no
+    /// other way to answer whether a queue started, what stopped it, or how much of it
+    /// was left. `BackgroundDownloads` records the *outcome* of a window; this records
+    /// the queue's own movements, which is what says why that outcome was the one.
+    private let trace: TraceLog
     private var task: Task<Void, Never>?
 
     /// Work not yet done, in order. Survives a pause so `resume()` picks up where
@@ -95,13 +103,15 @@ final class DownloadManager {
         downloads: DownloadStore,
         images: ImageFetcher,
         pacer: RequestPacer,
-        queueStore: DownloadQueueStore
+        queueStore: DownloadQueueStore,
+        trace: TraceLog = .makeShared()
     ) {
         self.service = service
         self.downloads = downloads
         self.images = images
         self.pacer = pacer
         self.queueStore = queueStore
+        self.trace = trace
     }
 
     /// How many chapters may fail one after another before the queue stops instead of
@@ -126,6 +136,10 @@ final class DownloadManager {
     func start(book: Book, rule: SiteRule, chapters: [Chapter]) {
         cancel()
         let pending = chapters.filter { !$0.isDownloaded }
+        // Both numbers, because "nothing happened" has two different causes here and the
+        // reader reports them identically: a tap that queued nothing because every chapter
+        // was already on disk, and a tap that queued work which then stopped somewhere.
+        trace.note("dl start n=\(pending.count) of=\(chapters.count)")
         guard !pending.isEmpty else {
             finish()
             return
@@ -168,6 +182,10 @@ final class DownloadManager {
     ///   under a Wi-Fi-only policy — because a queue that stops by itself with no
     ///   explanation reads as a bug.
     func pause(reason: String? = nil) {
+        // `auto` separates the two callers that matter: a reason means something other
+        // than the user stopped this — backgrounding, a metered connection, a window
+        // expiring — which is the case nobody can see happen.
+        trace.note("dl pause left=\(remaining.count) auto=\(reason == nil ? 0 : 1)")
         task?.cancel()
         task = nil
         if !remaining.isEmpty { status = .paused }
@@ -190,6 +208,7 @@ final class DownloadManager {
     ///   running, because an assertion held for a queue that already stopped is
     ///   time taken from the user for nothing.
     func stopAfterCurrentChapter(reason: String?, onStopped: @escaping () -> Void) {
+        trace.note("dl drain running=\(status == .running ? 1 : 0) left=\(remaining.count)")
         guard status == .running else {
             onStopped()
             return
@@ -209,6 +228,9 @@ final class DownloadManager {
     ///   the whole queue rather than one chapter, but wants telling at the same
     ///   moment, because that is when it can hand the system's time back.
     func resume(onStopped: (() -> Void)? = nil) {
+        // Before the guard: a resume that refuses is exactly the shape of "I pressed it
+        // and nothing happened", and after the guard it would leave no line at all.
+        trace.note("dl resume can=\(canResume ? 1 : 0) left=\(remaining.count)")
         guard canResume else { return }
         pendingChallenge = nil
         lastError = nil
@@ -217,6 +239,9 @@ final class DownloadManager {
     }
 
     func cancel() {
+        // Only when there was something to lose. `start` calls this first, so an
+        // unconditional line would put a "cancel" in front of every download ever begun.
+        if !remaining.isEmpty { trace.note("dl cancel left=\(remaining.count)") }
         task?.cancel()
         task = nil
         remaining = []
@@ -235,6 +260,9 @@ final class DownloadManager {
     /// user does in the sheet, the retry after it has to be the chapter that hit
     /// the wall, not the one after it.
     private func hold(_ request: ChallengeRequest, because error: WebFetcher.FetchError) {
+        // The wall's kind, not its address: a queue parked on a sign-in and one parked on
+        // a verification look the same from outside and need opposite things from the user.
+        trace.note("dl held signIn=\(request.reason == .signIn ? 1 : 0) left=\(remaining.count)")
         pendingChallenge = request
         lastError = error.localizedDescription
         status = .paused
@@ -281,6 +309,10 @@ final class DownloadManager {
                         )
                     }
                     guard self.completeIfStillQueued(chapter) else { return }
+                    // After the removal, so the count is what is genuinely left. One line
+                    // per chapter is the rate of the queue itself — paced, seconds apart —
+                    // not a hot loop, and it is the only record of how far a window got.
+                    self.trace.note("dl ok left=\(self.remaining.count) missing=\(missing)")
                 } catch is CancellationError {
                     return
                 } catch WebFetcher.FetchError.challengePresented(let url) {
@@ -320,6 +352,9 @@ final class DownloadManager {
                     // reason on screen. The chapter that hit the limit keeps its place
                     // at the head — it was never given a fair attempt.
                     if self.noteChapterFailed() {
+                        // The queue stopping with work still in it, which is the outcome
+                        // `BackgroundDownloads` reports as `stalled` — this says why.
+                        self.trace.note("dl streak left=\(self.remaining.count)")
                         self.lastError = String(
                             localized: "downloads.paused.repeatedFailures \(error.localizedDescription)"
                         )
@@ -329,6 +364,7 @@ final class DownloadManager {
                     }
                     self.lastError = error.localizedDescription
                     guard self.completeIfStillQueued(chapter) else { return }
+                    self.trace.note("dl fail left=\(self.remaining.count)")
                 }
                 // Checked after both outcomes: a chapter that failed is still a
                 // chapter this run is done with.
@@ -409,6 +445,7 @@ final class DownloadManager {
     /// been over for minutes. The chapter list already shows what is on disk;
     /// the progress row exists only while there is progress.
     private func finish() {
+        trace.note("dl done")
         status = .finished
         progress = nil
         pacer.reset()
@@ -422,6 +459,9 @@ final class DownloadManager {
     /// the book screen would offer to continue a download that is over.
     private func haltIfDraining() -> Bool {
         guard isDraining else { return false }
+        // The count here is what a background window is worth knowing: it is the queue
+        // the next wake-up will be asked to finish.
+        trace.note("dl drained left=\(remaining.count)")
         task = nil
         if remaining.isEmpty {
             finish()

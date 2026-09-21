@@ -38,6 +38,12 @@ struct SettingsView: View {
                 Section("settings.section.reading") {
                     NavigationLink("settings.appearance") { AppearanceSettingsView() }
                         .accessibilityIdentifier("settings.appearance")
+                    // Here rather than on the listening strip in the reader: the strip is
+                    // what a reader reaches for mid-chapter to say "this is too fast", and a
+                    // list of every voice on the device is not something anyone opens with
+                    // a book running under it.
+                    NavigationLink("settings.speech") { SpeechVoiceView() }
+                        .accessibilityIdentifier("settings.speech")
                     // The two launch pickers and the reading-history controls, together
                     // on one screen: they are four answers to "what do I see when I open
                     // this app", and they were three sections apart.

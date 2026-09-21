@@ -280,9 +280,17 @@ struct PaginatedChapterView: View {
             guard page != pageIndex else { return }
             turn(page - pageIndex)
         }
-        // Matches the scrolling reader's text inset, so switching modes does not move
-        // the left margin of the book.
-        .padding(.horizontal, 20)
+        // The same measure the scrolling reader sets, by name rather than by a matching
+        // number, so switching modes mid-chapter cannot reflow the book under the reader.
+        //
+        // Three layers, outermost last: the padding proposes the glass less the margin,
+        // the infinite frame claims all of it so the capped child lands in the middle,
+        // and the capped frame is the line length itself. The `GeometryReader` inside
+        // therefore measures the column rather than the screen, which is what makes the
+        // page breaks fall where a reader would put them.
+        .frame(maxWidth: ReaderTextScrollView.maxCharactersPerLine * CGFloat(metrics.fontSize))
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, ReaderTextScrollView.textMargin)
         .padding(.top, 8)
         .padding(.bottom, 2)
     }

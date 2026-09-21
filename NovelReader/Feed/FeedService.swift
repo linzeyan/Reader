@@ -390,7 +390,7 @@ final class FeedService {
     private func store(
         _ parsed: ParsedFeed, in book: Book, progress: @escaping ProgressHandler = { _ in }
     ) async throws {
-        try repo.mergeCatalog(
+        let arrived = try repo.mergeCatalog(
             bookId: book.id,
             entries: parsed.items.map {
                 (
@@ -418,8 +418,22 @@ final class FeedService {
             try repo.saveFeedFetchState(state)
         }
 
-        let missing = Set(stored.filter { !$0.isDownloaded }.map(\.siteChapterId))
-        let pending = parsed.items.filter { missing.contains($0.identity) }
+        // The articles that just arrived — not every article that has no text.
+        //
+        // Those two read the same off the rows and are opposite things. A null
+        // `downloadedAt` means "this device has no text for it", which covers the article
+        // that never had any *and* the article whose text the reader deleted. Going by the
+        // column therefore undid every deletion: the piece came straight back on the next
+        // refresh, pictures and all, and kept coming back for as long as the publisher
+        // listed it. Retention could not save it either — it deliberately never deletes
+        // anything the publisher still lists, precisely to avoid resurrecting it.
+        //
+        // The same change ends the other half of that waste. An article the extractor
+        // cannot read — a paywall, a consent wall, a page built in JavaScript — never
+        // takes a `downloadedAt` either, so it was re-attempted on every single refresh
+        // for ever. Once is the honest number of times to try something that failed for a
+        // reason no refresh can change; the reader has `fetchFullText` for the rest.
+        let pending = parsed.items.filter { arrived.contains($0.identity) }
         guard !pending.isEmpty else { return }
 
         // `defer` works here where `LocalBookImporter` had to spell both exits out,

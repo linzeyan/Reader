@@ -31,7 +31,7 @@ struct LibraryView: View {
     /// only record of what the reader has not got to yet. There is no undo for it.
     @State private var confirmingMarkAllRead = false
     /// Held so the reading history's handoff can lay down a whole route — shelf,
-    /// book screen, reader — in one assignment. See `consumeHandoff`.
+    /// book screen, reader — replacing whatever was there. See `consumeHandoff`.
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -51,9 +51,9 @@ struct LibraryView: View {
             }
             .navigationTitle("tab.library")
             // At the stack's root rather than on the shelf list, for the same reason
-            // the history used to declare them at its root: the handoff lays both
-            // path values down in one transaction, before any pushed screen — and
-            // its own destinations — exists. Both types are declared here and
+            // the history used to declare them at its root: the handoff lays the
+            // reader down straight after the book, before the book screen has had a
+            // chance to declare anything of its own. Both types are declared here and
             // nowhere deeper: a stack uses only the declaration closest to its root,
             // so a second one on the book screen would be dead weight — which is
             // exactly what it was, announced at every launch by the runtime.
@@ -93,10 +93,13 @@ struct LibraryView: View {
                 // worth more than the last few points of proximity.
                 ToolbarItem(placement: .topBarLeading) { MediaModePicker() }
                 // Two buttons rather than one menu: the ways in are not
-                // interchangeable — adding by URL needs an installed rule while
-                // importing a file needs nothing at all — so a fresh install with
-                // no sources yet has to be able to reach the second one, and
-                // neither is worth burying behind an extra tap.
+                // interchangeable — one fetches from a site, the other reads a file
+                // already on the device — and neither is worth burying behind an
+                // extra tap.
+                //
+                // Not gated on having a source. A pasted address with no rule behind
+                // it is where a rule gets worked out — see `addPastedBook` — so a
+                // fresh install's first book is also how it gets its first source.
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         adding = true
@@ -104,13 +107,7 @@ struct LibraryView: View {
                         Label("library.add", systemImage: "plus")
                     }
                     .accessibilityIdentifier("library.add")
-                    // Rules gate the two media that are read through one. A feed address
-                    // is complete on its own, so gating the feed shelf on an empty rule
-                    // list would leave a fresh install unable to subscribe to anything.
-                    .disabled(
-                        (env.mediaMode.needsRules && env.sites.rules.isEmpty)
-                            || importProgress != nil
-                    )
+                    .disabled(importProgress != nil)
                 }
                 // On every shelf, taking a different kind of file on each. What a
                 // file can be imported *as* is decided by its type — text is a
@@ -258,15 +255,23 @@ struct LibraryView: View {
     ///
     /// The path is *replaced*, not appended to — whatever the shelf was showing, the
     /// handoff means "take me to this sentence", and pushing on top of an old stack
-    /// would put an unrelated book on the way back. One assignment, so the stack
-    /// plays the route as a single push.
+    /// would put an unrelated book on the way back.
+    ///
+    /// Two steps rather than one assignment of the whole route. Laid down together, the
+    /// book screen is never on screen before the reader covers it, so it gets its first
+    /// layout inside the swipe back — and its search drawer comes out of that expanded:
+    /// a bar 54 pt taller than the shelf route's, drawn over the reader mid-swipe, and on
+    /// iOS 18 over the book's own cover. Pushing the book on its own first, unanimated,
+    /// lets it lay out like any other book screen; measured on iOS 26, the swipe back
+    /// then lands on the same bar and the same first row as a book opened from the
+    /// shelf. The price is that screen showing for a frame before the reader slides in.
     private func consumeHandoff() {
         guard let target = env.readingHandoff else { return }
         env.readingHandoff = nil
-        var route = NavigationPath()
-        route.append(target.book)
-        route.append(target)
-        path = route
+        var quiet = Transaction()
+        quiet.disablesAnimations = true
+        withTransaction(quiet) { path = NavigationPath([target.book]) }
+        DispatchQueue.main.async { path.append(target) }
     }
 
     /// Sort, grouping and filter in one menu.
@@ -662,39 +667,26 @@ struct LibraryView: View {
         } description: {
             Text(copy.body)
         } actions: {
-            if copy.needsSource {
-                Text("library.empty.gotoSettings").font(.footnote).foregroundStyle(.secondary)
-            } else {
-                Button("library.add") { adding = true }.buttonStyle(.borderedProminent)
-            }
-            // Offered even with no sources installed: a file on the device is a
-            // book this app can read today, and it is the only such book a fresh
-            // install has. Novels only, for the reason the toolbar button gives.
+            // Offered with no sources installed too: pasting a book's address is how the
+            // first source gets made.
+            Button("library.add") { adding = true }.buttonStyle(.borderedProminent)
+            // Novels only, for the reason the toolbar button gives.
             if env.mediaMode == .novel {
                 Button("library.import") { picking = true }.buttonStyle(.bordered)
             }
         }
     }
 
-    /// What an empty shelf says, and whether the way out of it is installing a source.
+    /// What an empty shelf says.
     ///
-    /// Both questions are per mode. "No sources yet" has to mean no *comic* sources
-    /// when the comic shelf is on screen, since a novel rule is no help to someone
-    /// pasting a comic address — and comics get their own wording for the other case
-    /// too, because "書櫃是空的" in front of a library full of novels reads as though
-    /// they had all gone missing, when what is empty is the half being looked at.
-    private var emptyCopy: (heading: LocalizedStringKey, body: LocalizedStringKey, needsSource: Bool) {
-        let mode = env.mediaMode
-        // A feed shelf is never waiting on a source: an address is the whole of what it
-        // takes to subscribe, so its empty state offers the button rather than sending
-        // the reader to settings for a rule it will never use.
-        if mode.needsRules, env.sites.rules(of: mode).isEmpty {
-            return (mode.noSourcesTitleKey, mode.noSourcesHintKey, true)
-        }
-        switch mode {
-        case .novel: return ("library.empty.books", "library.empty.hint", false)
-        case .comic: return ("library.empty.comic.books", "library.empty.comic.hint", false)
-        case .feed: return ("library.empty.feed.title", "library.empty.feed.hint", false)
+    /// Per mode: comics get their own wording because "書櫃是空的" in front of a library
+    /// full of novels reads as though they had all gone missing, when what is empty is
+    /// the half being looked at.
+    private var emptyCopy: (heading: LocalizedStringKey, body: LocalizedStringKey) {
+        switch env.mediaMode {
+        case .novel: return ("library.empty.books", "library.empty.hint")
+        case .comic: return ("library.empty.comic.books", "library.empty.comic.hint")
+        case .feed: return ("library.empty.feed.title", "library.empty.feed.hint")
         }
     }
 

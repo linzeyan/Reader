@@ -215,6 +215,45 @@ final class FeedServiceTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(chapters.last).isDownloaded)
     }
 
+    /// Deleting an article's text has to stick.
+    ///
+    /// `downloadedAt` being null means "this device has no text for this article", which
+    /// is equally true of one that never had any and of one the reader deleted to get
+    /// their storage back. A refresh that decided what to fetch from that column could
+    /// not tell them apart, so it fetched the deleted piece straight back — pictures and
+    /// all — and went on doing it on every refresh for as long as the publisher listed
+    /// the item. Retention is no help here by design: it never deletes anything still in
+    /// the publisher's window, precisely so that it cannot resurrect it.
+    ///
+    /// The deletion is made through `DownloadStore.delete`, the same call every delete
+    /// scope in the app ends at, rather than by writing the column directly — the point
+    /// is that what the storage screen does survives the next refresh.
+    func testTextTheReaderDeletedIsNotFetchedBackByTheNextRefresh() async throws {
+        StubProtocol.answer = .ok(feed(item("1", body: "<p>One.</p>")))
+        let book = try await service.subscribe(to: address)
+        let article = try XCTUnwrap(try repo.chapters(bookId: book.id).first)
+        XCTAssertTrue(
+            article.isDownloaded,
+            "the subscribe has to have stored the text, or the deletion below proves nothing"
+        )
+
+        try downloads.delete(.chapter(book: book, siteChapterId: article.siteChapterId))
+        XCTAssertFalse(
+            try XCTUnwrap(try repo.chapters(bookId: book.id).first).isDownloaded,
+            "the delete has to have cleared the flag, or the refusal below is vacuous"
+        )
+
+        // The same document again: the item is still listed, still has a body, and is
+        // still the only thing standing between the reader and its return.
+        StubProtocol.answer = .ok(feed(item("1", body: "<p>One.</p>")))
+        _ = try await service.refresh(try XCTUnwrap(repo.book(id: book.id)))
+
+        XCTAssertFalse(
+            try XCTUnwrap(try repo.chapters(bookId: book.id).first).isDownloaded,
+            "an article the reader deleted must not come back on the next refresh"
+        )
+    }
+
     // MARK: - Failures
 
     func testAHostThatRefusesTheRequestIsReported() async {

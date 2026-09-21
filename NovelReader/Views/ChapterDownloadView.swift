@@ -51,13 +51,6 @@ struct ChapterDownloadView: View {
                 // rows past two section headers.
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("downloads.summary")
-                if let progress = env.downloader.progress, progress.bookId == book.id,
-                   env.downloader.status == .running || env.downloader.status == .paused {
-                    ProgressView(value: progress.fraction) {
-                        Text("book.download.progress \(progress.completed) \(progress.total)")
-                            .font(.footnote)
-                    }
-                }
             }
 
             Section {
@@ -133,7 +126,18 @@ struct ChapterDownloadView: View {
                 .accessibilityIdentifier("downloads.selectAll")
             }
         }
-        .safeAreaInset(edge: .bottom) { if !selection.isEmpty { selectionBar } }
+        // The queue takes the slot the selection bar vacates, so the tap that started it
+        // has somewhere to show. Never both: a selection is the reader picking the *next*
+        // thing to queue, and that is the one moment the bar has something more useful to
+        // say than how the last queue is getting on.
+        .safeAreaInset(edge: .bottom) {
+            if !selection.isEmpty {
+                selectionBar
+            } else if let progress = env.downloader.progress, progress.bookId == book.id,
+                      env.downloader.status == .running || env.downloader.status == .paused {
+                queueBar(progress)
+            }
+        }
         .confirmationDialog("downloads.deleteAll.confirm", isPresented: $confirmingDelete) {
             Button("downloads.deleteAll", role: .destructive) {
                 try? env.downloads.delete(.book(book))
@@ -188,6 +192,38 @@ struct ChapterDownloadView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// What the download button actually did, where the reader was looking when they
+    /// pressed it.
+    ///
+    /// The queue has always had a progress row, in the summary section at the top of the
+    /// list — which is nowhere near anybody picking an arc out of a 1300-chapter book.
+    /// From down there the whole visible answer to "download" was the ticks vanishing,
+    /// which is also what an accidental deselect looks like, and the only way to find out
+    /// a queue existed at all was to leave for the download manager.
+    ///
+    /// `lastError` rides along because a *paused* queue is the case a bare progress bar
+    /// reads worst: stalled at a third with no word about why is the reading that sends
+    /// someone to the download manager all over again.
+    private func queueBar(_ progress: DownloadManager.Progress) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ProgressView(value: progress.fraction) {
+                Text("book.download.progress \(progress.completed) \(progress.total)")
+                    .font(.footnote)
+            }
+            if let reason = env.downloader.lastError {
+                Text(reason)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("downloads.queue")
     }
 
     private var sizeText: String {

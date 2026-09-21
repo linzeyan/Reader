@@ -2,7 +2,9 @@ import SwiftUI
 
 /// The generic "paste a link" path. It is the only way to add a book that does
 /// not go through search, and it works for every installed rule because the
-/// matching is done by host + id pattern, not by any hardcoded site.
+/// matching is done by host + id pattern, not by any hardcoded site. A site with
+/// no rule gets one worked out from the pasted page — see
+/// `AppEnvironment.addPastedBook` — so this is also where a first source comes from.
 ///
 /// One address per line, and the lines are independent: each is matched against the
 /// installed rules on its own, so a novel address and a comic address can be pasted
@@ -33,8 +35,9 @@ struct AddBookSheet: View {
                     inputSection
                     // Nothing to list on the feed shelf: an address is the whole of what
                     // it takes, so a section headed "sources" would be an empty box
-                    // implying something is missing.
-                    if env.mediaMode != .feed { sourcesSection }
+                    // implying something is missing. Nor with no sources yet, for the
+                    // same reason: the paste is what will make the first one.
+                    if env.mediaMode != .feed, !env.sites.rules.isEmpty { sourcesSection }
                 } else {
                     progressSection
                 }

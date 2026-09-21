@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shufang 書房 — Offline novel, comic &amp; RSS reader for iOS</title>
+<title>Shufang 書房 — Ad-free offline novel, comic &amp; RSS reader for iOS</title>
 <meta name="description" content="A reader where you choose the sources: paste a URL and a novel, comic or feed becomes a book on your shelf, downloaded for offline reading. No account, no ads.">
 <link rel="canonical" href="https://shufang-reader.pages.dev/en/">
 <link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/">
@@ -34,8 +34,8 @@
       "alternateName": "Shufang",
       "operatingSystem": "iOS 17.0 or later",
       "applicationCategory": "EntertainmentApplication",
-      "softwareVersion": "1.6.2",
-      "dateModified": "2026-09-13",
+      "softwareVersion": "1.7.1",
+      "dateModified": "2026-09-24",
       "description": "A reader where you choose the sources: paste a URL and a novel, comic or feed becomes a book on your shelf, downloaded for offline reading. TXT and EPUB too. No account, no ads, no data collected.",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "installUrl": "https://apps.apple.com/app/id6798525550",
@@ -55,7 +55,7 @@
         {
           "@type": "Question",
           "name": "How do I add a source?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Go to Settings → Sources → + → Create from a URL, paste the URL of any book page on the site, and tap Analyse. 書房 opens that page, derives the book, contents and chapter URL patterns, and shows you the title, the chapter count and the opening of chapter one to confirm; the source is saved only after you confirm. A rule file someone else shared can be added with Import from URL or Import file." }
+          "acceptedAnswer": { "@type": "Answer", "text": "The quickest way is to tap + in your Library and paste the URL of a book page. If the site has no source yet, 書房 opens that page, derives the book, contents and chapter URL patterns, creates the source and adds the book; if it cannot, it tells you why. To look before you save, go to Settings → Sources → + → Create from a URL, paste the URL and tap Analyse: the title, the chapter count and the opening of chapter one are shown to you before the source is saved. A rule file someone else shared can be added with Import from URL or Import file." }
         },
         {
           "@type": "Question",
@@ -114,14 +114,16 @@
         </p>
       </div>
       <figure class="shot">
-        <img src="/img/en/reader.webp" alt="The reader: a Chinese novel set with generous text size and line spacing" width="720" height="1565" fetchpriority="high">
+        <video autoplay muted loop playsinline poster="/img/en/preview.webp" width="720" height="1560" aria-label="A walk through the app: opening a novel, scrolling, reading aloud with the spoken sentence marked, and switching to the dark theme">
+          <source src="/img/en/preview.mp4" type="video/mp4">
+        </video>
       </figure>
     </section>
 
     <section class="ch">
       <div>
         <h2>Paste one link and it works the site out</h2>
-        <p>Paste the URL of a book page. 書房 opens that page, derives the book / contents / chapter URL patterns, and shows you the title, the chapter count and the opening of chapter one to confirm — only then is the source saved. Every other book on that site is then one paste away, and feeds are added the same way.</p>
+        <p>Paste the URL of a book page into your Library. If the site has no source yet, 書房 opens that page, derives the book / contents / chapter URL patterns, creates the source and adds the book — or tells you why it could not. To look before you save, preview the title, the chapter count and the opening of chapter one from Sources first. Every other book on that site is then one paste away, and feeds are added the same way.</p>
       </div>
       <figure class="derive" aria-label="What the app shows before saving a source">
         <span class="url">Book page URL</span>
@@ -151,6 +153,7 @@
         <h2>Built for long reading sessions</h2>
         <p>Scrolling or paged, and you can highlight in either. Any Chinese typeface on the device; text size, line spacing and paragraph spacing set independently; a background of your own — a colour, a gradient, or a photograph.</p>
         <p>A book from a simplified source reads in traditional, and the other way round. Your position is remembered down to the paragraph, not just the chapter.</p>
+        <p>When your eyes are tired, a system voice of your choosing reads to you, with the screen locked if you like. Remember a sentence but not the chapter? Search › My Books finds the passage, and a book's highlights and bookmarks export as Markdown.</p>
       </div>
       <figure class="shot">
         <img src="/img/en/settings.webp" alt="Appearance settings: scrolling or paged, typeface, text size, line and paragraph spacing, script conversion" width="720" height="1565" loading="lazy">
@@ -181,7 +184,7 @@
 
     <section class="ch">
       <div>
-        <h2>Collects nothing</h2>
+        <h2>No ads, and nothing collected</h2>
         <p>No account, no sign-up, no analytics, no ads, no third-party SDK. Bookmarks and progress sync through your own iCloud; chapter text stays on the device. The developer runs no server, so there is nowhere to see what you read.</p>
         <p><a href="/en/privacy/">Privacy policy</a></p>
         <p class="cta">
@@ -200,7 +203,7 @@
         <h3>Does 書房 come with novel or comic sites built in?</h3>
         <p>No. 書房 does not ship with, recommend, or link to any content site; on first launch both the library and the source list are empty. It understands a site only once you paste one of its pages — the same way a browser does.</p>
         <h3>How do I add a source?</h3>
-        <p>Go to Settings → Sources → + → Create from a URL, paste the URL of any book page on the site, and tap Analyse. 書房 opens that page, derives the book, contents and chapter URL patterns, and shows you the title, the chapter count and the opening of chapter one to confirm; the source is saved only after you confirm. A rule file someone else shared can be added with Import from URL or Import file.</p>
+        <p>The quickest way is to tap + in your Library and paste the URL of a book page. If the site has no source yet, 書房 opens that page, derives the book, contents and chapter URL patterns, creates the source and adds the book; if it cannot, it tells you why. To look before you save, go to Settings → Sources → + → Create from a URL, paste the URL and tap Analyse: the title, the chapter count and the opening of chapter one are shown to you before the source is saved. A rule file someone else shared can be added with Import from URL or Import file.</p>
         <h3>Which file formats are supported?</h3>
         <p>Novels: TXT (encoding detected automatically — UTF-8, Big5, GB18030 — and split into chapters by their headings) and EPUB import, with export to TXT or EPUB. Comics: ZIP import and export, laid out as title / chapter / pages. Feeds: RSS, Atom and JSON Feed, with OPML import for a whole list.</p>
         <h3>Do I need an account? Does it cost anything?</h3>
@@ -218,10 +221,16 @@
       <p class="note">書房 does not provide, host, or index any content. Everything comes from URLs you enter yourself, the same way a browser does. Please make sure the sites you visit comply with your local laws and with those sites' own terms of use.</p>
     </section>
   </main>
+  <!-- Markup cannot make autoplay conditional: a reader who asked the system for less
+       motion gets the first frame and a play button instead of a loop. -->
+  <script>
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches)
+      for (const v of document.querySelectorAll("video[autoplay]")) { v.pause(); v.removeAttribute("autoplay"); v.controls = true; }
+  </script>
 
   <footer class="foot">
     <span>© 2026 Ze-Yan Lin</span>
-    <span>Version 1.6.2 · Updated <time datetime="2026-09-13">2026-09-13</time></span>
+    <span>Version 1.7.1 · Updated <time datetime="2026-09-24">2026-09-24</time></span>
     <a href="/en/privacy/">Privacy policy</a>
     <a href="https://github.com/linzeyan/Reader">Source &amp; issues</a>
     <a href="/" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a>

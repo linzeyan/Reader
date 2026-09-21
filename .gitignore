@@ -31,3 +31,7 @@ build-release/
 
 # --- App Store screenshots (regenerate with `make screenshots`) ---
 screenshots/
+
+# --- App Store previews (regenerate with `make previews`; the site's copies live in site/img) ---
+previews/
+__pycache__

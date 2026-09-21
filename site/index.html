@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>書房 — 小說、漫畫、RSS 離線閱讀器｜iPhone、iPad</title>
+<title>書房 — 無廣告的小說、漫畫、RSS 離線閱讀器｜iPhone、iPad</title>
 <meta name="description" content="來源由你決定的 iOS 閱讀器：貼上網址，小說、漫畫或訂閱就變成書櫃裡的一本，下載後離線讀，也讀 TXT 與 EPUB。沒有帳號、沒有廣告、不收集資料。">
 <link rel="canonical" href="https://shufang-reader.pages.dev/">
 <link rel="alternate" hreflang="zh-Hant" href="https://shufang-reader.pages.dev/">
@@ -33,8 +33,8 @@
       "name": "書房",
       "operatingSystem": "iOS 17.0 或以上",
       "applicationCategory": "EntertainmentApplication",
-      "softwareVersion": "1.6.2",
-      "dateModified": "2026-09-13",
+      "softwareVersion": "1.7.1",
+      "dateModified": "2026-09-24",
       "description": "來源由你決定的閱讀器：貼上網址，小說、漫畫或訂閱就變成書櫃裡的一本，下載後離線讀，也讀 TXT 與 EPUB。沒有帳號、沒有廣告、不收集資料。",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "TWD" },
       "installUrl": "https://apps.apple.com/app/id6798525550",
@@ -54,7 +54,7 @@
         {
           "@type": "Question",
           "name": "要怎麼新增一個來源？",
-          "acceptedAnswer": { "@type": "Answer", "text": "到「設定 → 來源 → ＋ → 自動建立來源」，貼上任何一本書的書籍頁網址，按「分析」。書房會實際打開那一頁，推導出書籍頁、目錄與章節頁的規則，把書名、章數與第一章開頭抓給你確認，確認後才存檔。也可以用「從網址匯入規則」或「檔案匯入」加入別人分享的規則檔。" }
+          "acceptedAnswer": { "@type": "Answer", "text": "最快的方法是在書櫃按「＋」，直接貼上書籍頁網址：還沒有來源的網站，書房會實際打開那一頁，推導出書籍頁、目錄與章節頁的規則，建立來源並把書加進書櫃；推導不出來會直接告訴你原因。想先確認再存，就到「設定 → 來源 → ＋ → 自動建立來源」，貼上網址按「分析」，書名、章數與第一章開頭抓給你看過才存檔。也可以用「從網址匯入規則」或「檔案匯入」加入別人分享的規則檔。" }
         },
         {
           "@type": "Question",
@@ -113,14 +113,16 @@
         </p>
       </div>
       <figure class="shot">
-        <img src="/img/zh-Hant/reader.webp" alt="書房的閱讀畫面：正體中文小說內文，字級與行距寬鬆" width="720" height="1565" fetchpriority="high">
+        <video autoplay muted loop playsinline poster="/img/zh-Hant/preview.webp" width="720" height="1560" aria-label="操作示範：打開小說、捲動閱讀、朗讀時標出正在唸的句子，再換成深色主題">
+          <source src="/img/zh-Hant/preview.mp4" type="video/mp4">
+        </video>
       </figure>
     </section>
 
     <section class="ch">
       <div>
         <h2>貼一個網址，它自己看懂</h2>
-        <p>貼上一本書的頁面網址，書房會實際打開那一頁，推導出「書籍頁／目錄／章節頁」的規則，先把書名、章數與第一章抓給你確認，確認過才存起來。之後同一個網站的每一本書，貼網址就能加；訂閱源也是貼網址就加得進來。</p>
+        <p>在書櫃貼上一本書的頁面網址，還沒有來源的網站，書房會實際打開那一頁，推導出「書籍頁／目錄／章節頁」的規則，建立來源並把書加進來；推導不出來會直接告訴你原因。想先確認再存，也可以在來源頁先看書名、章數與第一章。之後同一個網站的每一本書，貼網址就能加；訂閱源也是貼網址就加得進來。</p>
       </div>
       <figure class="derive" aria-label="自動建立來源時的確認內容">
         <span class="url">書籍頁網址</span>
@@ -150,6 +152,7 @@
         <h2>為長時間閱讀調整過</h2>
         <p>捲動或分頁，兩種讀法都能劃線。裝置上任何一款中文字體都能用，字級、行距、段距各自可調，背景可以是顏色、漸層或你自己的照片。</p>
         <p>簡體站的書能整本讀成正體，反過來也行。進度記到「讀到哪一段」，不只記到哪一章。</p>
+        <p>眼睛累了可以交給系統語音朗讀，聲音自己挑，鎖定螢幕照樣聽。記得一句話卻忘了在哪一章，「搜尋 › 我的書」會直接找到那一段；劃線與書籤也能整本匯出成 Markdown。</p>
       </div>
       <figure class="shot">
         <img src="/img/zh-Hant/settings.webp" alt="外觀設定：捲動或分頁、字體、字級、行距、段距、簡繁轉換" width="720" height="1565" loading="lazy">
@@ -180,7 +183,7 @@
 
     <section class="ch">
       <div>
-        <h2>不收集你的資料</h2>
+        <h2>沒有廣告，不收集你的資料</h2>
         <p>沒有帳號、沒有註冊、沒有分析追蹤、沒有廣告、沒有第三方 SDK。書籤與閱讀進度透過你自己的 iCloud 同步，章節內文留在裝置上。開發者沒有伺服器，也就沒有地方看到你讀什麼。</p>
         <p><a href="/privacy/">隱私權政策全文</a></p>
         <p class="cta">
@@ -199,7 +202,7 @@
         <h3>書房有內建小說或漫畫網站嗎？</h3>
         <p>沒有。書房不內建、不推薦、也不連向任何內容網站，第一次打開時書櫃與來源清單都是空的。你貼上哪個網頁的網址，它才認得那個網站，就像瀏覽器一樣。</p>
         <h3>要怎麼新增一個來源？</h3>
-        <p>到「設定 → 來源 → ＋ → 自動建立來源」，貼上任何一本書的書籍頁網址，按「分析」。書房會實際打開那一頁，推導出書籍頁、目錄與章節頁的規則，把書名、章數與第一章開頭抓給你確認，確認後才存檔。也可以用「從網址匯入規則」或「檔案匯入」加入別人分享的規則檔。</p>
+        <p>最快的方法是在書櫃按「＋」，直接貼上書籍頁網址：還沒有來源的網站，書房會實際打開那一頁，推導出書籍頁、目錄與章節頁的規則，建立來源並把書加進書櫃；推導不出來會直接告訴你原因。想先確認再存，就到「設定 → 來源 → ＋ → 自動建立來源」，貼上網址按「分析」，書名、章數與第一章開頭抓給你看過才存檔。也可以用「從網址匯入規則」或「檔案匯入」加入別人分享的規則檔。</p>
         <h3>支援哪些檔案格式？</h3>
         <p>小說：TXT（自動判斷 UTF-8、Big5、GB18030 編碼並依章名分章）與 EPUB 匯入，也能匯出成 TXT 或 EPUB。漫畫：ZIP 匯入與匯出，資料夾結構為「書名／章節／頁面」。訂閱：RSS、Atom、JSON Feed，清單可用 OPML 整批匯入。</p>
         <h3>需要帳號嗎？要付費嗎？</h3>
@@ -217,10 +220,16 @@
       <p class="note">書房不提供、不代管、不索引任何內容。所有內容都來自你自己輸入的網址，就像瀏覽器一樣。請自行確認你所瀏覽的網站符合當地法規與該網站的使用條款。</p>
     </section>
   </main>
+  <!-- Markup cannot make autoplay conditional: a reader who asked the system for less
+       motion gets the first frame and a play button instead of a loop. -->
+  <script>
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches)
+      for (const v of document.querySelectorAll("video[autoplay]")) { v.pause(); v.removeAttribute("autoplay"); v.controls = true; }
+  </script>
 
   <footer class="foot">
     <span>© 2026 Ze-Yan Lin</span>
-    <span>版本 1.6.2・<time datetime="2026-09-13">2026-09-13</time> 更新</span>
+    <span>版本 1.7.1・<time datetime="2026-09-24">2026-09-24</time> 更新</span>
     <a href="/privacy/">隱私權政策</a>
     <a href="https://github.com/linzeyan/Reader">原始碼與問題回報</a>
     <a href="/zh-Hans/" lang="zh-Hans" hreflang="zh-Hans">简体中文</a>

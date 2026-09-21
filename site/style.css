@@ -46,7 +46,7 @@ body {
 }
 a { color: var(--accent); text-underline-offset: .18em; text-decoration-thickness: 1px; }
 a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-img { display: block; max-width: 100%; height: auto; }
+img, video { display: block; max-width: 100%; height: auto; }
 h1, h2 { font-family: var(--serif); font-weight: 600; letter-spacing: .02em; }
 p { margin: 0 0 1em; }
 
@@ -141,7 +141,7 @@ h3 {
 
 /* A phone screenshot wider than a phone tells nothing extra; cap it and centre it. */
 .shot { margin: 0 auto; max-width: 18rem; width: 100%; }
-.shot img {
+.shot img, .shot video {
   border-radius: 24px;
   border: 1px solid var(--rule);
   background: #F2F2F7;

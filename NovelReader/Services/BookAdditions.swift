@@ -17,7 +17,7 @@ import Foundation
 final class BookAdditions {
     /// What a run is turning addresses into, which is also what decides how it is run.
     enum Kind {
-        /// Novels and comics, matched against the installed rules.
+        /// Novels and comics, matched against the installed rules or given one.
         case book
         /// Subscriptions, pasted one per line.
         case subscription
@@ -41,8 +41,9 @@ final class BookAdditions {
     struct Work {
         /// Subscribes to one address, and hands back the name it ended up under.
         var subscribe: (String, @escaping FeedService.ProgressHandler) async throws -> String
-        /// Adds one address as a novel or a comic, by whatever installed rule it matches,
-        /// and hands back its title.
+        /// Adds one address as a novel or a comic, by whatever installed rule it matches —
+        /// or by one worked out from the page and installed, if none does — and hands back
+        /// its title.
         var addBook: (String) async throws -> String
         /// Puts a subscription on the shelf without reading it, under `title` or whatever
         /// its own address suggests. Nil if the address is not one at all.

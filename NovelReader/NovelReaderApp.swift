@@ -28,6 +28,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // been answered — and a book opened in that window is laid out in the system face
         // with no sign that anything went wrong. See `InstalledFonts`.
         InstalledFonts.restore(into: .shared)
+        #if DEBUG
+        TouchIndicator.armIfRequested()
+        #endif
         // `using: .main` rather than the default private queue: everything the
         // handler touches — the download queue, the fetcher's one web view — is
         // main-actor state, so the alternative is a hop that has to smuggle a

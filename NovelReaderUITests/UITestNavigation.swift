@@ -71,14 +71,29 @@ extension XCUIApplication {
     /// Filtered by frame rather than taken as the first match: the paragraph straddling
     /// the top of the window is on screen and comes first in the tree, but its own top is
     /// above the glass, so its frame alone says nothing about what the reader can see.
+    ///
+    /// Read out of one snapshot rather than by querying element by element. Every caller
+    /// asks this *while the page is moving* — that is the whole point of asking — and a
+    /// query counts the paragraphs against one tree and then resolves each index against
+    /// a fresh one. A page that scrolled in between recycles paragraphs, the last index
+    /// no longer exists, and XCUITest fails the walk with "No matches found for Element
+    /// at index N" rather than returning a short list. The failure lands on whichever
+    /// walk happened to be reading a moving page, so it reads as a different flaky test
+    /// each run.
     func topParagraphLabel() -> String {
-        let paragraphs = descendants(matching: .any).matching(identifier: "reader.paragraph")
-        let window = windows.firstMatch.frame
-        return (0..<paragraphs.count)
-            .map { paragraphs.element(boundBy: $0) }
-            .filter { $0.frame.maxY > window.minY && $0.frame.minY < window.maxY }
-            .min(by: { $0.frame.minY < $1.frame.minY })?
-            .label ?? ""
+        guard let window = try? windows.firstMatch.snapshot() else { return "" }
+        var top: XCUIElementSnapshot?
+        var pending = [window]
+        while let node = pending.popLast() {
+            pending.append(contentsOf: node.children)
+            guard node.identifier == "reader.paragraph",
+                  node.frame.maxY > window.frame.minY,
+                  node.frame.minY < window.frame.maxY
+            else { continue }
+            if let highest = top, highest.frame.minY <= node.frame.minY { continue }
+            top = node
+        }
+        return top?.label ?? ""
     }
 
     /// Scrolls until a row is there to be tapped.

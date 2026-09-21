@@ -499,6 +499,96 @@ final class AppDatabase {
             )
         }
 
+        // The text of every downloaded chapter, and an index over it, so a reader can
+        // find the passage they remember instead of the chapter they guess.
+        //
+        // The text is *copied* here rather than read from the files it already lives in.
+        // That is a real cost — measured at roughly the size of the text again — and it
+        // buys the only thing a file tree cannot do: answer "which of four hundred
+        // chapters contains this" without opening four hundred files. It is kept beside
+        // the index rather than inside it because FTS5's delete command has to be handed
+        // the original text of the row it is removing, and a file that has already been
+        // deleted cannot supply it (see the triggers below).
+        //
+        // `detail=none` drops token positions, which are the bulk of an FTS5 index —
+        // measured here at 0.6× the stored text instead of 1.2×. It also makes phrase
+        // queries an error rather than a slower answer, which is why `FullTextQuery`
+        // sends a conjunction of trigrams and `FullTextExcerpt` re-reads the file to
+        // confirm the run really is contiguous. `trigram` is the only tokenizer that can
+        // see inside a Chinese sentence at all; the default splits on spaces, and these
+        // books have none.
+        //
+        // Never synced. This describes what is on *this* device, exactly like
+        // `Chapter.downloadedAt`, which `CloudSync` deliberately does not carry — an
+        // index of text the other phone has never downloaded would offer passages it
+        // cannot open.
+        migrator.registerMigration("v13.chapterText") { db in
+            try db.create(table: "chapterText") { t in
+                // A plain `INTEGER PRIMARY KEY`, so it *is* the rowid: FTS5 addresses an
+                // external content table by rowid and nothing else.
+                t.primaryKey("id", .integer)
+                // Deleting a chapter takes its text with it, and deleting a book takes
+                // its chapters — so a book leaving the shelf cannot leave searchable text
+                // behind. Unique because this is one row per chapter, and a second row
+                // would put the same chapter in the results twice.
+                t.column("chapterId", .text)
+                    .notNull()
+                    .unique()
+                    .references(Chapter.databaseTableName, onDelete: .cascade)
+                t.column("text", .text).notNull()
+            }
+
+            // Spelled in SQL because there is no builder for a virtual table, and pinned
+            // to the shape it shipped with for the reason v6 and v9 give.
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE "chapterTextIndex" USING fts5(
+                    "text",
+                    content='chapterText',
+                    content_rowid='id',
+                    detail='none',
+                    tokenize='trigram'
+                )
+                """)
+
+            // An external content index is not maintained by SQLite: these three are what
+            // keep it in step, and they are the documented pattern for it. They matter
+            // most on the path nothing else covers — a cascade. Deleting a book fires no
+            // app code at all, and without the delete trigger the index would keep
+            // answering with chapters whose rows are gone.
+            //
+            // The delete command is handed `old."text"` because that is how FTS5 finds
+            // the tokens to remove; it has no copy of its own to consult. An update is a
+            // delete followed by an insert for the same reason — re-downloading a chapter
+            // whose site corrected its text must not leave the old words searchable.
+            try db.execute(sql: """
+                CREATE TRIGGER "chapterText_ai" AFTER INSERT ON "chapterText" BEGIN
+                    INSERT INTO "chapterTextIndex"("rowid", "text")
+                    VALUES (new."id", new."text");
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER "chapterText_ad" AFTER DELETE ON "chapterText" BEGIN
+                    INSERT INTO "chapterTextIndex"("chapterTextIndex", "rowid", "text")
+                    VALUES ('delete', old."id", old."text");
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER "chapterText_au" AFTER UPDATE ON "chapterText" BEGIN
+                    INSERT INTO "chapterTextIndex"("chapterTextIndex", "rowid", "text")
+                    VALUES ('delete', old."id", old."text");
+                    INSERT INTO "chapterTextIndex"("rowid", "text")
+                    VALUES (new."id", new."text");
+                END
+                """)
+
+            // Nothing is backfilled here. The text of an already-downloaded chapter is in
+            // a file this layer cannot reach — the database has never held a path — so
+            // filling the index is `FullTextIndex.indexPending`'s job, off the main
+            // thread, after launch. An empty index is the honest starting state: it says
+            // "nothing has been read in yet", which is true, where a half-filled one
+            // would quietly answer some searches and not others.
+        }
+
         return migrator
     }
 }

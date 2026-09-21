@@ -17,6 +17,32 @@ final class ReaderTextScrollView: UIScrollView {
     /// switching modes does not move the left edge of the book.
     static let textMargin: CGFloat = 20
 
+    /// The longest line this reader will set, counted in characters rather than points.
+    ///
+    /// Counted that way because the reader owns the font size: a measure fixed in points
+    /// would hold 21 characters for someone reading at 32pt and 52 for someone at 13pt,
+    /// and the number of characters is what the eye actually loses its place over. Past
+    /// roughly this many, the return sweep starts landing on the line just read.
+    ///
+    /// On a phone this never binds — 350pt of glass at 19pt is eighteen characters, half
+    /// the cap — which is the point: it changes nothing anybody has already been reading,
+    /// and exists for the iPad, where the same column was being set thirteen hundred
+    /// points wide.
+    static let maxCharactersPerLine: CGFloat = 36
+
+    /// How wide to set the text, given the glass available and the size it is set at.
+    ///
+    /// Shared with the paginated renderer, which reaches for it by name: the two must
+    /// agree, or switching modes mid-chapter would reflow the book under the reader.
+    static func textWidth(in available: CGFloat, fontSize: CGFloat) -> CGFloat {
+        let full = max(0, available - textMargin * 2)
+        // A size of zero means nobody has said yet — during the first layout pass, before
+        // a config has reached the coordinator. Capping against it would set the column
+        // to nothing and lay the chapter out at a width no reader will ever see.
+        guard fontSize > 0 else { return full }
+        return min(full, fontSize * maxCharactersPerLine)
+    }
+
     private let canvas = ReaderTextCanvas()
     private let footer = ReaderTextFooter()
     private var lastOffset: CGFloat = 0
@@ -26,7 +52,17 @@ final class ReaderTextScrollView: UIScrollView {
     private(set) var isMovingUp = false
 
     /// The measure text is laid out in.
-    var textWidth: CGFloat { max(0, bounds.width - Self.textMargin * 2) }
+    var textWidth: CGFloat {
+        Self.textWidth(in: bounds.width, fontSize: coordinator?.textPointSize ?? 0)
+    }
+
+    /// Where the column's left edge sits.
+    ///
+    /// Centred rather than pinned at `textMargin`, because on glass wide enough for the
+    /// cap to bite, the left-over space has to fall on both sides — a column held against
+    /// the left edge of an iPad with three hundred points of nothing beside it reads as a
+    /// layout that failed rather than one that chose.
+    var textInset: CGFloat { (bounds.width - textWidth) / 2 }
 
     /// Where the top of the window sits in the content. The reading position, exactly,
     /// with no container to ask and nothing to correct for.
@@ -84,12 +120,12 @@ final class ReaderTextScrollView: UIScrollView {
     /// Puts the canvas over the visible slice and lines the footer up under the text.
     private func positionCanvas() {
         canvas.frame = CGRect(
-            x: Self.textMargin, y: contentOffset.y,
+            x: textInset, y: contentOffset.y,
             width: textWidth, height: bounds.height
         )
         canvas.columnOrigin = contentOffset.y
         footer.frame = CGRect(
-            x: Self.textMargin, y: coordinator?.contentHeight ?? 0,
+            x: textInset, y: coordinator?.contentHeight ?? 0,
             width: textWidth, height: ReaderTextFooter.height
         )
     }

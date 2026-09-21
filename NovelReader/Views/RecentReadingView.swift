@@ -134,13 +134,11 @@ struct RecentReadingView: View {
 
     /// Where a row leads, or nil for a book whose chapter the site has dropped.
     ///
-    /// The same line `ReadingMarksView` draws: the entry stays, because the reader did
-    /// read this book, but it is not offered as a destination — there is nowhere left to
-    /// send them, and the first chapter is not a lesser answer, it is the wrong one for
-    /// somebody four hundred chapters in.
+    /// Shared with the "continue reading" intent, which asks the same question of the
+    /// same list from outside the app — see `ReadingTarget.init(continuing:)`, which is
+    /// where the rule now lives so that the two cannot drift.
     private func target(for entry: RecentRead) -> ReadingTarget? {
-        guard entry.chapterTitle != nil, let position = entry.position else { return nil }
-        return ReadingTarget(book: entry.book, position: position)
+        ReadingTarget(continuing: entry)
     }
 
     /// Reached by a fresh install, and by a reader who has just cleared the history.

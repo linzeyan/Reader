@@ -47,6 +47,52 @@ final class ChapterColumnTests: XCTestCase {
         return column
     }
 
+    // MARK: - The title is not a paragraph
+
+    /// An article's title carries a link, and nothing about where it is drawn can be
+    /// found by asking which paragraph the finger is in.
+    ///
+    /// This is the fact `ReaderScrollCoordinator` was wrong about. Its link lookup
+    /// narrowed the search to the tapped paragraph — right and cheap for a link inside a
+    /// sentence — while the title's range sits ahead of every paragraph and its band has
+    /// no `ParagraphFrame` at all, so `hit` returned nil and the lookup never ran. The
+    /// scrolling reader could therefore never open a title the paginated one always
+    /// could, which looks a link up over a whole page.
+    ///
+    /// Pinned here rather than at the coordinator because this is where the asymmetry is
+    /// created. If the title ever becomes an ordinary paragraph, the coordinator's
+    /// fallback turns into dead code and this is the test that says so.
+    func testAnArticlesTitleLinkSitsOutsideEveryParagraph() throws {
+        let link = try XCTUnwrap(URL(string: "https://example.com/piece"))
+        let text = ChapterText(
+            title: "渡口的燈",
+            titleLink: link,
+            blocks: ["第一段。", "第二段。"].map(ArticleBlock.paragraph),
+            typography: typography(),
+            alignment: .natural
+        )
+
+        let title = try XCTUnwrap(
+            text.links.first { $0.url == link },
+            "the title has to carry its link, or there is nothing for any tap to find"
+        )
+        XCTAssertFalse(
+            text.paragraphRanges.contains { NSIntersectionRange($0, title.range).length > 0 },
+            "a lookup narrowed to a paragraph can never reach the title"
+        )
+        XCTAssertGreaterThan(
+            try XCTUnwrap(text.paragraphRanges.first).location, 0,
+            "the head the coordinator falls back to is what holds the title, so it cannot be empty"
+        )
+
+        let column = ChapterColumn(text: text, width: 350)
+        column.layOut()
+        XCTAssertEqual(
+            column.paragraphFrames.count, 2,
+            "frames are built one per paragraph, so the title has none to be hit by"
+        )
+    }
+
     // MARK: - Layout
 
     func testLayingOutGivesEveryParagraphAPlaceInTheColumn() {
@@ -397,5 +443,89 @@ final class ChapterColumnTests: XCTestCase {
         let column = column([])
         XCTAssertTrue(column.paragraphFrames.isEmpty)
         XCTAssertEqual(column.anchor(atY: 0), .start)
+    }
+
+    // MARK: - How wide a line is set
+
+    /// The widths a real device actually offers, so the claims below are about glass
+    /// somebody reads on rather than about arithmetic.
+    private enum Glass {
+        static let phone: CGFloat = 393
+        static let padPortrait: CGFloat = 834
+        static let padLandscape: CGFloat = 1366
+    }
+
+    private func measure(_ available: CGFloat, at size: CGFloat = 19) -> CGFloat {
+        ReaderTextScrollView.textWidth(in: available, fontSize: size)
+    }
+
+    /// The rule this cap exists for. A column set the full width of an iPad is over
+    /// thirteen hundred points of unbroken text, and the eye finishing such a line has
+    /// no reliable way back to the start of the next one — it lands on the line just
+    /// read. Nothing else in the reader notices, which is why this is pinned here.
+    func testALineIsNeverSetLongerThanTheEyeCanFollowBackToTheNextOne() {
+        let characters = measure(Glass.padLandscape) / 19
+        XCTAssertLessThanOrEqual(
+            characters, ReaderTextScrollView.maxCharactersPerLine,
+            "an iPad line has to be capped in characters, not left at the width of the glass"
+        )
+        XCTAssertGreaterThan(
+            characters, 20, "capped is not the same as cramped — this is a reading measure"
+        )
+    }
+
+    /// The other half, and the one that makes this safe to ship: a phone never reaches
+    /// the cap, so every reader already holding one sees the identical column. A change
+    /// to the reading measure that moved the text on a phone would be a redesign of the
+    /// app's main screen rather than an iPad fix.
+    func testAPhoneIsReadingExactlyTheColumnItWasBeforeTheCapExisted() {
+        XCTAssertEqual(
+            measure(Glass.phone), Glass.phone - ReaderTextScrollView.textMargin * 2,
+            "on a phone the measure is still the glass less the margins, to the point"
+        )
+    }
+
+    /// Counted in characters rather than points, which is the whole reason the rule takes
+    /// a font size. Someone reading at 32pt and someone at 13pt should lose their place
+    /// at the same *word*, and a cap fixed in points would give the first of them a third
+    /// of the line the second gets.
+    func testTheCapIsTheSameNumberOfCharactersWhateverSizeTheReaderSetsIt() {
+        let small = measure(Glass.padLandscape, at: 13) / 13
+        let large = measure(Glass.padLandscape, at: 32) / 32
+        XCTAssertEqual(
+            small, large, accuracy: 0.01,
+            "the measure has to hold the same number of characters at either size"
+        )
+        XCTAssertGreaterThan(
+            measure(Glass.padLandscape, at: 32), measure(Glass.padLandscape, at: 13),
+            "and bigger type therefore has to occupy a wider column, not the same one"
+        )
+    }
+
+    /// The first layout pass, before any config has reached the coordinator. Capping
+    /// against a size nobody has stated yet would set the column to nothing — and a
+    /// chapter laid out at zero width measures nothing, which the test above this file's
+    /// `width: 0` case already shows is a reader with no text and no position.
+    func testAWidthAskedForBeforeAnyoneSaidTheSizeIsTheFullMeasureRatherThanNothing() {
+        XCTAssertEqual(
+            measure(Glass.padPortrait, at: 0),
+            Glass.padPortrait - ReaderTextScrollView.textMargin * 2,
+            "an unstated size means 'not said yet', never 'a column zero points wide'"
+        )
+    }
+
+    /// Both renderers reach for the same two constants rather than matching numbers, so
+    /// that a reader switching modes mid-chapter lands on the same line. This pins the
+    /// arithmetic they share; `PaginatedChapterView` composes it out of the same names.
+    func testTheTwoRenderersAreSetToOneMeasure() {
+        let capped = ReaderTextScrollView.maxCharactersPerLine * 19
+        XCTAssertEqual(
+            measure(Glass.padLandscape), capped,
+            "wide glass gives the cap itself, which is what the paginated frame is set to"
+        )
+        XCTAssertLessThan(
+            capped, Glass.padLandscape - ReaderTextScrollView.textMargin * 2,
+            "and the cap has to actually bite on an iPad, or none of this does anything"
+        )
     }
 }

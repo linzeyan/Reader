@@ -89,6 +89,7 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
     private func text(
         _ chapters: [ReaderModel.LoadedChapter],
         palette: ReaderPalette = .light,
+        isOnScreen: Bool = true,
         onPlaceChange: @escaping (ReaderPlace) -> Void = { _ in },
         onNeedsNext: @escaping () -> Void = {},
         onRanOut: @escaping () -> Void = {},
@@ -101,6 +102,7 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             chapters: chapters,
             metrics: settings.metrics(forBook: "book", kind: .novel),
             palette: palette,
+            isOnScreen: isOnScreen,
             highlights: [:], marked: nil,
             target: nil, footer: .none,
             onPlaceChange: onPlaceChange, onNeedsNext: onNeedsNext, onNeedsPrevious: {},
@@ -276,6 +278,10 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
     /// a reader on the system theme gets two ink changes back to back. The first empties
     /// the stack to rebuild; the second finds nothing to ask where the reader is and used
     /// to carry that nothing into the rebuild as the place to restore.
+    ///
+    /// Off screen the pair is now held rather than rebuilt — see the two tests below — so
+    /// this is made on screen, where the path is still reachable: a type size dragged
+    /// through several steps is the same two changes landing mid-rebuild.
     func testAnAppearanceFlipWhileTheColumnsAreRebuildingLeavesTheReaderWhereTheyWere() async throws {
         let window = [chapter(1, paragraphs: 30), chapter(2, paragraphs: 30),
                       chapter(3, paragraphs: 30)]
@@ -310,6 +316,81 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
                 + "is told down, and the throttle then refuses the correction — which is "
                 + "how a bogus chapter reaches the database, got \(reported.map(\.chapterIndex))"
         )
+    }
+
+    /// The same pair of flips, made where iOS actually makes them — off screen — costs
+    /// nothing at all.
+    ///
+    /// On a phone every such departure rebuilt each loaded chapter twice over — 9 of 25 in
+    /// one device trace, 2.7 seconds of layout at worst on an XR — to end exactly where it
+    /// began. Asserted as the very same column objects, because "the reader is where they
+    /// were" holds through a rebuild too; that is the test above. The trace line is
+    /// asserted as well, because it is how a phone shows this working: a snapshot that no
+    /// longer rebuilds leaves nothing behind to tell it from a snapshot that never came.
+    func testAnAppearanceFlippedAndFlippedBackOffScreenLaysNothingOutAgain() async throws {
+        trace.isOn = true
+        let window = [chapter(1, paragraphs: 30), chapter(2, paragraphs: 30)]
+        try await show(window)
+        // Held, so a discarded column cannot hand its address to a new one.
+        let before = coordinator.placed.map(\.column)
+
+        coordinator.update(with: text(window, palette: .dark, isOnScreen: false))
+        coordinator.update(with: text(window, palette: .light, isOnScreen: false))
+        coordinator.update(with: text(window, palette: .light))
+
+        XCTAssertEqual(
+            coordinator.placed.map { ObjectIdentifier($0.column) },
+            before.map(ObjectIdentifier.init),
+            "a flip and its undo made while nobody can see the page must not throw a "
+                + "single column away"
+        )
+        XCTAssertEqual(lines(matching: "relayout why=").count, 1, "only the first build")
+        let held = lines(matching: "relayout held")
+        XCTAssertEqual(held.count, 1, "once for the flip, and nothing for its undo: \(held)")
+        XCTAssertTrue(held.first?.contains("why=ink") == true, "\(held)")
+    }
+
+    /// And a change that really happened while the page was away is not lost to the
+    /// waiting: it is built as soon as the page is back. Held for ever, the reader would
+    /// return to text in the ink of the appearance they left — near-black on near-black,
+    /// going from light to dark.
+    func testAnAppearanceChangedOffScreenIsBuiltWhenThePageComesBack() async throws {
+        let window = [chapter(1, paragraphs: 30), chapter(2, paragraphs: 30)]
+        try await show(window)
+        let before = coordinator.placed.map(\.column)
+
+        coordinator.update(with: text(window, palette: .dark, isOnScreen: false))
+        // The whole array, not each pair: a rebuild empties the stack, and a check over
+        // pairs of an empty stack passes — which is how this line once passed with the
+        // waiting taken out.
+        XCTAssertEqual(
+            coordinator.placed.map { ObjectIdentifier($0.column) },
+            before.map(ObjectIdentifier.init),
+            "off screen the change waits"
+        )
+
+        coordinator.update(with: text(window, palette: .dark))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while coordinator.placed.count < window.count {
+            guard ContinuousClock.now < deadline else {
+                return XCTFail("the rebuild never finished")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        for placed in coordinator.placed {
+            XCTAssertFalse(
+                before.contains { $0 === placed.column },
+                "chapter \(placed.chapterIndex) is still the column built in the old ink"
+            )
+            let text = placed.column.text
+            let body = try XCTUnwrap(text.paragraphRanges.first)
+            XCTAssertEqual(
+                text.attributed.attribute(.foregroundColor, at: body.location, effectiveRange: nil)
+                    as? UIColor,
+                ReaderPalette.dark.foreground.uiColor,
+                "the page came back in the appearance it is now in"
+            )
+        }
     }
 
     // MARK: - Where the reader is
@@ -445,6 +526,34 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             back + view.visibleHeight, view.readingOffset,
             "going back a whole window with no overlap would lose the line they were on"
         )
+    }
+
+    /// A turn lands on the paragraph it aimed at in the chapter it aimed into — not on the
+    /// same paragraph number in some other loaded chapter.
+    ///
+    /// Every chapter numbers its paragraphs from zero, so a number alone names one
+    /// paragraph per loaded chapter, and the aim has to carry which. Made across a seam,
+    /// where the paragraph aimed at is in the next chapter and the one with the same number
+    /// in the chapter above is the wrong answer still at hand: found first, it throws the
+    /// reader a chapter backwards on a tap that asked to go on.
+    func testATurnAcrossASeamLandsInTheNextChapter() async throws {
+        try await show([chapter(1, paragraphs: 40), chapter(2, paragraphs: 40)])
+        coordinator.scroll(
+            to: TextAnchor(paragraph: 39, characterOffset: 0), inChapter: 1, animated: false
+        )
+        let aimed = try XCTUnwrap(coordinator.visibleParagraphs().last { $0.minY > 0 })
+        XCTAssertEqual(
+            aimed.chapterIndex, 2, "the window has to straddle the seam for this to mean anything"
+        )
+
+        let forward = try XCTUnwrap(coordinator.pageTurnDestination(.next))
+        XCTAssertGreaterThan(forward, view.readingOffset, "going on has to move forward")
+        view.setReadingOffset(forward, animated: false)
+
+        let top = try XCTUnwrap(coordinator.visibleParagraphs().first)
+        XCTAssertEqual(top.chapterIndex, 2)
+        XCTAssertEqual(top.paragraph, aimed.paragraph)
+        XCTAssertEqual(top.minY, 0, accuracy: 1, "and sits against the top of the window")
     }
 
     /// While there is text on the other side of the window, a tap has to move it.

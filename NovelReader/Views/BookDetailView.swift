@@ -789,6 +789,35 @@ struct ReadingTarget: Hashable {
     let position: ReadingPosition
 }
 
+extension ReadingTarget {
+    /// Where a reading-history entry leads, or nil for a book whose chapter the site has
+    /// since dropped.
+    ///
+    /// The entry itself stays — the reader did read this book — but it is not offered as
+    /// a destination: there is nowhere left to send them, and the first chapter is not a
+    /// lesser answer, it is the wrong one for somebody four hundred chapters in.
+    ///
+    /// Here rather than on `RecentRead` so the dependency runs the way round it should:
+    /// this is a view's idea of a destination, and the model has no business knowing it.
+    init?(continuing entry: RecentRead) {
+        guard entry.chapterTitle != nil, let position = entry.position else { return nil }
+        self.init(book: entry.book, position: position)
+    }
+
+    /// Where "continue reading" goes, given the history in the order it is kept.
+    ///
+    /// The most recent entry that can actually be opened, which is not the same as the
+    /// most recent entry. A reader whose last book had its chapter dropped by the site
+    /// still has a book to continue — the one under it — and answering nothing there
+    /// would send them to the shelf to find a shelf they were already looking at.
+    ///
+    /// A fact about the history rather than about the app, so it is settled here and
+    /// `AppEnvironment.continueReading` only has to apply it.
+    static func continuing(_ history: [RecentRead]) -> ReadingTarget? {
+        history.lazy.compactMap(ReadingTarget.init(continuing:)).first
+    }
+}
+
 struct ChapterRow: View {
     let chapter: Chapter
     /// How far the reader got, in reading order, which is what makes "new" answerable —

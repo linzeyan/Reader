@@ -39,16 +39,14 @@ enum ReaderTapZone {
 
     /// One paragraph, as the scroll view currently has it placed in the window.
     ///
-    /// Carries which text the frame belongs to, not only where it sits: the same
-    /// measurements now serve two readers — the tap zones aim scrolls by `id`, and the
-    /// reading position needs the chapter and paragraph the top of the window is in.
+    /// Carries which text the frame belongs to, not only where it sits: the tap zones aim
+    /// a turn at it, and the reading position needs the chapter and paragraph the top of
+    /// the window is in.
     struct VisibleParagraph: Equatable {
         /// Reading-order index of the chapter this paragraph belongs to.
         let chapterIndex: Int
         /// The paragraph's index within its chapter — what a `TextAnchor` stores.
         let paragraph: Int
-        /// The scroll destination for this paragraph — `TextAnchor.paragraphID`.
-        let id: String
         /// Distance from the top of the window to the top of the paragraph. Negative once
         /// the paragraph has started to scroll off.
         let minY: CGFloat
@@ -59,8 +57,16 @@ enum ReaderTapZone {
 
     /// Where to scroll to turn one page: a paragraph to aim at, and the point of it to
     /// line up with the same point of the window.
+    ///
+    /// Named by chapter and paragraph number rather than by `TextAnchor.paragraphID`.
+    /// Finding a paragraph by that string meant building one for every paragraph ahead
+    /// of it in the loaded window — the reader's chapter sits near its end, so over a
+    /// thousand strings per tap. A turn's cost grew with how much was loaded, 1–2ms with
+    /// one chapter and 5–9ms with nine on an XR, and that lookup was the one step of it
+    /// whose work did.
     struct PageScroll: Equatable {
-        let id: String
+        let chapterIndex: Int
+        let paragraph: Int
         let anchor: UnitPoint
     }
 
@@ -90,7 +96,9 @@ enum ReaderTapZone {
         switch zone {
         case .next:
             if let last = onScreen.last(where: { $0.minY > 0 }) {
-                return PageScroll(id: last.id, anchor: .top)
+                return PageScroll(
+                    chapterIndex: last.chapterIndex, paragraph: last.paragraph, anchor: .top
+                )
             }
             // Nothing on screen starts on screen, so a single paragraph is taller than
             // the window and the move has to be made inside it.
@@ -99,7 +107,9 @@ enum ReaderTapZone {
             guard first.height <= viewport else {
                 return within(first, by: -viewport, viewport: viewport)
             }
-            return PageScroll(id: first.id, anchor: .bottom)
+            return PageScroll(
+                chapterIndex: first.chapterIndex, paragraph: first.paragraph, anchor: .bottom
+            )
         case .controls:
             return nil
         }
@@ -119,6 +129,9 @@ enum ReaderTapZone {
         let span = paragraph.height - viewport
         guard span > 0 else { return nil }
         let anchor = min(max((delta - paragraph.minY) / span, 0), 1)
-        return PageScroll(id: paragraph.id, anchor: UnitPoint(x: 0, y: anchor))
+        return PageScroll(
+            chapterIndex: paragraph.chapterIndex, paragraph: paragraph.paragraph,
+            anchor: UnitPoint(x: 0, y: anchor)
+        )
     }
 }
