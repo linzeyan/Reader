@@ -1,7 +1,7 @@
 import XCTest
 
-/// The one claim about marking a paragraph that arithmetic cannot support: that a long
-/// press inside a scroll view reaches the paragraph instead of being eaten by the scroll.
+/// The one claim about marking text while scrolling that arithmetic cannot support: that
+/// a long press inside a scroll view reaches the text instead of being eaten by the scroll.
 ///
 /// A `ScrollView` and a long press want the same touch, and the paragraph's tap has to
 /// coexist with the tap that shows the reader's controls. Every anchor, range and excerpt
@@ -62,18 +62,26 @@ final class ScrollHighlightGestureTests: XCTestCase {
         let action = app.buttons["reader.highlight.action"]
         XCTAssertTrue(
             action.waitForExistence(timeout: 5),
-            "a long press must offer to mark the paragraph; failing here means the scroll view swallowed it"
+            "a long press must offer to mark the word under it; failing here means the scroll view swallowed it"
         )
         action.tap()
         XCTAssertFalse(action.exists, "committing the mark should put the bar away")
 
-        // A plain tap on the marked paragraph has to bring a bar back. Nothing else on
-        // this screen does that — a tap on unmarked text toggles the reader's controls —
-        // so this is the mark itself being stored, drawn, and answering for its paragraph.
+        // A plain tap on the marked word has to bring a bar back. Nothing else on this
+        // screen does that — a tap on unmarked text toggles the reader's controls — so
+        // this is the mark itself being stored, drawn, and answering for where it is.
+        // The press and the tap both land on the paragraph's centre, which is the word.
         paragraph.tap()
         XCTAssertTrue(
             action.waitForExistence(timeout: 5),
-            "tapping a marked paragraph should offer to remove it"
+            "tapping a marked word should offer to remove it"
         )
+
+        // Copying is the other thing a mark is for, and it answers by putting the bar
+        // away like any other choice. What it copies is `HighlightTests`' business.
+        let copy = app.buttons["reader.highlight.copy"]
+        XCTAssertTrue(copy.exists, "a mark should offer to copy its text")
+        copy.tap()
+        XCTAssertFalse(action.waitForExistence(timeout: 1), "copying should put the bar away")
     }
 }

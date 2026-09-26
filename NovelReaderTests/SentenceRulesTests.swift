@@ -90,14 +90,4 @@ final class SentenceRulesTests: XCTestCase {
             ["第二段。"]
         )
     }
-
-    /// The question the selection snap asks, still answered the same way — this rule is
-    /// shared, and the highlight tests are the other half of its safety net.
-    func testAnOffsetInsideASentenceGrowsToTheWholeOfIt() {
-        let text = "他推開門。雪落在渡口的燈上。船還沒有來。" as NSString
-        let whole = NSRange(location: 0, length: text.length)
-        let start = SentenceRules.start(at: 8, in: whole, of: text)
-        let end = SentenceRules.end(at: 8, in: whole, of: text)
-        XCTAssertEqual(text.substring(with: NSRange(location: start, length: end - start)), "雪落在渡口的燈上。")
-    }
 }

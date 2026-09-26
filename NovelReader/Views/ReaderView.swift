@@ -511,19 +511,15 @@ struct ReaderView: View {
                 onRanOut: { Task { await model.ranOutOfText() } },
                 onTouch: { down in
                     model.touch(down: down)
-                    // A press that turned into a drag was a scroll, not a question. The
-                    // press fires on time whatever the finger does next, so this is the
-                    // only thing that can tell the two apart: a drag has begun.
-                    if down, markChoice != nil { markChoice = nil }
+                    // Scrolling away from a mark the reader tapped is leaving it alone. A
+                    // passage being picked out is not put away by a scroll — the reader
+                    // may be scrolling to where it should end; the renderer withdraws
+                    // the one press that turned into a scroll itself (`onSelect(nil)`).
+                    if down, case .remove = markChoice { markChoice = nil }
                 },
                 onTurning: { model.turning($0) },
                 onTap: { handleTap($0, model: model) },
-                onMark: { chapterIndex, paragraph in
-                    guard let chapter = model.loaded.first(where: {
-                        $0.chapter.index == chapterIndex
-                    }) else { return }
-                    mark(paragraph: paragraph, in: chapter)
-                },
+                onSelect: { markChoice = $0.map(ScrollMarkChoice.mark) },
                 onTargetReached: {
                     outlineJump = nil
                     model.clearScrollTarget()
@@ -588,21 +584,14 @@ struct ReaderView: View {
     ///
     /// - Returns: whether the tap should go on to turn a page.
     private func handleTap(_ tap: ReaderTap, model: ReaderModel) -> Bool {
-        if let paragraph = tap.paragraph, let index = tap.chapterIndex,
-           let chapter = model.loaded.first(where: { $0.chapter.index == index }) {
-            // The lift of the finger that started the press arrives here as a tap, so
-            // the paragraph being asked about must not dismiss its own question.
-            if case .some(.mark(let asked, let askedParagraph, _)) = markChoice,
-               asked == chapter.chapter.siteChapterId, askedParagraph == paragraph {
-                return false
-            }
-            // The mark under the finger, hit against the bands it is drawn in — see
-            // `ReaderScrollCoordinator.highlight(at:in:)`, which is also the rule the
-            // paginated renderer answers by.
-            if markChoice == nil, let stored = tap.highlight {
-                markChoice = .remove(stored)
-                return false
-            }
+        // The mark under the finger, hit against the bands it is drawn in — see
+        // `ReaderScrollCoordinator.highlight(at:in:)`, which is also the rule the
+        // paginated renderer answers by. (The lift of a long press never gets here: the
+        // renderer swallows it, so a word just picked out is not put away by its own
+        // finger leaving the glass.)
+        if markChoice == nil, let stored = tap.highlight {
+            markChoice = .remove(stored, text: tap.highlightText)
+            return false
         }
         if markChoice != nil {
             markChoice = nil
@@ -735,35 +724,27 @@ struct ReaderView: View {
     /// question, and a pair of states that must never both be set is a state machine
     /// spelled wrong.
     private enum ScrollMarkChoice: Equatable {
-        /// A long press picked out a whole paragraph, which is waiting to become a mark.
-        case mark(siteChapterId: String, paragraph: Int, selection: TextSelection)
-        /// A tap landed on a stored mark, which is waiting to be removed.
-        case remove(TextHighlight)
+        /// A passage the reader picked out, waiting to become a mark or be copied.
+        case mark(ReaderMark)
+        /// A tap landed on a stored mark, which is waiting to be removed or copied. The
+        /// text rides along because only the renderer holds the composed chapter.
+        case remove(TextHighlight, text: String?)
 
         var siteChapterId: String {
             switch self {
-            case .mark(let siteChapterId, _, _): return siteChapterId
-            case .remove(let highlight): return highlight.siteChapterId
+            case .mark(let mark): return mark.siteChapterId
+            case .remove(let highlight, _): return highlight.siteChapterId
             }
         }
 
-        /// The paragraph to draw picked out, when the open question is about marking one.
+        /// The passage to draw picked out, when the open question is about marking one.
         var beingMarked: ReaderMark? {
-            guard case .mark(let siteChapterId, let paragraph, _) = self else { return nil }
-            return ReaderMark(siteChapterId: siteChapterId, paragraph: paragraph)
+            guard case .mark(let mark) = self else { return nil }
+            return mark
         }
     }
 
-    /// A long press picks out the paragraph under the finger.
-    private func mark(paragraph: Int, in chapter: ReaderModel.LoadedChapter) {
-        guard let selection = TextSelection.wholeParagraph(at: paragraph, in: chapter.paragraphs)
-        else { return }
-        markChoice = .mark(
-            siteChapterId: chapter.chapter.siteChapterId, paragraph: paragraph, selection: selection
-        )
-    }
-
-    /// The bar that asks about the paragraph, drawn only while the chapter it belongs to
+    /// The bar that asks about the passage, drawn only while the chapter it belongs to
     /// is still on screen: a jump from the catalog replaces what is loaded, and a bar
     /// left over from the chapter before would offer to mark text nobody can see.
     @ViewBuilder
@@ -771,15 +752,17 @@ struct ReaderView: View {
         if let choice = markChoice,
            model.loaded.contains(where: { $0.chapter.siteChapterId == choice.siteChapterId }) {
             switch choice {
-            case .mark(let siteChapterId, _, let selection):
-                MarkActionBar(title: "reader.highlight.add", icon: "highlighter") {
-                    model.addHighlight(siteChapterId: siteChapterId, selection: selection)
+            case .mark(let mark):
+                MarkActionBar(
+                    title: "reader.highlight.add", icon: "highlighter", text: mark.selection.text
+                ) {
+                    model.addHighlight(siteChapterId: mark.siteChapterId, selection: mark.selection)
                     markChoice = nil
                 } cancel: {
                     markChoice = nil
                 }
-            case .remove(let highlight):
-                MarkActionBar(title: "reader.highlight.remove", icon: "trash") {
+            case .remove(let highlight, let text):
+                MarkActionBar(title: "reader.highlight.remove", icon: "trash", text: text) {
                     model.removeHighlight(highlight)
                     markChoice = nil
                 } cancel: {
@@ -1372,6 +1355,9 @@ private struct AutoScrollBar: View {
 struct MarkActionBar: View {
     let title: LocalizedStringKey
     let icon: String
+    /// The passage in words, for copying. Nil hides the button rather than offering to
+    /// copy nothing — a stored mark whose text came back shorter than it was.
+    let text: String?
     let confirm: () -> Void
     let cancel: () -> Void
 
@@ -1382,6 +1368,19 @@ struct MarkActionBar: View {
             }
             .accessibilityIdentifier("reader.highlight.action")
             Divider().frame(height: 18)
+            if let text {
+                // Copying is the end of the question, the same as marking: the passage has
+                // gone where the reader wanted it, and a bar left up would be asking again.
+                Button {
+                    UIPasteboard.general.string = text
+                    cancel()
+                } label: {
+                    Label("reader.highlight.copy", systemImage: "doc.on.doc")
+                        .font(.footnote.weight(.medium))
+                }
+                .accessibilityIdentifier("reader.highlight.copy")
+                Divider().frame(height: 18)
+            }
             Button("common.cancel", action: cancel)
                 .font(.footnote)
                 .tint(.secondary)
@@ -1411,8 +1410,8 @@ final class ReaderModel {
         /// the anchor arithmetic changes for having gained the possibility of structure.
         let blocks: [ArticleBlock]
         /// The same content flattened, kept beside the blocks rather than derived at every
-        /// use: this is asked for on every scrolled frame (the accessibility labels), on
-        /// every long press and on every progress write, and `map(\.plainText)` down a
+        /// use: this is asked for on every scrolled frame (the accessibility labels) and
+        /// on every progress write, and `map(\.plainText)` down a
         /// chapter of two hundred blocks is not free at that rate.
         let paragraphs: [String]
         /// Where this chapter's pictures are, for an article that has any. Resolved when

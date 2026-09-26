@@ -372,7 +372,8 @@ final class LocalBookCloudSyncTests: XCTestCase {
         let store = SpyStore()
         let defaults = UserDefaults(suiteName: "novelreader.tests.\(UUID().uuidString)")!
         defaults.set(true, forKey: CloudSync.enabledDefaultsKey)
-        let sync = CloudSync(repo: repo, store: store, defaults: defaults)
+        let sites = SiteStore(directory: URL.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let sync = CloudSync(repo: repo, sites: sites, store: store, defaults: defaults)
 
         sync.pushAll()
         sync.push(imported)

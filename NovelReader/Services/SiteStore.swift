@@ -22,6 +22,10 @@ final class SiteStore {
     }
 
     private(set) var rules: [SiteRule] = []
+    /// Told about every rule installed or removed here, so iCloud can carry it. Not told
+    /// about one that arrived from iCloud, which is there already.
+    var onImport: ((SiteRule) -> Void)?
+    var onRemove: ((String) -> Void)?
 
     private let directory: URL
     private let fileManager: FileManager
@@ -116,8 +120,12 @@ final class SiteStore {
 
     // MARK: - Import / remove
 
+    /// - Parameter syncedAt: set for a rule that arrived from iCloud, which keeps the time
+    ///   it was published with. Stamped with the time it arrived instead, it would look
+    ///   newer than the copy it came from and be sent straight back — every device
+    ///   re-publishing every rule, forever.
     @discardableResult
-    func importRule(data: Data) throws -> SiteRule {
+    func importRule(data: Data, syncedAt: Date? = nil) throws -> SiteRule {
         let rule: SiteRule
         do {
             rule = try JSONDecoder().decode(SiteRule.self, from: data)
@@ -178,7 +186,11 @@ final class SiteStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try encoder.encode(rule).write(to: target, options: .atomic)
+        if let syncedAt {
+            try fileManager.setAttributes([.modificationDate: syncedAt], ofItemAtPath: target.path)
+        }
         try load()
+        if syncedAt == nil { onImport?(rule) }
         return rule
     }
 
@@ -231,7 +243,21 @@ final class SiteStore {
         return fileManager.fileExists(atPath: target.path) ? target : nil
     }
 
-    func remove(id: String) throws {
+    /// When a rule was installed, which is what iCloud compares two copies of it by.
+    ///
+    /// Whole seconds: the file system keeps finer time than survives a round trip through
+    /// `Date`, and a copy that read back a hair older than the record it was stamped from
+    /// would be installed again at every pull.
+    func modificationDate(ofRule id: String) -> Date? {
+        guard let url = fileURL(forRuleId: id),
+              let date = (try? fileManager.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        else { return nil }
+        return Date(timeIntervalSinceReferenceDate: date.timeIntervalSinceReferenceDate.rounded(.down))
+    }
+
+    /// - Parameter publish: off for a removal that arrived from iCloud, as in
+    ///   `AppEnvironment.removeBookmark`.
+    func remove(id: String, publish: Bool = true) throws {
         let target = directory.appendingPathComponent(
             ChapterFileStore.safeComponent(id)
         ).appendingPathExtension("json")
@@ -239,6 +265,7 @@ final class SiteStore {
             try fileManager.removeItem(at: target)
         }
         try load()
+        if publish { onRemove?(id) }
     }
 
     // MARK: - Development seeding

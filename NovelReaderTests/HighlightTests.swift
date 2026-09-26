@@ -16,8 +16,7 @@ final class HighlightTests: XCTestCase {
     // MARK: - Fixtures
 
     /// Sentence-punctuated Chinese prose with dialogue in 「」, which is what the sites
-    /// this app reads actually look like — and what the sentence snapping has to cope
-    /// with.
+    /// this app reads actually look like — and what picking out words has to cope with.
     private let prose = [
         "雪停了。他推開門，看見渡口的燈在雪裡亮著。像一句沒有說完的話。",
         "「你還是來了。」船夫沒有回頭。他把槳擱在膝上，等著。",
@@ -35,8 +34,14 @@ final class HighlightTests: XCTestCase {
         )
     }
 
-    private func chapterText(_ paragraphs: [String], size: CGFloat = 19) -> ChapterText {
-        ChapterText(title: "第十七章　渡口", paragraphs: paragraphs, typography: typography(size: size))
+    private func chapterText(
+        _ paragraphs: [String], size: CGFloat = 19, alignment: NSTextAlignment = .justified,
+        script: ChineseScript = .off
+    ) -> ChapterText {
+        ChapterText(
+            title: "第十七章　渡口", paragraphs: paragraphs, typography: typography(size: size),
+            alignment: alignment, script: script
+        )
     }
 
     /// A long chapter, so that a highlight can be put well past the first page.
@@ -49,27 +54,34 @@ final class HighlightTests: XCTestCase {
 
     private let pageSize = CGSize(width: 350, height: 600)
 
-    /// A highlight over whatever a press-and-drag between two character positions picks
-    /// out, which is the only way the app itself can make one.
-    private func mark(
-        _ text: ChapterText, from: Int, to: Int, siteChapterId: String = "1"
+    /// A highlight over a range, made the way the app makes one: through the selection
+    /// the bar commits.
+    private func highlight(
+        _ text: ChapterText, _ range: NSRange, siteChapterId: String = "1"
     ) throws -> TextHighlight {
-        let range = try XCTUnwrap(text.sentenceRange(from: from, to: to))
         let selection = try XCTUnwrap(text.selection(for: range))
         return TextHighlight(
             bookId: "demo|1", siteChapterId: siteChapterId, selection: selection, createdAt: Date()
         )
     }
 
-    /// A highlight over a whole paragraph, which is the only shape the scrolling reader
-    /// can make: it knows which paragraph the finger is on and nothing finer.
-    private func markParagraph(
-        _ index: Int, in paragraphs: [String], siteChapterId: String = "1"
+    /// A highlight over what a press and slide between two positions picks out.
+    private func mark(
+        _ text: ChapterText, from: Int, to: Int, siteChapterId: String = "1"
     ) throws -> TextHighlight {
-        let selection = try XCTUnwrap(TextSelection.wholeParagraph(at: index, in: paragraphs))
-        return TextHighlight(
-            bookId: "demo|1", siteChapterId: siteChapterId, selection: selection, createdAt: Date()
+        try highlight(
+            text, try XCTUnwrap(text.wordSelection(from: from, to: to)),
+            siteChapterId: siteChapterId
         )
+    }
+
+    /// A highlight over exactly the characters between two carets — what the grips make.
+    private func markCharacters(_ text: ChapterText, from: Int, to: Int) throws -> TextHighlight {
+        try highlight(text, try XCTUnwrap(text.caretSelection(fixed: from, moving: to)))
+    }
+
+    private func composed(_ text: ChapterText, _ range: NSRange) -> String {
+        (text.attributed.string as NSString).substring(with: range)
     }
 
     /// The characters the paginated renderer would paint bands behind.
@@ -122,10 +134,12 @@ final class HighlightTests: XCTestCase {
     /// head of the last — and nothing outside.
     func testASelectionAcrossParagraphsMarksTheTailAndTheHead() throws {
         let text = chapterText(prose)
-        let highlight = try mark(
+        // 「像」 is the 22nd character of the first paragraph; the passage runs to the end
+        // of the third.
+        let highlight = try markCharacters(
             text,
-            from: start(ofParagraph: 0, in: text) + 22,
-            to: start(ofParagraph: 2, in: text) + 1
+            from: start(ofParagraph: 0, in: text) + 21,
+            to: NSMaxRange(text.paragraphRanges[2])
         )
 
         let painted = paintedInScroll(highlight, in: prose)
@@ -144,8 +158,8 @@ final class HighlightTests: XCTestCase {
     /// directly, so an unclamped one is a crash rather than a cosmetic fault.
     func testAHighlightIsClampedToTextThatCameBackShorter() throws {
         let text = chapterText(prose)
-        let highlight = try mark(
-            text, from: start(ofParagraph: 1, in: text), to: start(ofParagraph: 1, in: text) + 3
+        let highlight = try markCharacters(
+            text, from: start(ofParagraph: 1, in: text), to: start(ofParagraph: 1, in: text) + 6
         )
 
         let shortened = 4
@@ -161,52 +175,93 @@ final class HighlightTests: XCTestCase {
 
     // MARK: - What a press picks out
 
-    /// A press with no drag has to select something worth marking, and sentences are
-    /// what a reader can aim at: the finger covers the characters it is pointing at, so
-    /// snapping to nothing would mean marking whatever the hand was hiding.
-    func testAPressSelectsTheWholeSentenceItLandsIn() throws {
-        let text = chapterText(prose)
-        let inside = start(ofParagraph: 0, in: text) + 6
-        let range = try XCTUnwrap(text.sentenceRange(from: inside, to: inside))
-
+    /// A press picks out a word, and it has to be the word the finger is on: the reader
+    /// asked for "these characters", and a sentence — what a press used to pick — was
+    /// usually far more than that.
+    ///
+    /// Latin text for the exact answer, because its word boundaries are not a matter of
+    /// dictionary; the Chinese properties are pinned by the sweep below.
+    func testAPressSelectsTheWordItLandsIn() throws {
+        let text = chapterText(["The ferryman did not look back."])
+        let paragraph = text.paragraphRanges[0]
+        // Inside "ferryman".
+        let range = try XCTUnwrap(text.word(at: paragraph.location + 6))
+        XCTAssertEqual(composed(text, range), "ferryman")
         XCTAssertEqual(
-            (text.attributed.string as NSString).substring(with: range), "他推開門，看見渡口的燈在雪裡亮著。"
+            text.wordSelection(from: paragraph.location + 6, to: paragraph.location + 6), range,
+            "a press that does not slide is exactly the word"
         )
     }
 
-    /// Closing punctuation belongs to the sentence it closes. Snapping to the full stop
-    /// alone would leave the bracket outside the mark, which looks like a rendering
-    /// fault rather than like a choice.
-    func testASelectionKeepsTheBracketWithTheSentenceItCloses() throws {
+    /// Every position in Chinese prose picks out something that contains it, stays in its
+    /// own paragraph, and is smaller than the sentence around it — the change this whole
+    /// grain exists for. Swept over every position rather than sampled: the segmenter is
+    /// a dictionary, and one lucky sample says nothing about the rest.
+    func testEveryPositionInAParagraphPicksOutAWordThatContainsIt() throws {
         let text = chapterText(prose)
-        let inside = start(ofParagraph: 1, in: text) + 2
-        let range = try XCTUnwrap(text.sentenceRange(from: inside, to: inside))
-
-        XCTAssertEqual(
-            (text.attributed.string as NSString).substring(with: range), "「你還是來了。」"
-        )
+        var misses: [String] = []
+        for (index, paragraph) in text.paragraphRanges.enumerated() {
+            for offset in paragraph.location..<NSMaxRange(paragraph) {
+                guard let word = text.word(at: offset) else {
+                    misses.append("p\(index)+\(offset - paragraph.location): nothing")
+                    continue
+                }
+                if !NSLocationInRange(offset, word) {
+                    misses.append("p\(index)+\(offset - paragraph.location): \(word) misses it")
+                }
+                if NSIntersectionRange(word, paragraph) != word {
+                    misses.append("p\(index)+\(offset - paragraph.location): \(word) leaves the paragraph")
+                }
+                if composed(text, word).contains("。") && word.length > 1 {
+                    misses.append("p\(index)+\(offset - paragraph.location): \(composed(text, word)) runs over a full stop")
+                }
+            }
+        }
+        XCTAssertEqual(misses, [])
     }
 
-    /// Pressing *on* the full stop marks the sentence it ends, not the one after it. The
-    /// end of a sentence is exactly where a reader aims when they mean "this one".
-    func testPressingOnAFullStopSelectsTheSentenceItEnds() throws {
+    /// Punctuation is no word, but it is something a reader can point at — the end of a
+    /// quotation they want to take with them. It is picked out on its own.
+    func testPressingOnPunctuationPicksOutJustThatMark() throws {
         let text = chapterText(prose)
         // "第四段。" — the full stop is the fourth character of the paragraph.
         let stop = start(ofParagraph: 3, in: text) + 3
-        let range = try XCTUnwrap(text.sentenceRange(from: stop, to: stop))
-
-        XCTAssertEqual((text.attributed.string as NSString).substring(with: range), "第四段。")
+        let range = try XCTUnwrap(text.word(at: stop))
+        XCTAssertEqual(composed(text, range), "。")
     }
 
-    /// A paragraph the site handed over without any terminator is one sentence, so it is
-    /// marked whole. Falling back to "mark nothing" would leave dialogue lines and
-    /// section breaks impossible to highlight at all.
-    func testAParagraphWithNoTerminatorIsSelectedWhole() throws {
-        let text = chapterText(prose)
-        let inside = start(ofParagraph: 2, in: text) + 1
-        let range = try XCTUnwrap(text.sentenceRange(from: inside, to: inside))
+    /// A press on blank space picks out nothing. An indent is not a word, and a mark on
+    /// it would paint nothing, quote nothing, and have no ink to be tapped away by.
+    func testAPressOnBlankSpacePicksOutNothing() {
+        let text = chapterText(["　　河面很靜", "   ", "有字"])
+        XCTAssertNil(text.word(at: start(ofParagraph: 0, in: text)), "the indent")
+        XCTAssertNotNil(text.word(at: start(ofParagraph: 0, in: text) + 2), "the first word after it")
+        XCTAssertNil(text.word(at: start(ofParagraph: 1, in: text) + 1), "a paragraph of spaces")
+        XCTAssertNil(
+            text.wordSelection(from: start(ofParagraph: 1, in: text), to: start(ofParagraph: 1, in: text)),
+            "and a press there selects nothing at all"
+        )
+    }
 
-        XCTAssertEqual((text.attributed.string as NSString).substring(with: range), prose[2])
+    /// A slide grows a word at a time: both ends of what it picks out are word
+    /// boundaries, whichever way the finger went, so a passage never starts or stops
+    /// halfway through a word.
+    func testASlideNeverSplitsAWord() throws {
+        let text = chapterText(prose)
+        let first = start(ofParagraph: 0, in: text)
+        let last = NSMaxRange(text.paragraphRanges[1])
+        for (from, to) in [(first + 5, first + 13), (first + 13, first + 5), (first + 6, last - 3)] {
+            let range = try XCTUnwrap(text.wordSelection(from: from, to: to))
+            XCTAssertEqual(
+                text.word(at: range.location)?.location, range.location,
+                "\(from)→\(to) starts on a word boundary"
+            )
+            XCTAssertEqual(
+                text.word(at: NSMaxRange(range) - 1).map(NSMaxRange), NSMaxRange(range),
+                "\(from)→\(to) ends on one"
+            )
+            XCTAssertTrue(NSLocationInRange(min(from, to), range) && NSLocationInRange(max(from, to), range))
+        }
     }
 
     /// The chapter heading sits before the first paragraph, so no `TextAnchor` can name
@@ -214,7 +269,9 @@ final class HighlightTests: XCTestCase {
     /// over the wrong words, so the selection has to refuse instead.
     func testTheChapterHeadingCannotBeHighlighted() {
         let text = chapterText(prose)
-        XCTAssertNil(text.sentenceRange(from: 1, to: 2), "the title is not part of any paragraph")
+        XCTAssertNil(text.word(at: 1), "the title is not part of any paragraph")
+        XCTAssertNil(text.wordSelection(from: 1, to: 2))
+        XCTAssertNil(text.caretSelection(fixed: 0, moving: 3), "not by a grip either")
     }
 
     /// A drag that began on the heading still marks text, starting at the first
@@ -222,10 +279,84 @@ final class HighlightTests: XCTestCase {
     /// is better than nothing happening.
     func testADragThatBeganOnTheHeadingMarksFromTheFirstParagraph() throws {
         let text = chapterText(prose)
-        let range = try XCTUnwrap(text.sentenceRange(from: 1, to: start(ofParagraph: 0, in: text) + 2))
+        let first = start(ofParagraph: 0, in: text)
+        let range = try XCTUnwrap(text.wordSelection(from: 1, to: first + 2))
 
-        XCTAssertEqual(range.location, start(ofParagraph: 0, in: text))
-        XCTAssertEqual((text.attributed.string as NSString).substring(with: range), "雪停了。")
+        XCTAssertEqual(range.location, first)
+        XCTAssertTrue(NSLocationInRange(first + 2, range), "as far as the word the finger reached")
+        XCTAssertLessThanOrEqual(NSMaxRange(range), first + 3, "and not over the full stop after it")
+    }
+
+    // MARK: - What a grip moves
+
+    /// A grip moves one end a character at a time and holds the other still, in either
+    /// order: dragging the start past the end turns it into the end, the way a reader's
+    /// thumb expects, rather than into an empty or inverted passage.
+    func testAGripPicksOutExactlyTheCharactersBetweenTheTwoEnds() throws {
+        let text = chapterText(prose)
+        let paragraph = text.paragraphRanges[0]
+        let fixed = paragraph.location + 9
+        for moving in paragraph.location...NSMaxRange(paragraph) where moving != fixed {
+            let range = try XCTUnwrap(text.caretSelection(fixed: fixed, moving: moving))
+            XCTAssertEqual(
+                range, NSRange(location: min(fixed, moving), length: abs(fixed - moving)),
+                "moving to \(moving - paragraph.location)"
+            )
+        }
+    }
+
+    /// Nothing between the two ends is not a passage. The caller keeps the one it had,
+    /// so a grip dragged onto the other one does not leave the reader with a selection
+    /// of nothing — and neither does a grip that has only crossed the gap between two
+    /// paragraphs.
+    func testAGripThatEnclosesNothingKeepsTheLastRealPassage() {
+        let text = chapterText(prose)
+        let end = NSMaxRange(text.paragraphRanges[0])
+        XCTAssertNil(text.caretSelection(fixed: end, moving: end))
+        XCTAssertNil(
+            text.caretSelection(fixed: end, moving: start(ofParagraph: 1, in: text)),
+            "only the separator between two paragraphs"
+        )
+    }
+
+    /// A grip dragged past the last line stops at the end of the chapter rather than
+    /// asking for characters that are not there.
+    func testAGripDraggedPastTheEndStopsAtTheLastCharacter() throws {
+        let text = chapterText(prose)
+        let fixed = start(ofParagraph: 3, in: text)
+        let range = try XCTUnwrap(text.caretSelection(fixed: fixed, moving: fixed + 10_000))
+        XCTAssertEqual(NSMaxRange(range), NSMaxRange(text.paragraphRanges[3]))
+    }
+
+    // MARK: - Copying
+
+    /// Copying a stored mark gives exactly the characters it covers, with the paragraph
+    /// break where the page has one — not the excerpt, which is capped for the list.
+    func testCopyingAMarkGivesItsWholeTextAcrossParagraphs() throws {
+        let long = String(repeating: "字", count: 400)
+        let text = chapterText([long, "下一段。"])
+        let highlight = try markCharacters(
+            text, from: start(ofParagraph: 0, in: text), to: start(ofParagraph: 1, in: text) + 3
+        )
+
+        let copied = try XCTUnwrap(text.text(of: highlight))
+        XCTAssertEqual(copied, long + "\n下一段", "the whole passage, separator and all")
+        XCTAssertLessThan(highlight.excerpt.count, copied.count, "which the excerpt is not")
+    }
+
+    /// And in the script the reader is reading in now: a mark made over simplified text
+    /// is copied as traditional once the reader has switched, because what goes on the
+    /// pasteboard is what the page shows.
+    func testCopyingAMarkGivesTheTextAsThePageShowsIt() throws {
+        let served = ["头发很长。"]
+        let highlight = try markCharacters(
+            chapterText(served), from: start(ofParagraph: 0, in: chapterText(served)),
+            to: NSMaxRange(chapterText(served).paragraphRanges[0])
+        )
+        let shown = chapterText(
+            served, script: ChineseScript(depth: .characters, target: .traditional)
+        )
+        XCTAssertEqual(try XCTUnwrap(shown.text(of: highlight)), "頭髮很長。")
     }
 
     // MARK: - Marks survive the reader changing the page
@@ -304,12 +435,12 @@ final class HighlightTests: XCTestCase {
         let paragraphs = longChapter()
         let paginator = ChapterPaginator(text: chapterText(paragraphs), pageSize: pageSize)
         paginator.paginateAll()
-        // Paragraph 4 is the longest of the repeating shapes, so its first sentence
-        // certainly wraps at this width.
-        let highlight = try mark(
+        // Paragraph 4 is the longest of the repeating shapes, so its first sentence —
+        // twenty-seven characters — certainly wraps at this width.
+        let highlight = try markCharacters(
             paginator.text,
-            from: start(ofParagraph: 4, in: paginator.text) + 2,
-            to: start(ofParagraph: 4, in: paginator.text) + 2
+            from: start(ofParagraph: 4, in: paginator.text),
+            to: start(ofParagraph: 4, in: paginator.text) + 27
         )
         let range = try XCTUnwrap(paginator.text.ranges(of: highlight).first)
         let page = paginator.pageIndex(for: highlight.start)
@@ -333,8 +464,10 @@ final class HighlightTests: XCTestCase {
         for page in stride(from: 1, to: min(paginator.pages.count, 24), by: 1) {
             let span = paginator.pages[page].range
             let middle = span.location + span.length / 2
-            guard let range = paginator.text.sentenceRange(from: middle, to: middle),
-                  let rect = paginator.rects(for: range, onPage: page).first
+            // Six characters, and the widest band of them: the middle of a one-character
+            // band is the boundary a caret rounds across, which is not the question here.
+            guard let range = paginator.text.caretSelection(fixed: middle, moving: middle + 6),
+                  let rect = paginator.rects(for: range, onPage: page).max(by: { $0.width < $1.width })
             else { continue }
             let touched = paginator.offset(at: CGPoint(x: rect.midX, y: rect.midY), onPage: page)
             guard let touched, NSLocationInRange(touched, range) else {
@@ -373,156 +506,127 @@ final class HighlightTests: XCTestCase {
 
     // MARK: - Marks made while scrolling
 
-    /// The claim that lets the scrolling reader make marks at all: the span a pressed
-    /// paragraph names is *that paragraph*, end to end, and the paginated renderer paints
-    /// exactly those characters. The two renderers share no drawing code, so nothing but
-    /// this can promise that the paragraph a reader pressed while scrolling is the same
-    /// line of yellow after they switch to pages.
-    func testAParagraphMarkedWhileScrollingCoversThatParagraphInBothRenderers() throws {
-        let text = chapterText(prose)
-        let highlight = try markParagraph(1, in: prose)
-
-        XCTAssertEqual(
-            highlight.start, TextAnchor(paragraph: 1, characterOffset: 0),
-            "the mark starts where the paragraph starts"
-        )
-        XCTAssertEqual(
-            highlight.end, TextAnchor(paragraph: 1, characterOffset: (prose[1] as NSString).length),
-            "and ends where the paragraph ends"
-        )
-        XCTAssertEqual(paintedInScroll(highlight, in: prose), [prose[1]])
-        XCTAssertEqual(
-            paintedOnPages(highlight, in: text), paintedInScroll(highlight, in: prose),
-            "a paragraph marked while scrolling must be the same passage on a page"
-        )
-        XCTAssertEqual(
-            text.ranges(of: highlight), [text.paragraphRanges[1]],
-            "one paragraph is one band, and not the separator composed in front of it"
-        )
-    }
-
-    /// The index is the chapter's own paragraph index — the one a `TextAnchor` stores —
-    /// and a chapter's title is not one of its paragraphs: `ChapterText` composes the
-    /// heading in front of paragraph 0. An index counted off what is on screen instead
-    /// would move every mark in the chapter down by one paragraph.
-    func testAParagraphMarkIsIndexedFromTheChapterAndNotFromTheHeading() throws {
-        let text = chapterText(prose)
-        let highlight = try markParagraph(0, in: prose)
-
-        XCTAssertEqual(paintedOnPages(highlight, in: text), [prose[0]])
-        let range = try XCTUnwrap(text.ranges(of: highlight).first)
-        XCTAssertEqual(range, text.paragraphRanges[0])
-        XCTAssertGreaterThan(
-            range.location, 0,
-            "the heading is composed before the first paragraph, and is never part of a mark"
-        )
-    }
-
-    /// The predicate the scrolling reader asks a tap with: a mark answers for the
-    /// paragraph it covers and for no other, or every tap in the chapter would offer to
-    /// delete something.
-    func testAParagraphMarkAnswersOnlyForItsOwnParagraph() throws {
-        let highlight = try markParagraph(1, in: prose)
-
-        for index in prose.indices {
-            XCTAssertEqual(
-                highlight.range(inParagraph: index, length: (prose[index] as NSString).length) != nil,
-                index == 1,
-                "paragraph \(index)"
-            )
+    /// The scrolling column answers the two questions a finger asks of a line. A press is
+    /// over a character, anywhere on it. A grip is a caret: the character's own index on
+    /// its left half, the next one on its right — so taking hold of a grip, whose aim
+    /// starts on the boundary it was drawn at, moves nothing.
+    ///
+    /// Swept over every character of forty paragraphs, collecting every miss: a geometry
+    /// claim tested at one point says only that one point happened to work, which is how
+    /// the paginator's lookup was off by a whole line for months.
+    func testAPointOnTheScrollingColumnIsTheCharacterUnderItOrTheNearestCaret() throws {
+        let text = chapterText(longChapter(), alignment: .natural)
+        let column = ChapterColumn(text: text, width: pageSize.width)
+        column.layOut()
+        var misses: [String] = []
+        for paragraph in text.paragraphRanges.prefix(40) {
+            for offset in paragraph.location..<NSMaxRange(paragraph) {
+                guard let glyph = column.rects(for: NSRange(location: offset, length: 1)).first
+                else {
+                    misses.append("\(offset): no rect")
+                    continue
+                }
+                let left = CGPoint(x: glyph.minX + glyph.width / 4, y: glyph.midY)
+                let right = CGPoint(x: glyph.maxX - glyph.width / 4, y: glyph.midY)
+                let found = [
+                    column.offset(at: left), column.offset(at: right),
+                    column.offset(at: left, caret: true), column.offset(at: right, caret: true),
+                ]
+                if found != [offset, offset, offset, offset + 1] {
+                    misses.append("\(offset): \(found)")
+                }
+            }
         }
+        XCTAssertEqual(Array(misses.prefix(20)), [], "\(misses.count) misses in all")
     }
 
-    /// What a paragraph press has to refuse. A blank paragraph is a real thing in text
-    /// pulled off a site — a spacer between scenes — and marking one would store a row
-    /// that paints nothing, quotes nothing, and cannot be tapped to get rid of.
-    func testAParagraphWithNothingInItCannotBeMarked() {
-        let paragraphs = ["", "   \n ", "有字"]
-
-        XCTAssertNil(TextSelection.wholeParagraph(at: 0, in: paragraphs), "an empty paragraph")
-        XCTAssertNil(TextSelection.wholeParagraph(at: 1, in: paragraphs), "and one holding only space")
-        XCTAssertNotNil(TextSelection.wholeParagraph(at: 2, in: paragraphs))
-        XCTAssertNil(TextSelection.wholeParagraph(at: 3, in: paragraphs), "past the last paragraph")
-        XCTAssertNil(TextSelection.wholeParagraph(at: -1, in: paragraphs))
-        XCTAssertNil(TextSelection.wholeParagraph(at: 0, in: []), "a chapter with no text at all")
+    /// The same caret on a page, where the paginated reader's grips are dragged: every
+    /// character of a page well into the chapter, on justified lines.
+    func testAPointOnAPageIsTheNearestCaretForAGrip() throws {
+        let paginator = ChapterPaginator(text: chapterText(longChapter()), pageSize: pageSize)
+        paginator.paginateAll()
+        let page = 5
+        var misses: [String] = []
+        let range = paginator.pages[page].range
+        let composed = paginator.text.attributed.string as NSString
+        for offset in range.location..<NSMaxRange(range) {
+            let character = NSRange(location: offset, length: 1)
+            guard composed.substring(with: character) != "\n",
+                  let glyph = paginator.rects(for: character, onPage: page).first
+            else { continue }
+            let left = CGPoint(x: glyph.minX + glyph.width / 4, y: glyph.midY)
+            let right = CGPoint(x: glyph.maxX - glyph.width / 4, y: glyph.midY)
+            let found = [
+                paginator.offset(at: left, onPage: page, caret: true),
+                paginator.offset(at: right, onPage: page, caret: true),
+            ]
+            if found != [offset, offset + 1] { misses.append("\(offset): \(found)") }
+        }
+        XCTAssertEqual(Array(misses.prefix(20)), [], "\(misses.count) misses in all")
     }
 
-    /// Both ends of a chapter: the single paragraph of a one-paragraph chapter, and the
-    /// last of several. These are where an off-by-one stops being invisible — it marks the
-    /// wrong paragraph, or nothing.
-    func testTheOnlyParagraphAndTheLastParagraphAreMarkedWhole() throws {
-        let single = ["整章只有這一段。"]
-        let only = try markParagraph(0, in: single)
-        XCTAssertEqual(paintedOnPages(only, in: chapterText(single)), single)
-        XCTAssertEqual(paintedInScroll(only, in: single), single)
+    /// A grip dragged off the column — above the heading, past the last line, out into
+    /// the margins — still lands somewhere in the chapter. `characterIndex(for:)` answers
+    /// `NSNotFound`, which is `Int.max`, for a point it cannot place, and adding anything
+    /// to that traps the process: the paginator found that out from a finger dragged off
+    /// the bottom of a page.
+    func testNoPointOnOrOffTheScrollingColumnCanTrapTheLookup() throws {
+        let text = chapterText(Array(longChapter().prefix(12)), alignment: .natural)
+        let column = ChapterColumn(text: text, width: pageSize.width)
+        column.layOut()
+        let length = text.attributed.length
+        var misses: [String] = []
+        for x in [-40, 0, pageSize.width / 2, pageSize.width, pageSize.width + 40] as [CGFloat] {
+            for y in stride(from: CGFloat(-100), through: column.height + 100, by: 3) {
+                let offset = column.offset(at: CGPoint(x: x, y: y))
+                if offset < 0 || offset > length { misses.append("(\(x), \(y)) → \(offset)") }
+            }
+        }
+        XCTAssertEqual(misses, [])
 
-        let text = chapterText(prose)
-        let lastIndex = prose.count - 1
-        let last = try markParagraph(lastIndex, in: prose)
-        XCTAssertEqual(paintedOnPages(last, in: text), [prose[lastIndex]])
-        XCTAssertEqual(text.ranges(of: last), [text.paragraphRanges[lastIndex]])
-        XCTAssertNil(
-            last.range(inParagraph: lastIndex + 1, length: 10),
-            "a mark on the last paragraph may not reach into a paragraph the chapter has not got"
+        let fixed = text.paragraphRanges[3].location
+        let above = try XCTUnwrap(
+            text.caretSelection(fixed: fixed, moving: column.offset(at: CGPoint(x: 10, y: -50)))
         )
-    }
-
-    /// The excerpt goes through the same cap a sentence mark's does. A paragraph is the
-    /// largest thing one gesture can mark in this app, so a second truncation rule here
-    /// would be the one that puts a chapter in the database.
-    func testAParagraphMarkQuotesItselfUnderTheSharedCap() throws {
-        let long = String(repeating: "字", count: 400)
-        let selection = try XCTUnwrap(TextSelection.wholeParagraph(at: 0, in: [long]))
-        let highlight = try markParagraph(0, in: [long])
-
-        XCTAssertEqual(highlight.excerpt, selection.excerpt, "the shared rule, not a second one")
-        XCTAssertLessThan(highlight.excerpt.count, long.count)
-        XCTAssertTrue(highlight.excerpt.hasSuffix("…"), "a cut has to be visible in the list")
         XCTAssertEqual(
-            highlight.end.characterOffset, (long as NSString).length,
-            "the cap is on what the list quotes, never on what was marked"
+            above.location, text.paragraphRanges[0].location,
+            "a grip dragged above the heading stops at the first character of the text"
+        )
+        let last = try XCTUnwrap(text.paragraphRanges.last)
+        let below = try XCTUnwrap(text.caretSelection(
+            fixed: fixed, moving: column.offset(at: CGPoint(x: 10, y: column.height + 50))
+        ))
+        XCTAssertTrue(
+            NSMaxRange(below) >= last.location && NSMaxRange(below) <= NSMaxRange(last),
+            "and one dragged past the last line stops on it"
         )
     }
 
-    /// A mark made while scrolling has to be drawn and touchable on the page, or a reader
-    /// who switches renderers is left with a mark they cannot remove from where they are.
-    func testAMarkMadeWhileScrollingIsDrawnAndHitTestableOnThePage() throws {
+    /// The two renderers compose the same chapter with different alignment — ragged in
+    /// the column, justified on a page — and a passage picked out in one has to be the
+    /// same characters in the other, or a mark would move when the reader switched modes.
+    func testAPassagePickedOutWhileScrollingIsTheSamePassageOnAPage() throws {
         let paragraphs = longChapter()
-        let highlight = try markParagraph(40, in: paragraphs)
+        let scrolling = chapterText(paragraphs, alignment: .natural)
+        let column = ChapterColumn(text: scrolling, width: pageSize.width)
+        column.layOut()
+        let lineOf40 = column.y(for: TextAnchor(paragraph: 40, characterOffset: 0))
+        let pressed = column.offset(at: CGPoint(x: 100, y: lineOf40 + 5))
+        let highlight = try mark(scrolling, from: pressed, to: pressed)
+        XCTAssertEqual(highlight.startParagraph, 40, "the press landed on the paragraph it aimed at")
+
         let paginator = ChapterPaginator(text: chapterText(paragraphs), pageSize: pageSize)
         paginator.paginateAll()
-
+        XCTAssertEqual(
+            paintedOnPages(highlight, in: paginator.text), paintedOnPages(highlight, in: scrolling),
+            "one passage in both modes"
+        )
         let page = paginator.pageIndex(for: highlight.start)
-        let ranges = paginator.text.ranges(of: highlight)
-        let rect = try XCTUnwrap(
-            paginator.rects(for: try XCTUnwrap(ranges.first), onPage: page).first
+        XCTAssertFalse(
+            paginator.rects(for: try XCTUnwrap(paginator.text.ranges(of: highlight).first), onPage: page)
+                .isEmpty,
+            "and drawn on the page a jump to it opens"
         )
-        let touched = try XCTUnwrap(
-            paginator.offset(at: CGPoint(x: rect.midX, y: rect.midY), onPage: page)
-        )
-        XCTAssertTrue(
-            ranges.contains { NSLocationInRange(touched, $0) },
-            "a touch on the band must find the mark that drew it"
-        )
-    }
-
-    /// Pressing the same paragraph twice is a gesture a reader will make by accident.
-    /// Identity is the span, so it collapses onto the row already on screen — the same
-    /// promise a sentence mark makes, now over a span nothing measured character by
-    /// character.
-    func testPressingTheSameParagraphTwiceKeepsOneHighlight() throws {
-        let repo = LibraryRepo(database: try AppDatabase.makeInMemory())
-        let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
-        let selection = try XCTUnwrap(TextSelection.wholeParagraph(at: 1, in: prose))
-
-        let first = try repo.addHighlight(bookId: book.id, siteChapterId: "1", selection: selection)
-        let second = try repo.addHighlight(bookId: book.id, siteChapterId: "1", selection: selection)
-
-        XCTAssertEqual(first.id, second.id)
-        XCTAssertEqual(try repo.highlights(bookId: book.id).count, 1)
-        let stored = try XCTUnwrap(repo.highlights(bookId: book.id).first)
-        XCTAssertEqual(stored.start, selection.start, "both ends survive the round trip")
-        XCTAssertEqual(stored.end, selection.end)
     }
 
     // MARK: - Storage
@@ -531,7 +635,7 @@ final class HighlightTests: XCTestCase {
         let repo = LibraryRepo(database: try AppDatabase.makeInMemory())
         let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
         let text = chapterText(prose)
-        let range = try XCTUnwrap(text.sentenceRange(
+        let range = try XCTUnwrap(text.wordSelection(
             from: start(ofParagraph: 0, in: text) + 20, to: start(ofParagraph: 1, in: text) + 3
         ))
         let selection = try XCTUnwrap(text.selection(for: range))
@@ -553,7 +657,7 @@ final class HighlightTests: XCTestCase {
         let repo = LibraryRepo(database: try AppDatabase.makeInMemory())
         let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
         let text = chapterText(prose)
-        let range = try XCTUnwrap(text.sentenceRange(
+        let range = try XCTUnwrap(text.wordSelection(
             from: start(ofParagraph: 0, in: text), to: start(ofParagraph: 0, in: text)
         ))
         let selection = try XCTUnwrap(text.selection(for: range))
@@ -595,7 +699,7 @@ final class HighlightTests: XCTestCase {
             (chapter: "a", from: start(ofParagraph: 0, in: text)),
         ]
         for span in spans {
-            let range = try XCTUnwrap(text.sentenceRange(from: span.from, to: span.from))
+            let range = try XCTUnwrap(text.wordSelection(from: span.from, to: span.from))
             try repo.addHighlight(
                 bookId: book.id, siteChapterId: span.chapter,
                 selection: try XCTUnwrap(text.selection(for: range))
@@ -614,7 +718,7 @@ final class HighlightTests: XCTestCase {
         let repo = LibraryRepo(database: try AppDatabase.makeInMemory())
         let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
         let text = chapterText(prose)
-        let range = try XCTUnwrap(text.sentenceRange(
+        let range = try XCTUnwrap(text.wordSelection(
             from: start(ofParagraph: 0, in: text), to: start(ofParagraph: 0, in: text)
         ))
         try repo.addHighlight(
@@ -681,7 +785,7 @@ final class HighlightTests: XCTestCase {
         )
 
         let text = chapterText(prose)
-        let range = try XCTUnwrap(text.sentenceRange(
+        let range = try XCTUnwrap(text.wordSelection(
             from: start(ofParagraph: 0, in: text), to: start(ofParagraph: 0, in: text)
         ))
         try repo.addHighlight(

@@ -45,13 +45,13 @@ struct SpeechVoiceView: View {
         } header: {
             // The language alone, because the list is every region of it — see
             // `SpeechReader.voiceKey(for:)`. Each row says which region it is.
-            Text(verbatim: Locale.current.localizedString(forLanguageCode: key) ?? key)
-        } footer: {
-            // Said once, under the last list: iOS ships two or three voices per language and
-            // keeps the good ones behind a download, so a reader looking at a short list is
+            //
+            // The help on every list: iOS ships two or three voices per language and keeps
+            // the good ones behind a download, so a reader looking at a short list is
             // usually looking at a list that is short for a reason they can fix.
-            if language == languages.last {
-                Text("speech.voice.footer")
+            HStack(spacing: 6) {
+                Text(verbatim: Locale.current.localizedString(forLanguageCode: key) ?? key)
+                HelpButton("speech.voice.footer")
             }
         }
     }

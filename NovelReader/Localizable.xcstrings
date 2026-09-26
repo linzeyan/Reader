@@ -2076,6 +2076,30 @@
         }
       }
     },
+    "common.help" : {
+      "comment" : "Spoken name of the ? button after a settings title, which shows a longer explanation.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More Info"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说明"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "說明"
+          }
+        }
+      }
+    },
     "common.save" : {
       "comment" : "Generic button.",
       "extractionState" : "manual",
@@ -3352,25 +3376,25 @@
       }
     },
     "highlights.empty.hint" : {
-      "comment" : "Tells the reader how a highlight is made, and that each reading mode marks a different amount of text.",
+      "comment" : "Tells the reader how a highlight is made: a long press picks a word, the handles widen it.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Press and hold the text in a book to highlight it: Scroll marks the whole paragraph, Pages marks the sentences you drag across. Both modes show what you have marked."
+            "value" : "Press and hold the text in a book to highlight it: a word is picked first, then drag the handles at either end to take in exactly the text you want. A highlight can be copied, too."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "长按书里的文字就能划线：滚动模式划下整段，分页模式长按拖动可以划到句子。两种模式都看得到已有的划线。"
+            "value" : "长按书里的文字就能划线：先选中一个词，再拖动两端的把手，想划几个字就划几个字。划好的线也能拷贝。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "長按書裡的文字就能劃線：捲動模式劃下整段，分頁模式長按拖曳可以劃到句子。兩種模式都看得到已有的劃線。"
+            "value" : "長按書裡的文字就能劃線：先選起一個詞，再拖動兩端的把手，想劃幾個字就劃幾個字。劃好的線也能拷貝。"
           }
         }
       }
@@ -5680,6 +5704,30 @@
         }
       }
     },
+    "reader.highlight.copy" : {
+      "comment" : "Button that copies the text of the selected passage or the tapped highlight.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷貝"
+          }
+        }
+      }
+    },
     "reader.highlight.remove" : {
       "comment" : "Button that deletes the highlight the reader tapped.",
       "extractionState" : "manual",
@@ -6329,25 +6377,25 @@
       }
     },
     "reader.settings.mode.footer" : {
-      "comment" : "Explains how much text each reading mode can mark: a whole paragraph while scrolling, a sentence on a page.",
+      "comment" : "Says what each reading mode looks like: one long column, or one page at a time.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Both modes make highlights and both show the ones you have. Scroll marks a whole paragraph on a long press; Pages marks sentences as you drag, since only a page knows where each character sits."
+            "value" : "Scroll runs the whole chapter down one long column; Pages shows one page at a time and turns them like a book."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "两种模式都能划线，也都会显示已有的划线。滚动模式长按一段，划下整段；分页模式长按拖动，划到句子——只有分页排版知道每个字在画面上的位置。"
+            "value" : "滚动：整章一路往下滚。分页：一次一页，像书一样翻页。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "兩種模式都能劃線，也都會顯示已有的劃線。捲動模式長按一段，劃下整段；分頁模式長按拖曳，劃到句子——只有分頁排版知道每個字在畫面上的位置。"
+            "value" : "捲動：整章一路往下捲。分頁：一次一頁，像書一樣翻頁。"
           }
         }
       }
@@ -9540,25 +9588,49 @@
       }
     },
     "settings.icloud.footer" : {
-      "comment" : "States exactly what is and is not synced.",
+      "comment" : "Lists exactly what iCloud sync carries between devices and what it never does, shown from the ? after the sync toggle.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Syncs bookmarks, custom names and reading progress. Chapter text and downloads stay on this device."
+            "value" : "When this is on, devices signed in to the same Apple Account share:\n• your sources, and the books, comics and feeds on your shelves that came from a site, as they are added and removed\n• custom names\n• how far you have read in each book\n• the newest article you have read in each feed — your other devices count everything older as read\n\nNot synced: downloaded chapters, books imported from files, bookmarks and highlights, and the app's settings. To take those to another device, use Backup below."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "同步书签、自定义书名与阅读进度。章节正文与下载记录仅保留在本机。"
+            "value" : "打开后，登录同一个 Apple 账户的设备之间会同步：\n• 来源，以及书架上从网站加入的书、漫画与订阅（加入与移除都会同步）\n• 自定义书名\n• 每本书读到哪里\n• 每个订阅读到的最新一篇：其他设备会把比它旧的文章都算成已读\n\n不会同步：已下载的章节、从文件导入的书、书签与划线，以及 App 的设置。这些要带到另一台设备，请用下方的「备份」。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "同步書籤、自訂書名與閱讀進度。章節內文與下載紀錄僅保留在本機。"
+            "value" : "打開後，登入同一個 Apple 帳號的裝置之間會同步：\n• 來源，以及書架上從網站加入的書、漫畫與訂閱（加入與移除都會同步）\n• 自訂書名\n• 每本書讀到哪裡\n• 每個訂閱讀到的最新一篇：其他裝置會把比它舊的文章都算成已讀\n\n不會同步：已下載的章節、從檔案匯入的書、書籤與劃線，以及 App 的設定。這些要帶到另一台裝置，請用下方的「備份」。"
+          }
+        }
+      }
+    },
+    "settings.icloud.quotaExceeded" : {
+      "comment" : "Shown under the iCloud sync switch when a write did not fit in the app's key-value store. Must not suggest buying iCloud storage, which does not raise this limit.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What this app syncs has outgrown the room iCloud gives it, so some books or sources have not reached your other devices. Removing ones you no longer need makes room. Your iCloud storage plan does not change this limit."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步的内容超过了 iCloud 给这个 App 的上限，有些书或来源没有同步到其他设备。移除用不到的书或来源可以腾出位置；这个上限和你的 iCloud 存储方案无关。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步的內容超過了 iCloud 給這個 App 的上限，有些書或來源沒有同步到其他裝置。移除用不到的書或來源可以騰出位置；這個上限和你的 iCloud 儲存方案無關。"
           }
         }
       }
@@ -9906,19 +9978,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The app includes no sites. You add sources by importing rule files."
+            "value" : "The app includes no sites. You add every source yourself: worked out from a site, imported as a rule file, or subscribed to as a feed."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "App 不内置任何站点。来源由你自行导入规则文件添加。"
+            "value" : "App 不内置任何站点。来源都由你自己添加：从网站推导、导入规则文件，或订阅 RSS。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "App 不內建任何站台。來源由你自行匯入規則檔新增。"
+            "value" : "App 不內建任何站台。來源都由你自己加入：從網站推導、匯入規則檔，或訂閱 RSS。"
           }
         }
       }

@@ -231,7 +231,8 @@ final class ComicLibraryTests: XCTestCase {
         let store = SpyStore()
         let defaults = UserDefaults(suiteName: "novelreader.tests.\(UUID().uuidString)")!
         defaults.set(true, forKey: CloudSync.enabledDefaultsKey)
-        return (repo, store, CloudSync(repo: repo, store: store, defaults: defaults))
+        let sites = SiteStore(directory: URL.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        return (repo, store, CloudSync(repo: repo, sites: sites, store: store, defaults: defaults))
     }
 
     /// The record an older build would have written: this one, minus the field it had no

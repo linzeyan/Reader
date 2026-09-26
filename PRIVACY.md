@@ -1,6 +1,6 @@
 # 書房 隱私權政策 / Shufang Privacy Policy
 
-最後更新：2026 年 9 月 4 日　|　Last updated: 4 September 2026
+最後更新：2026 年 9 月 28 日　|　Last updated: 28 September 2026
 
 ---
 
@@ -15,10 +15,11 @@ SDK。開發者看不到你讀什麼、讀到哪裡，也沒有任何伺服器�
 
 | 資料                          | 存在哪裡                                                         | 誰看得到                       |
 | ----------------------------- | ---------------------------------------------------------------- | ------------------------------ |
-| 書籤、自訂書名、閱讀進度      | 裝置本機資料庫；若你開啟 iCloud 同步，另存於你自己的 iCloud 帳號 | 只有你                         |
-| 已下載的章節內文              | 裝置本機檔案                                                     | 只有你。**不會**上傳 iCloud    |
-| 你的訂閱清單與已抓下的文章    | 裝置本機資料庫與檔案                                             | 只有你。**不會**上傳 iCloud    |
-| 你新增的來源設定（規則 JSON） | 裝置本機檔案                                                     | 只有你，除非你自己選擇分享出去 |
+| 書架上的書與訂閱、自訂書名、閱讀進度、文章已讀狀態 | 裝置本機資料庫；若你開啟 iCloud 同步，另存於你自己的 iCloud 帳號 | 只有你                         |
+| 你新增的來源設定（規則 JSON）                      | 裝置本機檔案；若你開啟 iCloud 同步，另存於你自己的 iCloud 帳號   | 只有你，除非你自己選擇分享出去 |
+| 已下載的章節內文                                   | 裝置本機檔案                                                     | 只有你。**不會**上傳 iCloud    |
+| 已抓下的訂閱文章                                   | 裝置本機資料庫與檔案                                             | 只有你。**不會**上傳 iCloud    |
+| 從檔案匯入的書、書籤與劃線                         | 裝置本機資料庫與檔案                                             | 只有你。**不會**上傳 iCloud    |
 | 網站 Cookie 與快取            | 系統的 WebKit 資料區，與 App 一同刪除                            | 只有你                         |
 | 閱讀偏好（字級、主題等）      | 裝置本機                                                         | 只有你                         |
 
@@ -36,7 +37,9 @@ SDK。開發者看不到你讀什麼、讀到哪裡，也沒有任何伺服器�
    政策涵蓋範圍內。
 2. **Apple 的 iCloud**（僅在你開啟同步時）。同步經由 Apple 的
    `NSUbiquitousKeyValueStore`，資料存在你自己的 iCloud 帳號中，開發者無法存取。
-   同步內容僅限書籤、自訂書名與閱讀進度；章節內文與下載清單不同步。
+   同步內容僅限來源、書架上從網站加入的書與訂閱（加入與移除都會同步）、自訂書名與
+   閱讀進度（訂閱則是讀到的最新一篇）；章節內文、已抓下的文章、下載清單、從檔案匯入
+   的書、書籤與劃線都不同步。
 
 書房**不會**連向開發者的伺服器，因為並不存在這樣的伺服器。
 
@@ -49,7 +52,7 @@ App 可以載入使用者自行輸入的任意網址，因此年齡分級問卷�
 ### 你的控制權
 
 - 刪除已下載內容：App 內提供四個層級——單章、單本、單一來源、全部。
-- 移除來源：在「設定 → 來源」中刪除。
+- 移除來源：在「設定 → 來源」中刪除。開啟同步時，其他裝置也會一併移除。
 - 停止同步：在系統設定中關閉本 App 的 iCloud。
 - 全部清除：刪除 App。所有本機資料、Cookie 與快取會一併移除。
 
@@ -73,12 +76,13 @@ where you stopped, and has no server that could.
 
 ### What the app handles, and where it lives
 
-| Data                                       | Where it lives                                                  | Who can see it                           |
-| ------------------------------------------ | --------------------------------------------------------------- | ---------------------------------------- |
-| Bookmarks, custom titles, reading progress | Local database; also your own iCloud account if you enable sync | You only                                 |
-| Downloaded chapter text                    | Local files                                                     | You only. **Never** uploaded to iCloud   |
-| Your subscriptions and the articles fetched | Local database and files                                       | You only. **Never** uploaded to iCloud   |
-| Sources you add (rule JSON)                | Local files                                                     | You only, unless you choose to share one |
+| Data                                                                     | Where it lives                                                  | Who can see it                           |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------- | ---------------------------------------- |
+| Books and subscriptions on your shelves, custom titles, reading progress, which articles you have read | Local database; also your own iCloud account if you enable sync | You only                                 |
+| Sources you add (rule JSON)                                              | Local files; also your own iCloud account if you enable sync    | You only, unless you choose to share one |
+| Downloaded chapter text                                                  | Local files                                                     | You only. **Never** uploaded to iCloud   |
+| Articles fetched for your subscriptions                                  | Local database and files                                        | You only. **Never** uploaded to iCloud   |
+| Books imported from files, bookmarks and highlights                      | Local database and files                                        | You only. **Never** uploaded to iCloud   |
 | Site cookies and cache                     | The system WebKit data store, removed with the app              | You only                                 |
 | Reading preferences (text size, theme, …)  | On device                                                       | You only                                 |
 
@@ -97,8 +101,10 @@ Only two kinds of destination:
    policies, which this policy does not cover.
 2. **Apple's iCloud**, and only if you turn sync on. Sync uses Apple's
    `NSUbiquitousKeyValueStore`; the data sits in your own iCloud account and the
-   developer cannot reach it. Only bookmarks, custom titles and reading progress
-   are synced — never chapter text, never the list of downloads.
+   developer cannot reach it. Only your sources, the books and subscriptions on your
+   shelves (as they are added and removed), custom titles and reading progress (for a
+   feed, the newest article you have read) are synced — never chapter text, fetched articles, the list
+   of downloads, books imported from files, or bookmarks and highlights.
 
 Shufang does not connect to any developer-operated server, because none exists.
 
@@ -112,7 +118,7 @@ questionnaire.
 ### Your controls
 
 - Delete downloads at four levels: one chapter, one book, one source, everything.
-- Remove a source under Settings → Sources.
+- Remove a source under Settings → Sources; with sync on, it goes from your other devices too.
 - Stop syncing by turning off iCloud for the app in system settings.
 - Delete everything by deleting the app — local data, cookies and cache go with it.
 

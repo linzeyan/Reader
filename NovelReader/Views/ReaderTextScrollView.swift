@@ -45,6 +45,7 @@ final class ReaderTextScrollView: UIScrollView {
 
     private let canvas = ReaderTextCanvas()
     private let footer = ReaderTextFooter()
+    private lazy var grips = SelectionGrips(host: self)
     private var lastOffset: CGFloat = 0
     private var lastWidth: CGFloat = 0
 
@@ -101,6 +102,15 @@ final class ReaderTextScrollView: UIScrollView {
         // actually begins — see `scrollViewWillBeginDragging`.
         press.delegate = self
         addGestureRecognizer(press)
+
+        // On the scroll view rather than the canvas, so the grips answer in content
+        // coordinates like everything else here — and so a grip that begins on contact
+        // is the recogniser that takes the touch, instead of the pan it would otherwise
+        // start.
+        grips.carets = { [weak self] in self?.coordinator?.gripCarets() }
+        grips.onDrag = { [weak self] end, point, phase in
+            self?.coordinator?.dragGrip(end, to: point, phase: phase)
+        }
     }
 
     /// Never loaded from a nib.
@@ -204,8 +214,14 @@ final class ReaderTextScrollView: UIScrollView {
     }
 
     @objc private func handlePress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
-        coordinator?.handleLongPress(at: onScreen(gesture.location(in: self)))
+        switch gesture.state {
+        case .began:
+            coordinator?.handleLongPress(at: onScreen(gesture.location(in: self)))
+        case .ended, .cancelled, .failed:
+            coordinator?.pressEnded()
+        default:
+            break
+        }
     }
 }
 

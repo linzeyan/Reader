@@ -43,7 +43,15 @@ final class SearchDeriver {
 
     func derive(for rule: SiteRule, probe query: String) async throws -> Derived {
         guard let home = URL(string: "https://\(rule.host)/") else { throw DeriveError.badHost }
-        let forms = try await fetcher.fetch(home, extracting: Self.formProbe, as: FormsPayload.self)
+        var page = home
+        var forms = try await fetcher.fetch(home, extracting: Self.formProbe, as: FormsPayload.self)
+        // One page and no further: where a site keeps its search box off the homepage, it
+        // is a tap away on every site measured, and a crawl would be probing pages nobody
+        // searches from.
+        if forms.forms.isEmpty, let link = forms.searchLink.flatMap(URL.init(string:)) {
+            page = link
+            forms = try await fetcher.fetch(link, extracting: Self.formProbe, as: FormsPayload.self)
+        }
         guard !forms.forms.isEmpty else { throw DeriveError.noSearchForm }
 
         for form in forms.forms {
@@ -59,7 +67,7 @@ final class SearchDeriver {
             let landing: ResultsPayload
             do {
                 landing = try await fetcher.fetch(
-                    home, submitting: submit, extracting: Self.resultsProbe(rule),
+                    page, submitting: submit, extracting: Self.resultsProbe(rule),
                     as: ResultsPayload.self,
                     // Shorter than the default for the typed path: a click that
                     // opens an overlay instead of navigating never lands, and the
@@ -142,6 +150,9 @@ final class SearchDeriver {
             let inputSelector: String?
         }
         let forms: [Form]
+        /// A same-site link to what looks like a search page, offered only when this
+        /// page has nothing to type into.
+        let searchLink: String?
     }
 
     struct ResultsPayload: Decodable {
@@ -218,7 +229,21 @@ final class SearchDeriver {
           });
         });
 
-      return { forms: out.slice(0, 4) };
+      // A homepage with no box of its own usually links to a page that has one — wfxs's
+      // is an empty <a href="/s/"> drawn as a magnifier, so the address and the class
+      // say it where the text does not.
+      var link = null;
+      if (!out.length) {
+        Array.prototype.slice.call(document.querySelectorAll('a[href]')).some(function (a) {
+          if (a.origin !== location.origin
+              || a.href.split('#')[0] === location.href.split('#')[0]) return false;
+          var hint = [a.textContent, a.getAttribute('title'), a.getAttribute('class')].join(' ');
+          if (!searchy.test(a.pathname) && !/search|搜尋|搜索/i.test(hint)) return false;
+          link = a.href;
+          return true;
+        });
+      }
+      return { forms: out.slice(0, 4), searchLink: link };
     })()
     """
 
@@ -238,14 +263,24 @@ final class SearchDeriver {
           el.value = c[1];
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
+          // The button nearest a search box is often the one that empties it — 85novel's
+          // × is the box's own sibling — and clicking that submits nothing. Passed over,
+          // so the search button further out gets the click, or Enter goes if there is none.
+          function clears(b) {
+            var label = (b.textContent || b.value || '').trim();
+            var hint = [label, b.getAttribute('aria-label'), b.getAttribute('title'),
+                        b.getAttribute('class'), b.getAttribute('type')].join(' ');
+            return /^[×✕✖xX]$/.test(label)
+              || /clear|close|reset|cancel|清除|清空|取消|關閉|关闭/i.test(hint);
+          }
           var scope = el.parentElement, button = null;
           for (var depth = 0; depth < 3 && scope && !button; depth++) {
             // `input[type=image]` is in here because it is what an ASP.NET page
             // uses for a search button, and those pages ignore a synthesised
             // Enter entirely — without the click there is nothing to submit.
-            button = scope.querySelector(
+            button = Array.prototype.slice.call(scope.querySelectorAll(
               'button, input[type=submit], input[type=image], .search-btn, .btn-search, [role=button]'
-            );
+            )).filter(function (b) { return !clears(b); })[0] || null;
             scope = scope.parentElement;
           }
           if (button) { button.click(); return true; }

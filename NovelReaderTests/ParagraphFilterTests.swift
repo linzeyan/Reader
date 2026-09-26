@@ -48,4 +48,27 @@ final class ParagraphFilterTests: XCTestCase {
         )
         XCTAssertEqual(kept, ["內文一"])
     }
+
+    // MARK: - replacements
+
+    /// The site these exist for typesets its text for a vertical reader. Laid out
+    /// horizontally, ﹁﹂ and ︙ draw rotated a quarter turn — every line of dialogue
+    /// in the book reads wrong — so the substitution has to reach every occurrence,
+    /// including the doubled ellipsis and dash Chinese writes as pairs.
+    func testVerticalPunctuationReadsAsHorizontalText() {
+        let vertical = ["﹁小桃無主自開花︙︙﹂", "平江不肖生︵一八八九︱︱一九五七︶"]
+        let map = ["﹁": "「", "﹂": "」", "︙": "…", "︵": "（", "︶": "）", "︱": "—"]
+        XCTAssertEqual(
+            BookService.replacing(map, in: vertical),
+            ["「小桃無主自開花……」", "平江不肖生（一八八九——一九五七）"]
+        )
+    }
+
+    /// Every rule but one has no replacements, and for those this must be a no-op.
+    func testAbsentReplacementsLeaveTheChapterUntouched() {
+        XCTAssertEqual(BookService.replacing(nil, in: chapter), chapter)
+        XCTAssertEqual(BookService.replacing([:], in: chapter), chapter)
+        // An empty key would match between every character; it is skipped.
+        XCTAssertEqual(BookService.replacing(["": "x"], in: chapter), chapter)
+    }
 }

@@ -15,14 +15,14 @@ struct FeedRetentionView: View {
 
         List {
             Section {
-                Picker("retention.keep", selection: $settings.keep) {
+                Picker(selection: $settings.keep) {
                     ForEach(FeedRetentionSettings.Keep.allCases) { keep in
                         Text(keep.nameKey).tag(keep)
                     }
+                } label: {
+                    HelpLabel("retention.keep", help: "retention.keep.footer")
                 }
                 .accessibilityIdentifier("retention.keep")
-            } footer: {
-                Text("retention.keep.footer")
             }
 
             // Both hidden when nothing is ever deleted: they are the terms of a deletion
@@ -30,14 +30,14 @@ struct FeedRetentionView: View {
             // opposite of what the setting above it just said.
             if settings.keep != .everything {
                 Section {
-                    Picker("retention.grace", selection: $settings.grace) {
+                    Picker(selection: $settings.grace) {
                         ForEach(FeedRetentionSettings.Grace.allCases) { grace in
                             Text(grace.nameKey).tag(grace)
                         }
+                    } label: {
+                        HelpLabel("retention.grace", help: "retention.grace.footer")
                     }
                     .accessibilityIdentifier("retention.grace")
-                } footer: {
-                    Text("retention.grace.footer")
                 }
 
                 Section {

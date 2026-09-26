@@ -64,7 +64,7 @@ final class HighlightGestureTests: XCTestCase {
         // page does that — the middle of the page toggles the controls — so this is the
         // highlight itself being stored, drawn and hit-testable.
         //
-        // Tapped on the line the slide *ended* on. Sentence snapping only ever widens a
+        // Tapped on the line the slide *ended* on. Word snapping only ever widens a
         // passage, so that line is inside the mark whatever the text is; the line it began
         // on is not, because a press can start in the gap between two paragraphs and the
         // mark then starts below it.

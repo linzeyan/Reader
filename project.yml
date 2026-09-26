@@ -74,7 +74,7 @@ targets:
         # already translated. Nothing reads them, and every one of them was a `git diff`
         # after an install to the phone.
         SWIFT_EMIT_LOC_STRINGS: NO
-        # iCloud KVS carries bookmarks / progress / download index (metadata only).
+        # iCloud KVS carries sources, the shelf and reading progress (metadata only).
         CODE_SIGN_ENTITLEMENTS: NovelReader/NovelReader.entitlements
         # Simulator: ad-hoc signing, no Apple account needed.
         CODE_SIGN_STYLE: Manual

@@ -704,8 +704,8 @@ struct LibraryRepo {
     ///
     /// In the same transaction as the flags, not after it: `updatedAt` is what iCloud
     /// merges on (see `CloudSync`), so a device whose read state changed without it would
-    /// publish a record the other device is entitled to ignore — and the article marked
-    /// read here would come back unread on the next pull.
+    /// publish a record the other device is entitled to ignore, and what was read here
+    /// would never reach it.
     private static func stamp(_ db: Database, bookIds: [String], now: Date) throws {
         guard !bookIds.isEmpty else { return }
         try Book.filter(keys: bookIds).updateAll(db, Column("updatedAt").set(to: now))
@@ -755,77 +755,32 @@ struct LibraryRepo {
         }
     }
 
-    /// The ids of a subscription's unread articles, newest last.
-    ///
-    /// Read back for iCloud, which carries the read state as its complement — see
-    /// `CloudSync`. The unread set rather than the read one because it is the smaller of
-    /// the two by construction: an article is unread until somebody gets to it, and a
-    /// subscription anybody actually reads holds far more read articles than unread ones.
-    func unreadArticleIds(bookId: String) throws -> [String] {
+    /// When the newest article read in a subscription was published, or nil for one with
+    /// nothing read — which is all iCloud carries of a feed's read state. See `CloudSync`.
+    func newestReadArticleDate(bookId: String) throws -> Date? {
         try writer.read { db in
-            try String.fetchAll(db, sql: """
-                SELECT "siteChapterId" FROM "chapter"
-                WHERE "bookId" = ? AND "readAt" IS NULL
-                ORDER BY "index"
+            try Date.fetchOne(db, sql: """
+                SELECT MAX("publishedAt") FROM "chapter"
+                WHERE "bookId" = ? AND "readAt" IS NOT NULL
                 """, arguments: [bookId])
         }
     }
 
-    /// The newest publication date in a subscription's catalog, or nil for one with no
-    /// articles yet.
+    /// Marks read every article published at or before `through`: another device's "read
+    /// up to here", applied to the articles this one holds.
     ///
-    /// The cutoff iCloud's read state is published against: a list of unread ids says
-    /// nothing about articles the sending device had never seen, so the receiving one has
-    /// to be told where the sender's knowledge stopped.
-    func newestArticleDate(bookId: String) throws -> Date? {
-        try writer.read { db in
-            try Date.fetchOne(
-                db,
-                sql: #"SELECT MAX("publishedAt") FROM "chapter" WHERE "bookId" = ?"#,
-                arguments: [bookId]
-            )
-        }
-    }
-
-    /// Applies another device's read state to the articles this one holds.
-    ///
-    /// Everything published at or before `through` is set to what the other device said —
-    /// read unless it named it unread. `through` is the cutoff and not a formality: the
-    /// sending device wrote its list against the catalog *it* had, so an article that
-    /// arrived here afterwards is not absent from that list because it was read, it is
-    /// absent because the other device had never seen it. Without the cutoff every refresh
-    /// that beat the sync would mark its own new articles read.
-    ///
-    /// Nothing is un-read that this device has not been told about: a null `through` — a
-    /// record written before this existed — applies nothing at all.
-    /// - Parameter monotonic: when true, articles are only ever marked *read* — the other
-    ///   device's unread list is used to hold some back, never to un-read anything here.
-    ///   False on the sync's own path, where the record won last-writer-wins and is
-    ///   entitled to say both things. True when a refresh has just brought articles in
-    ///   underneath a record that was applied before they existed, which is the ordinary
-    ///   shape of setting a new device up: the books arrive from iCloud first and the
-    ///   articles are fetched after. Marking those read is recovering state that was
-    ///   already published; un-reading anything there would be an old record reaching
-    ///   forward over a mark made on this device since.
-    func applyRemoteReadState(
-        bookId: String, unread: Set<String>, through: Date?, monotonic: Bool, now: Date = Date()
-    ) throws {
-        guard let through else { return }
+    /// Only ever marks read — an article the other device skipped past is taken as one the
+    /// reader is not coming back for, and un-reading would need the per-article list this
+    /// date replaced. Articles newer than `through` are left alone, which is load-bearing:
+    /// a refresh here can easily beat the sync, and its new articles are not read for
+    /// being newer than what the other device had seen. One already read keeps its stamp,
+    /// which records when *this* device read it.
+    func markReadThrough(bookId: String, through: Date, now: Date = Date()) throws {
         try writer.write { db in
-            let chapters = try Chapter.fetchAll(db, sql: """
-                SELECT * FROM "chapter" WHERE "bookId" = ? AND "publishedAt" <= ?
-                """, arguments: [bookId, through])
-            for chapter in chapters {
-                let shouldBeRead = !unread.contains(chapter.siteChapterId)
-                guard shouldBeRead == chapter.isUnread else { continue }
-                if monotonic && !shouldBeRead { continue }
-                var updated = chapter
-                // A stamp already here survives being re-confirmed: it records when this
-                // device read the article, which is a truer answer than the moment a sync
-                // arrived.
-                updated.readAt = shouldBeRead ? (chapter.readAt ?? now) : nil
-                try updated.update(db)
-            }
+            try db.execute(sql: """
+                UPDATE "chapter" SET "readAt" = ?
+                WHERE "bookId" = ? AND "readAt" IS NULL AND "publishedAt" <= ?
+                """, arguments: [now, bookId, through])
         }
     }
 

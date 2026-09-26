@@ -652,36 +652,106 @@ extension ChapterText {
     }
 }
 
-// MARK: - Sentence snapping
+// MARK: - Picking out a passage
 
-/// Growing a press-and-drag into something worth marking.
+/// What a press, a slide and a grip make of the text under them.
 ///
-/// Selection is snapped to whole sentences rather than to characters, and that is the
-/// reason the paginated reader needs no drag handles. A finger covers the text it is
-/// selecting, so character-precise dragging on a phone means aiming at glyphs the hand
-/// is hiding; sentences are boundaries a reader can see before they press. It also
-/// means a highlight can never start mid-word or end mid-clause, which is the failure
-/// mode of every handle-free selection that snaps to nothing.
+/// Two grains, one after the other. A press picks out the *word* under the finger and a
+/// slide grows the selection a word at a time, because a finger covers what it is
+/// pointing at: a word is the smallest thing a reader can aim at with the hand in the
+/// way. The grips at the two ends then move a *character* at a time, under a loupe that
+/// shows the glyphs the thumb is hiding — which is what makes character precision
+/// something a reader can actually use, rather than a way to mark whatever the hand
+/// happened to cover.
 ///
-/// What counts as a sentence is `SentenceRules`, which the voice reads the same text by
-/// — see there for why that is one rule and not two.
+/// Both renderers ask the same questions here, so a passage picked out while scrolling
+/// is exactly the characters it would have been on a page.
 extension ChapterText {
-    /// Expands two character positions into the whole sentences they fall in.
+    /// The word containing a position, or the single character there when it belongs to
+    /// no word — a full stop, a bracket.
     ///
-    /// Returns nil for anything a `TextAnchor` cannot name — the chapter heading sits
-    /// before the first paragraph, and a highlight on it could not be stored, let alone
-    /// found again.
-    func sentenceRange(from: Int, to: Int) -> NSRange? {
+    /// Words are the system's own boundaries (`byWords`, which segments Chinese with a
+    /// dictionary rather than one character at a time), found inside the paragraph only,
+    /// so a word can never reach across the separator into the next one.
+    ///
+    /// Nil for anything a `TextAnchor` cannot name or a reader would not want marked: the
+    /// chapter heading, which sits before the first paragraph, and blank space — an
+    /// indent, or a paragraph that is nothing but spacing.
+    func word(at offset: Int) -> NSRange? {
+        guard let first = paragraphRanges.first, offset >= first.location else { return nil }
+        let paragraph = paragraphRanges[anchor(atOffset: offset).paragraph]
+        guard paragraph.length > 0 else { return nil }
+        // The last position in a paragraph is the caret after its last character, which
+        // is that character's word; so is a position in the separator after it.
+        let at = min(offset, NSMaxRange(paragraph) - 1)
+        var found: NSRange?
+        characters.enumerateSubstrings(
+            in: paragraph, options: [.byWords, .substringNotRequired]
+        ) { _, range, _, stop in
+            if NSLocationInRange(at, range) {
+                found = range
+                stop.pointee = true
+            } else if range.location > at {
+                stop.pointee = true
+            }
+        }
+        // Checked for blank whichever way it was found: `byWords` counts an ideographic
+        // space as a word of its own, and that is the indent Chinese prose opens with.
+        let range = found ?? characters.rangeOfComposedCharacterSequence(at: at)
+        let blank = characters.substring(with: range)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return blank ? nil : range
+    }
+
+    /// A press and a slide: from the word the press began in to the word under the
+    /// finger, whichever way the finger went.
+    ///
+    /// A slide that began on the heading marks from the first paragraph — the reader
+    /// asked for a passage, and the part of it that can be stored is better than nothing.
+    /// A slide that never left the heading marks nothing.
+    func wordSelection(from: Int, to: Int) -> NSRange? {
         guard let first = paragraphRanges.first else { return nil }
-        let lower = min(from, to)
+        let lower = max(min(from, to), first.location)
         let upper = max(from, to)
         guard upper >= first.location else { return nil }
-        let startParagraph = paragraphRanges[anchor(atOffset: max(lower, first.location)).paragraph]
-        let endParagraph = paragraphRanges[anchor(atOffset: upper).paragraph]
-        let head = SentenceRules.start(at: lower, in: startParagraph, of: characters)
-        let tail = SentenceRules.end(at: upper, in: endParagraph, of: characters)
+        let head = word(at: lower)?.location ?? lower
+        let tail = word(at: upper).map(NSMaxRange) ?? upper
         guard tail > head else { return nil }
         return NSRange(location: head, length: tail - head)
+    }
+
+    /// A grip being dragged: exactly the characters between the end held still and the
+    /// caret the finger has put down, in either order.
+    ///
+    /// Nil when there is nothing between them worth marking — the two ends meeting, or
+    /// a span of nothing but the space between two paragraphs. The caller keeps the
+    /// selection it had, so a grip dragged onto the other one leaves the last real
+    /// passage on screen rather than a selection of nothing.
+    func caretSelection(fixed: Int, moving: Int) -> NSRange? {
+        guard let first = paragraphRanges.first, let last = paragraphRanges.last else {
+            return nil
+        }
+        let clamp = { min(max($0, first.location), NSMaxRange(last)) }
+        let a = clamp(fixed)
+        let b = clamp(moving)
+        guard a != b else { return nil }
+        let range = NSRange(location: min(a, b), length: abs(a - b))
+        let blank = characters.substring(with: range)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return blank ? nil : range
+    }
+
+    /// Exactly the characters a stored mark covers, separators included — what copying
+    /// it puts on the pasteboard.
+    ///
+    /// From the text on screen rather than the excerpt the mark was stored with: the
+    /// excerpt is capped for the list, and the characters are the ones the reader sees
+    /// now, in the script they are reading in.
+    func text(of highlight: TextHighlight) -> String? {
+        let start = offset(for: highlight.start)
+        let end = offset(for: highlight.end)
+        guard end > start else { return nil }
+        return characters.substring(with: NSRange(location: start, length: end - start))
     }
 }
 
@@ -907,11 +977,10 @@ final class ChapterPaginator {
 
     // MARK: - Touching text
 
-    /// The character under a point on a page, in the page's own coordinates.
-    ///
-    /// Why only a page can mark a *sentence*: a page is still under the finger, so a
-    /// press on it means one position and nothing else. The scrolling reader marks a
-    /// paragraph whole because the surface it is pressed on is one that also scrolls.
+    /// The character under a point on a page, in the page's own coordinates — or, with
+    /// `caret`, the character boundary nearest it; see `NSTextLineFragment.index(for:caret:)`.
+    /// The counterpart of `ChapterColumn.offset(at:caret:)`, which answers the same
+    /// question for the scrolling reader.
     ///
     /// Clamped into the page rather than allowed to run off it, so a finger dragged
     /// past the bottom edge selects to the end of what the reader can see instead of
@@ -919,7 +988,7 @@ final class ChapterPaginator {
     /// on to the next page gets there by that page being turned to first — see
     /// `SelectionEdgeRule` — and then asking *it* for the offset, so the clamp never has
     /// to be relaxed for a passage to span a page break.
-    func offset(at point: CGPoint, onPage index: Int) -> Int? {
+    func offset(at point: CGPoint, onPage index: Int, caret: Bool = false) -> Int? {
         guard pages.indices.contains(index) else { return nil }
         let page = pages[index]
         let inColumn = CGPoint(x: point.x, y: point.y + page.top)
@@ -940,7 +1009,7 @@ final class ChapterPaginator {
         // in, and the clamp below turns that into a position on this page.
         let fragmentStart = offset(of: fragment.rangeInElement.location)
         guard fragmentStart != NSNotFound else { return page.range.location }
-        let inLineIndex = line.characterIndex(for: inLine)
+        let inLineIndex = line.index(for: inLine, caret: caret)
         // Everything below is an index into the *fragment* — the whole paragraph — not
         // into the line. `NSTextLineFragment` is created with the paragraph's string and
         // `characterRange` is this line's span inside it, so `characterIndex(for:)`
@@ -1048,5 +1117,31 @@ final class ChapterPaginator {
 
     private func offset(of location: NSTextLocation) -> Int {
         contentStorage.offset(from: contentStorage.documentRange.location, to: location)
+    }
+}
+
+extension NSTextLineFragment {
+    /// The index a point on this line names, into the paragraph the line was built from:
+    /// the character the point is over, or with `caret` the boundary nearest it.
+    ///
+    /// Two questions, because a press and a grip ask different things. A press is over a
+    /// character and wants the word that character is in. A grip *is* a caret, and its aim
+    /// starts on the boundary it was drawn at: read as "the character there", merely
+    /// taking hold of an end grip would grow the passage by the character to its right.
+    /// `characterIndex(for:)` answers only the first — measured, the right half of a glyph
+    /// is still that glyph — so the second rounds to whichever of its edges is nearer.
+    ///
+    /// `NSNotFound` wherever `characterIndex(for:)` answers it.
+    func index(for point: CGPoint, caret: Bool) -> Int {
+        let index = characterIndex(for: point)
+        let end = NSMaxRange(characterRange)
+        guard caret, index != NSNotFound, index < end else { return index }
+        let left = locationForCharacter(at: index).x
+        // The line's own right edge past its last character, which is the same edge
+        // `ChapterColumn.rects(for:)` draws a band to.
+        let right = index + 1 < end
+            ? locationForCharacter(at: index + 1).x
+            : typographicBounds.width
+        return point.x > (left + right) / 2 ? index + 1 : index
     }
 }

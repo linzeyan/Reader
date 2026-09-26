@@ -31,10 +31,15 @@ struct ReaderPlace: Equatable {
     let fraction: Double
 }
 
-/// The paragraph the reader is being asked about, drawn picked out.
+/// The passage the reader has picked out and not yet decided about, drawn picked out with
+/// a grip at each end.
+///
+/// Anchors rather than a composed range, because the owner holds it across rebuilds: a
+/// new type size re-lays every column, and a pair of anchors lands on the same characters
+/// afterwards where offsets into the old layout's text would only happen to.
 struct ReaderMark: Equatable {
     let siteChapterId: String
-    let paragraph: Int
+    let selection: TextSelection
 }
 
 /// What a tap landed on.
@@ -49,6 +54,9 @@ struct ReaderTap {
     let chapterIndex: Int?
     let paragraph: Int?
     let highlight: TextHighlight?
+    /// The characters that mark covers, as the page shows them — what copying it takes.
+    /// Found here because only the renderer holds the composed text.
+    let highlightText: String?
     /// The address under the finger, for an article with links in its sentences.
     let link: URL?
 }
@@ -92,7 +100,7 @@ struct ReaderScrollingText: UIViewRepresentable {
     let isOnScreen: Bool
     /// This book's highlights, by site chapter id — looked up per chapter as it is drawn.
     let highlights: [String: [TextHighlight]]
-    /// The paragraph being asked about right now, drawn in the selection colour.
+    /// The passage being asked about right now, drawn in the selection colour.
     let marked: ReaderMark?
     /// Where the reader must be put. Consumed once and cleared by the owner: a jump, a
     /// mode switch, or opening the book.
@@ -123,7 +131,11 @@ struct ReaderScrollingText: UIViewRepresentable {
     let onTurning: (Bool) -> Void
     /// - Returns: whether the tap should go on to turn a page.
     let onTap: (ReaderTap) -> Bool
-    let onMark: (Int, Int) -> Void
+    /// A passage was picked out, or its ends were moved — or nil, a press that turned
+    /// out to be the start of a scroll. Said once per gesture, when it lifts: a grip being
+    /// dragged is drawn from the coordinator's own copy, so the reader view is not asked
+    /// to re-render at the rate a thumb moves.
+    let onSelect: (ReaderMark?) -> Void
     /// Fired once the reader has been put where `target` asked, so the owner can stop
     /// asking. Unlike the arrival gate this replaces, there is nothing to detect: the
     /// scroll offset was set to an exact number, so it has arrived by construction.
@@ -222,6 +234,24 @@ final class ReaderScrollCoordinator {
     /// The spoken sentence the page has already been moved for, so the same one is not
     /// chased on every frame the voice spends saying it.
     private var followed: SpokenSentence?
+    /// A passage whose grip is being dragged — drawn from here rather than from
+    /// `config.marked`, so a moving thumb redraws the page and nothing else.
+    private var live: LiveSelection?
+    /// Whether the finger that made a long press is still down: the one thing that tells
+    /// a press that became a scroll from a scroll that came afterwards.
+    private var pressHeld = false
+    /// The tap the lift of a long press arrives as. Swallowed, or it would be read as
+    /// "never mind" and put away the word it has just picked out.
+    private var pressLifting = false
+
+    private struct LiveSelection {
+        let siteChapterId: String
+        /// The end held still. Nil once the grip has lifted and the owner has been told,
+        /// while the passage waits for the update that carries it back — without that
+        /// wait, the frame in between would draw the passage from before the drag.
+        var fixed: Int?
+        var range: NSRange
+    }
 
     /// Everything that changes where lines break.
     private struct LayoutKey: Equatable {
@@ -298,6 +328,8 @@ final class ReaderScrollCoordinator {
 
     func update(with config: ReaderScrollingText) {
         self.config = config
+        // The owner has answered a grip that lifted: `marked` now carries the passage.
+        if live?.fixed == nil { live = nil }
         view?.showFooter(config.footer)
         let key = LayoutKey(
             width: view?.textWidth ?? 0,
@@ -915,7 +947,7 @@ final class ReaderScrollCoordinator {
     }
 
     func handleTap(at point: CGPoint) {
-        guard let config, let view else { return }
+        guard let config, let view, !pressLifting else { return }
         let hit = hit(point)
         // The chapter under the finger, which is not the same question as the paragraph
         // under it. An article's title has no `ParagraphFrame` — `buildParagraphFrames`
@@ -925,22 +957,48 @@ final class ReaderScrollCoordinator {
         // worked in the paginated renderer, which looks a link up over the page rather
         // than over a paragraph.
         let column = hit?.chapter ?? chapter(atY: point.y + view.readingOffset)
+        let mark = hit.flatMap { hit in
+            highlight(at: point, in: hit.chapter).map { (chapter: hit.chapter, mark: $0) }
+        }
         let tap = ReaderTap(
             zone: ReaderTapZone.zone(
                 at: point, in: CGSize(width: view.bounds.width, height: view.visibleHeight)
             ),
             chapterIndex: hit?.chapter.chapterIndex,
             paragraph: hit?.paragraph,
-            highlight: hit.flatMap { highlight(at: point, in: $0.chapter) },
+            highlight: mark?.mark,
+            highlightText: mark.flatMap { $0.chapter.column.text.text(of: $0.mark) },
             link: column.flatMap { link(at: point, in: $0, paragraph: hit?.paragraph) }
         )
         guard config.onTap(tap) else { return }
         turnPage(tap.zone)
     }
 
+    /// A long press picks out the word under the finger — see `ChapterText.word(at:)`.
+    ///
+    /// Only on a paragraph: a press in the air between two of them, or on a chapter's
+    /// heading, is not a press on any word, and picking the nearest one would mark text
+    /// the reader never pointed at.
     func handleLongPress(at point: CGPoint) {
-        guard let config, let hit = hit(point) else { return }
-        config.onMark(hit.chapter.chapterIndex, hit.paragraph)
+        guard let config, let view, let hit = hit(point) else { return }
+        pressHeld = true
+        pressLifting = true
+        let text = hit.chapter.column.text
+        let offset = hit.chapter.column.offset(at: CGPoint(
+            x: point.x - view.textInset, y: point.y + view.readingOffset - hit.chapter.top
+        ))
+        guard let range = text.wordSelection(from: offset, to: offset),
+              let selection = text.selection(for: range)
+        else { return }
+        config.onSelect(ReaderMark(siteChapterId: hit.chapter.siteChapterId, selection: selection))
+    }
+
+    /// The press's finger lifted, or the press was taken away.
+    func pressEnded() {
+        pressHeld = false
+        // After the tap this same lift may arrive as, which is dispatched in the same
+        // pass over the touch — see `pressLifting`.
+        DispatchQueue.main.async { [weak self] in self?.pressLifting = false }
     }
 
     func handleTouch(down: Bool) {
@@ -949,6 +1007,94 @@ final class ReaderScrollCoordinator {
         // so letting go carries on from where they left it.
         autoScroll.hold(down)
         config?.onTouch(down)
+        // A press that turned into a drag was a scroll, not a question. The press fires on
+        // time whatever the finger does next, so this is the only thing that can tell the
+        // two apart: a drag has begun under the finger that pressed. A drag that begins
+        // later leaves the passage alone — scrolling to where it should end, and taking
+        // hold of the grip there, is how a passage longer than the screen is picked out.
+        if down, pressHeld {
+            pressHeld = false
+            config?.onSelect(nil)
+        }
+    }
+
+    // MARK: - Selecting text
+
+    /// The passage picked out in one chapter, if it is this one: the grip being dragged
+    /// if there is one, the passage the owner is asking about otherwise.
+    private func selectedRange(in chapter: PlacedColumn) -> NSRange? {
+        if let live {
+            return live.siteChapterId == chapter.siteChapterId ? live.range : nil
+        }
+        guard let marked = config?.marked, marked.siteChapterId == chapter.siteChapterId
+        else { return nil }
+        let text = chapter.column.text
+        let start = text.offset(for: marked.selection.start)
+        let end = text.offset(for: marked.selection.end)
+        return end > start ? NSRange(location: start, length: end - start) : nil
+    }
+
+    /// The two ends of a passage as carets, in the chapter's column coordinates.
+    private func carets(of range: NSRange, in chapter: PlacedColumn) -> SelectionGrips.Carets? {
+        let rects = chapter.column.rects(for: range)
+        guard let first = rects.first, let last = rects.last else { return nil }
+        return SelectionGrips.Carets(
+            start: CGRect(x: first.minX, y: first.minY, width: 0, height: first.height),
+            end: CGRect(x: last.maxX, y: last.minY, width: 0, height: last.height)
+        )
+    }
+
+    /// Where the grips are, in the scroll view's own coordinates — which are the
+    /// content's, since a scroll view's bounds origin is its offset.
+    func gripCarets() -> SelectionGrips.Carets? {
+        guard let view else { return nil }
+        for chapter in placed {
+            guard let range = selectedRange(in: chapter),
+                  let carets = carets(of: range, in: chapter)
+            else { continue }
+            let shift = { (rect: CGRect?) in
+                rect?.offsetBy(dx: view.textInset, dy: chapter.top)
+            }
+            return SelectionGrips.Carets(start: shift(carets.start), end: shift(carets.end))
+        }
+        return nil
+    }
+
+    /// A grip moved, to a point in the scroll view's own coordinates.
+    ///
+    /// Held to the chapter the passage is in: a highlight is a pair of anchors in one
+    /// chapter, so a grip dragged past the chapter's edge stops at its first or last
+    /// character — `ChapterColumn.offset(at:)` clamps there on its own.
+    func dragGrip(_ end: SelectionGrips.End, to point: CGPoint, phase: SelectionGrips.Phase) {
+        guard let config, let view else { return }
+        if phase == .began {
+            guard let chapter = placed.first(where: { selectedRange(in: $0) != nil }),
+                  let range = selectedRange(in: chapter)
+            else { return }
+            live = LiveSelection(
+                siteChapterId: chapter.siteChapterId,
+                fixed: end == .start ? NSMaxRange(range) : range.location,
+                range: range
+            )
+        }
+        guard var drag = live, let fixed = drag.fixed,
+              let chapter = placed.first(where: { $0.siteChapterId == drag.siteChapterId })
+        else { return }
+        let moving = chapter.column.offset(
+            at: CGPoint(x: point.x - view.textInset, y: point.y - chapter.top), caret: true
+        )
+        // Nil is the grip meeting the other end, and keeps the last real passage.
+        if let range = chapter.column.text.caretSelection(fixed: fixed, moving: moving) {
+            drag.range = range
+        }
+        if phase == .ended {
+            drag.fixed = nil
+            if let selection = chapter.column.text.selection(for: drag.range) {
+                config.onSelect(ReaderMark(siteChapterId: drag.siteChapterId, selection: selection))
+            }
+        }
+        live = drag
+        view.redraw()
     }
 
     /// The stored highlight under a point, hit against the bands it is *drawn* in — the
@@ -1031,6 +1177,21 @@ final class ReaderScrollCoordinator {
                 UIBezierPath(roundedRect: rect.insetBy(dx: 0, dy: 0.5), cornerRadius: 3).fill()
             }
             chapter.column.draw(inColumn, in: context)
+            // Over the glyphs: a grip is something to take hold of, not a mark on the text.
+            // Kept inside the column's width only — a knob above the top of the window is
+            // one the reader has scrolled past, and pulling it down into view would put it
+            // somewhere its passage is not.
+            if let config, let range = selectedRange(in: chapter),
+               let carets = carets(of: range, in: chapter) {
+                SelectionGrips.draw(
+                    carets, color: config.palette.foreground.uiColor,
+                    keptInside: CGRect(
+                        x: 0, y: -.greatestFiniteMagnitude / 4,
+                        width: chapter.column.width, height: .greatestFiniteMagnitude / 2
+                    ),
+                    in: context
+                )
+            }
             context.restoreGState()
         }
     }
@@ -1062,15 +1223,12 @@ final class ReaderScrollCoordinator {
                 }
             }
         }
-        if let marked = config.marked, marked.siteChapterId == chapter.siteChapterId,
-           chapter.column.text.paragraphRanges.indices.contains(marked.paragraph),
-           reaches(marked.paragraph, through: marked.paragraph) {
-            let range = chapter.column.text.paragraphRanges[marked.paragraph]
+        if let range = selectedRange(in: chapter) {
             for rect in chapter.column.rects(for: range) where rect.intersects(visible) {
                 result.append((rect, UIColor(config.palette.selection)))
             }
         }
-        // The sentence in the voice's mouth, in the same ink as the paragraph a question
+        // The sentence in the voice's mouth, in the same ink as the passage a question
         // is being asked about — both mean "this is the one the app is pointing at", and
         // a second colour for the second of them would be a palette entry every theme has
         // to answer for.

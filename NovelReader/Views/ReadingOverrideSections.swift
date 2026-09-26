@@ -161,9 +161,7 @@ struct ReadingOverrideSections: View {
                 revert: revert(\.pageTurn)
             )
         } header: {
-            Text("reader.settings.pageTurn")
-        } footer: {
-            Text("reader.settings.pageTurn.footer")
+            HelpLabel("reader.settings.pageTurn", help: "reader.settings.pageTurn.footer")
         }
     }
 

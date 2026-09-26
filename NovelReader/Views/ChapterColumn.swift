@@ -262,6 +262,57 @@ final class ChapterColumn {
 
     // MARK: - Touching text
 
+    /// The character under a point in the column — or, with `caret`, the character
+    /// boundary nearest it, where a caret put down there would go. See
+    /// `NSTextLineFragment.index(for:caret:)` for why those are two questions.
+    ///
+    /// Always an answer, clamped into the chapter: a grip dragged above the heading or
+    /// past the last line is still asking for the nearest end, not for nothing.
+    ///
+    /// Read off the held line fragments, like everything here that touches geometry —
+    /// see `PlacedFragment` for what asking the layout manager again costs on a device.
+    /// A fragment whose lines were never held falls back to the line table, which knows
+    /// where each line starts and nothing finer.
+    func offset(at point: CGPoint, caret: Bool = false) -> Int {
+        guard let placed = fragment(nearestY: point.y) else { return 0 }
+        let local = CGPoint(x: point.x - placed.origin.x, y: point.y - placed.origin.y)
+        guard let line = placed.lineFragments.last(where: {
+            $0.typographicBounds.minY <= local.y
+        }) ?? placed.lineFragments.first else {
+            return offset(atY: point.y)
+        }
+        let bounds = line.typographicBounds
+        let inLine = CGPoint(x: local.x - bounds.minX, y: local.y - bounds.minY)
+        // An index into the paragraph, not the line: the line fragment was built with the
+        // whole paragraph's string — see `ChapterPaginator.offset(at:onPage:)`, which
+        // learned that the expensive way. `NSNotFound` is `Int.max` and must never reach
+        // the addition below, so a point the line cannot place takes the nearer end.
+        let found = line.index(for: inLine, caret: caret)
+        let inParagraph = found != NSNotFound
+            ? found
+            : (inLine.x < 0 ? line.characterRange.location : NSMaxRange(line.characterRange))
+        return min(max(placed.start + inParagraph, placed.start), placed.end)
+    }
+
+    /// The fragment a height falls in, or the nearest one to it: the first for a point
+    /// above the column, the last for one below, and the one above a gap between two.
+    private func fragment(nearestY y: CGFloat) -> PlacedFragment? {
+        guard !fragments.isEmpty else { return nil }
+        var low = 0
+        var high = fragments.count - 1
+        var found = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            if fragments[mid].origin.y <= y {
+                found = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return fragments[found]
+    }
+
     /// Rects covering a character range, in column coordinates. One per line, so a
     /// passage that wraps is marked as the lines a reader sees.
     ///

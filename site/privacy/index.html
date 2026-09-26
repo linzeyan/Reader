@@ -20,7 +20,7 @@
 <meta property="og:url" content="https://shufang-reader.pages.dev/privacy/">
 <meta property="og:image" content="https://shufang-reader.pages.dev/icon.png">
 <meta property="og:locale" content="zh_TW">
-<meta property="article:modified_time" content="2026-09-04T00:00:00+08:00">
+<meta property="article:modified_time" content="2026-09-28T00:00:00+08:00">
 </head>
 <body>
 <div class="page">
@@ -32,7 +32,7 @@
 
   <main class="prose">
     <h1>書房 隱私權政策</h1>
-    <p class="updated">最後更新：<time datetime="2026-09-04">2026 年 9 月 4 日</time></p>
+    <p class="updated">最後更新：<time datetime="2026-09-28">2026 年 9 月 28 日</time></p>
 
     <h2 id="簡短版">簡短版</h2>
     <p>書房不收集你的任何資料。沒有帳號、沒有註冊、沒有分析追蹤、沒有廣告、沒有第三方 SDK。開發者看不到你讀什麼、讀到哪裡，也沒有任何伺服器可以看。</p>
@@ -47,9 +47,14 @@
     </thead>
     <tbody>
     <tr>
-    <td data-l="資料">書籤、自訂書名、閱讀進度</td>
+    <td data-l="資料">書架上的書與訂閱、自訂書名、閱讀進度、文章已讀狀態</td>
     <td data-l="存在哪裡">裝置本機資料庫；若你開啟 iCloud 同步，另存於你自己的 iCloud 帳號</td>
     <td data-l="誰看得到">只有你</td>
+    </tr>
+    <tr>
+    <td data-l="資料">你新增的來源設定（規則 JSON）</td>
+    <td data-l="存在哪裡">裝置本機檔案；若你開啟 iCloud 同步，另存於你自己的 iCloud 帳號</td>
+    <td data-l="誰看得到">只有你，除非你自己選擇分享出去</td>
     </tr>
     <tr>
     <td data-l="資料">已下載的章節內文</td>
@@ -57,14 +62,14 @@
     <td data-l="誰看得到">只有你。<strong>不會</strong>上傳 iCloud</td>
     </tr>
     <tr>
-    <td data-l="資料">你的訂閱清單與已抓下的文章</td>
+    <td data-l="資料">已抓下的訂閱文章</td>
     <td data-l="存在哪裡">裝置本機資料庫與檔案</td>
     <td data-l="誰看得到">只有你。<strong>不會</strong>上傳 iCloud</td>
     </tr>
     <tr>
-    <td data-l="資料">你新增的來源設定（規則 JSON）</td>
-    <td data-l="存在哪裡">裝置本機檔案</td>
-    <td data-l="誰看得到">只有你，除非你自己選擇分享出去</td>
+    <td data-l="資料">從檔案匯入的書、書籤與劃線</td>
+    <td data-l="存在哪裡">裝置本機資料庫與檔案</td>
+    <td data-l="誰看得到">只有你。<strong>不會</strong>上傳 iCloud</td>
     </tr>
     <tr>
     <td data-l="資料">網站 Cookie 與快取</td>
@@ -83,7 +88,7 @@
     <p>書房只會連向兩種地方：</p>
     <ol type="1">
     <li><strong>你自己輸入的網址。</strong> 你貼上哪個網站的連結、訂閱哪個網址，App 就去讀那個位址——小說與漫畫頁面用內建的網頁引擎（WKWebView），行為與你用 Safari 打開它相同；訂閱源文件、封面圖與來源規則則是一般的網路請求。兩者該網站都會看到一般瀏覽器會送出的資訊（IP 位址、User-Agent、Cookie 等）。訂閱會在你每次開啟 App 時各送出一次檢查更新的請求，沒有背景排程。這些網站有各自的隱私權政策，不在本政策涵蓋範圍內。</li>
-    <li><strong>Apple 的 iCloud</strong>（僅在你開啟同步時）。同步經由 Apple 的 <code>NSUbiquitousKeyValueStore</code>，資料存在你自己的 iCloud 帳號中，開發者無法存取。同步內容僅限書籤、自訂書名與閱讀進度；章節內文與下載清單不同步。</li>
+    <li><strong>Apple 的 iCloud</strong>（僅在你開啟同步時）。同步經由 Apple 的 <code>NSUbiquitousKeyValueStore</code>，資料存在你自己的 iCloud 帳號中，開發者無法存取。同步內容僅限來源、書架上從網站加入的書與訂閱（加入與移除都會同步）、自訂書名與閱讀進度（訂閱則是讀到的最新一篇）；章節內文、已抓下的文章、下載清單、從檔案匯入的書、書籤與劃線都不同步。</li>
     </ol>
     <p>書房<strong>不會</strong>連向開發者的伺服器，因為並不存在這樣的伺服器。</p>
     <h2 id="兒童">兒童</h2>
@@ -91,7 +96,7 @@
     <h2 id="你的控制權">你的控制權</h2>
     <ul>
     <li>刪除已下載內容：App 內提供四個層級——單章、單本、單一來源、全部。</li>
-    <li>移除來源：在「設定 → 來源」中刪除。</li>
+    <li>移除來源：在「設定 → 來源」中刪除。開啟同步時，其他裝置也會一併移除。</li>
     <li>停止同步：在系統設定中關閉本 App 的 iCloud。</li>
     <li>全部清除：刪除 App。所有本機資料、Cookie 與快取會一併移除。</li>
     </ul>

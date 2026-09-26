@@ -27,7 +27,7 @@ struct SettingsView: View {
                         SiteListView()
                     } label: {
                         LabeledContent("settings.sources") {
-                            Text("\(env.sites.rules.count)")
+                            Text("\(env.sites.rules.count + env.books.filter { $0.kind == .feed }.count)")
                         }
                     }
                     .accessibilityIdentifier("settings.sources")
@@ -64,9 +64,7 @@ struct SettingsView: View {
                     NavigationLink("settings.background") { BackgroundDownloadsView() }
                         .accessibilityIdentifier("settings.background")
                 } header: {
-                    Text("settings.section.downloads")
-                } footer: {
-                    Text("settings.downloadNetwork.footer")
+                    HelpLabel("settings.section.downloads", help: "settings.downloadNetwork.footer")
                 }
 
                 // Two links, not one inside the other: what the reader asked to keep and
@@ -85,7 +83,13 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("settings.icloud", isOn: $cloud.isEnabled)
+                    Toggle(isOn: $cloud.isEnabled) {
+                        HelpLabel("settings.icloud", help: "settings.icloud.footer")
+                    }
+                    .accessibilityIdentifier("settings.icloud")
+                    if let error = cloud.lastError {
+                        Text(error).font(.footnote).foregroundStyle(.red)
+                    }
                     // Beside the sync toggle, because they answer the same question from
                     // opposite ends: sync is what keeps two devices the same, a backup is
                     // what survives having neither of them. A reader looking for one has
@@ -94,8 +98,6 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings.backup")
                 } header: {
                     Text("settings.section.sync")
-                } footer: {
-                    Text("settings.icloud.footer")
                 }
 
                 Section {
@@ -191,9 +193,7 @@ private struct RecentReadingSection: View {
                 // worse than one that is plainly unavailable.
                 .disabled(env.recentReads.isEmpty)
         } header: {
-            Text("settings.recent")
-        } footer: {
-            Text("settings.recent.footer")
+            HelpLabel("settings.recent", help: "settings.recent.footer")
         }
         // Asked about, unlike most of this app's deletes, because what is destroyed is
         // not visible from here: the list is on another tab, and "clear" gives no hint
@@ -252,9 +252,7 @@ private struct BackgroundDownloadsSection: View {
                     .foregroundStyle(.orange)
             }
         } header: {
-            Text("settings.background")
-        } footer: {
-            Text("settings.background.footer")
+            HelpLabel("settings.background", help: "settings.background.footer")
         }
     }
 
@@ -298,7 +296,7 @@ struct SiteListView: View {
             if let error {
                 Section { Text(error).font(.footnote).foregroundStyle(.red) }
             }
-            if env.sites.rules.isEmpty {
+            if env.sites.rules.isEmpty && subscriptions.isEmpty {
                 Section {
                     Text("settings.sources.empty").foregroundStyle(.secondary)
                 }
@@ -309,9 +307,14 @@ struct SiteListView: View {
             // Empty sections are dropped rather than drawn as a header over nothing.
             ForEach(MediaMode.allCases) { mode in
                 let installed = env.sites.rules(of: mode)
-                if !installed.isEmpty {
+                // A subscription is a source of its own — a feed describes itself, so no
+                // rule stands behind it — and this list is where a reader looks for where
+                // things come from. Only the feed section, which no rule can ever fill.
+                let feeds = mode == .feed ? subscriptions : []
+                if !installed.isEmpty || !feeds.isEmpty {
                     Section {
                         ForEach(installed) { row($0) }
+                        ForEach(feeds) { subscription($0) }
                     } header: {
                         Label(mode.nameKey, systemImage: mode.icon)
                     }
@@ -376,6 +379,30 @@ struct SiteListView: View {
                             .disabled(pasted.isEmpty)
                         }
                     }
+            }
+        }
+    }
+
+    private var subscriptions: [Book] {
+        env.books.filter { $0.kind == .feed }
+            .sorted { $0.shownName.localizedStandardCompare($1.shownName) == .orderedAscending }
+    }
+
+    /// Not a link, unlike a rule's row: a subscription's own page is the one on the shelf,
+    /// and it opens articles through a route only the shelf's navigation knows.
+    private func subscription(_ book: Book) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(book.shownName)
+            Text(URL(string: book.siteBookId)?.host() ?? book.siteBookId)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .accessibilityIdentifier("sources.subscription")
+        .swipeActions {
+            // The same removal as the shelf's: a subscription is one thing in two lists.
+            Button(role: .destructive) {
+                env.removeBookmark(book)
+            } label: {
+                Label("common.delete", systemImage: "trash")
             }
         }
     }
@@ -618,9 +645,7 @@ struct CacheView: View {
                 .disabled((env.cache.used ?? 0) == 0)
                 .accessibilityIdentifier("cache.clear")
             } header: {
-                Text("cache.chapters")
-            } footer: {
-                Text("cache.chapters.footer")
+                HelpLabel("cache.chapters", help: "cache.chapters.footer")
             }
 
             ForEach(cachedGroups, id: \.siteId) { group in
@@ -657,9 +682,7 @@ struct CacheView: View {
                 .disabled(clearing)
                 .accessibilityIdentifier("storage.clearCache")
             } header: {
-                Text("cache.web.section")
-            } footer: {
-                Text("cache.web.footer")
+                HelpLabel("cache.web.section", help: "cache.web.footer")
             }
         }
         .navigationTitle("settings.cache")

@@ -151,38 +151,6 @@ struct TextSelection: Equatable {
     }
 }
 
-extension TextSelection {
-    /// The whole of one paragraph — the finest span the scrolling reader can name.
-    ///
-    /// A choice rather than a limit, now that both renderers lay their own text out. A
-    /// press while scrolling is a press on a *moving* surface — the same gesture that
-    /// starts a drag — so the finest thing it can honestly claim to have picked out is
-    /// the paragraph under the finger; a page is still, so a press there can be
-    /// sentence-precise (`ChapterText.sentenceRange(from:to:)`).
-    ///
-    /// The index is the chapter's own paragraph index, the one a `TextAnchor` stores, so
-    /// a mark made here lands on the same characters when the same chapter is composed
-    /// for a page — where a chapter heading sits in front of paragraph 0 and belongs to
-    /// no paragraph at all.
-    ///
-    /// Nil for an index the chapter does not have, and for a paragraph holding nothing
-    /// but space: the excerpt is all the marks list can show, and a row quoting nothing
-    /// is a row the reader cannot place.
-    static func wholeParagraph(at index: Int, in paragraphs: [String]) -> TextSelection? {
-        guard paragraphs.indices.contains(index) else { return nil }
-        let text = paragraphs[index]
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return TextSelection(
-            start: TextAnchor(paragraph: index, characterOffset: 0),
-            // The paragraph's full UTF-16 length: `range(inParagraph:length:)` clamps
-            // against whatever text it is handed, so this end covers the paragraph
-            // whole in both renderers and runs past it in neither.
-            end: TextAnchor(paragraph: index, characterOffset: (text as NSString).length),
-            text: text
-        )
-    }
-}
-
 /// A place in a book: which chapter, and where inside it.
 struct ReadingPosition: Codable, Hashable {
     /// The chapter, by the id the site gave it — never by its place in the catalog.

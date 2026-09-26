@@ -14,7 +14,7 @@
 - **漫畫**：同一套來源流程，直向連續捲動；ZIP 匯入與匯出。
 - **訂閱**：RSS、Atom、JSON Feed；OPML 整批匯入。
 - **你自己的檔案**：TXT（自動判斷 UTF-8／Big5／GB18030 編碼並分章）與 EPUB 匯入，可匯出成 TXT 或 EPUB。
-- **不收集資料**：沒有帳號、分析追蹤、廣告或第三方 SDK。書籤與進度經你自己的 iCloud 同步；開發者沒有伺服器。詳見 [PRIVACY.md](PRIVACY.md)。
+- **不收集資料**：沒有帳號、分析追蹤、廣告或第三方 SDK。來源、書架與閱讀進度經你自己的 iCloud 同步；開發者沒有伺服器。詳見 [PRIVACY.md](PRIVACY.md)。
 
 書房不提供、不代管、不索引任何內容。所有內容都來自你自己輸入的網址，就像瀏覽器一樣。請自行確認你所瀏覽的網站符合當地法規與該網站的使用條款。
 
@@ -40,7 +40,7 @@ make help         # 全部目標
 
 ## English
 
-**書房 (Shufang)** is an iPhone/iPad reader where you decide the sources: web novels, comics and feeds on one shelf, downloaded for offline reading. The app ships with no sites built in — paste the URL of a book page and it works out the site's structure itself. TXT (UTF-8/Big5/GB18030, auto-chaptered) and EPUB import and export; comics as ZIP; RSS, Atom and JSON Feed with OPML import. No account, no ads, no analytics, no server: bookmarks and progress sync through your own iCloud. See [PRIVACY.md](PRIVACY.md).
+**書房 (Shufang)** is an iPhone/iPad reader where you decide the sources: web novels, comics and feeds on one shelf, downloaded for offline reading. The app ships with no sites built in — paste the URL of a book page and it works out the site's structure itself. TXT (UTF-8/Big5/GB18030, auto-chaptered) and EPUB import and export; comics as ZIP; RSS, Atom and JSON Feed with OPML import. No account, no ads, no analytics, no server: sources, shelves and reading progress sync through your own iCloud. See [PRIVACY.md](PRIVACY.md).
 
 [![Download on the App Store](site/img/badge-en.svg)](https://apps.apple.com/app/id6798525550)
 

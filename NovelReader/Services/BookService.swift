@@ -68,7 +68,8 @@ final class BookService {
         guard let url = rule.catalogURL(bookId: book.siteBookId) else { throw ServiceError.badURL }
         let script = try ExtractorScript.catalog(rule)
         let payload = try await fetcher.fetch(
-            url, extracting: script, as: ExtractorScript.CatalogPayload.self, signIn: rule.signIn
+            url, extracting: script, as: ExtractorScript.CatalogPayload.self, signIn: rule.signIn,
+            waitingFor: rule.catalog.waitFor
         )
 
         let entries = Self.entries(from: payload, rule: rule, siteBookId: book.siteBookId)
@@ -93,13 +94,17 @@ final class BookService {
     ) -> [CatalogEntry] {
         var seen = Set<String>()
         var entries: [CatalogEntry] = []
+        // A catalog read from lines or JSON carries its chapter ids already: there is
+        // no link text to match a pattern against.
+        let carriesIds = rule.catalog.carriesChapterIds
         for entry in payload.entries {
             // `entry.url` is the link's href unless the rule named an attribute, in
             // which case it is that attribute's raw contents — a JavaScript call on
             // the one site that needs it. Matched as text either way, because that
             // raw form is not a URL and `URL(string:)` would either refuse it or
             // invent one.
-            guard let chapterId = rule.chapterId(inLinkText: entry.url) else { continue }
+            guard let chapterId = carriesIds ? entry.url : rule.chapterId(inLinkText: entry.url)
+            else { continue }
             // A chapter link that carries a *different* book id belongs to another
             // book; one that carries none is accepted, since not every site puts
             // the book id in its chapter path.
@@ -108,7 +113,7 @@ final class BookService {
             // do not round-trip through `{bookId}/{chapterId}`. Where the catalog
             // links nowhere, the template is the only address there is.
             let url: String
-            if rule.catalog.linkAttribute == nil {
+            if rule.catalog.linkAttribute == nil, !carriesIds {
                 guard URL(string: entry.url) != nil else { continue }
                 url = entry.url
             } else {
@@ -117,7 +122,10 @@ final class BookService {
                 url = rebuilt.absoluteString
             }
             guard seen.insert(chapterId).inserted else { continue }
-            entries.append((chapterId, entry.title, url))
+            // The catalog is typeset the same way as the chapters it names — the
+            // vertical-reader site titles a preface 「原序︵趙苕狂︶」.
+            let title = replacing(rule.chapter?.replacements, in: [entry.title])[0]
+            entries.append((chapterId, title, url))
         }
         return entries
     }
@@ -145,9 +153,13 @@ final class BookService {
         guard let url = URL(string: chapter.url) else { throw ServiceError.badURL }
         let script = try ExtractorScript.chapter(rule)
         let payload = try await fetcher.fetch(
-            url, extracting: script, as: ExtractorScript.ChapterPayload.self, signIn: rule.signIn
+            url, extracting: script, as: ExtractorScript.ChapterPayload.self, signIn: rule.signIn,
+            waitingFor: rule.chapter?.waitFor
         )
-        let paragraphs = Self.dropping(rule.chapter?.dropParagraphPatterns, from: payload.paragraphs)
+        let paragraphs = Self.dropping(
+            rule.chapter?.dropParagraphPatterns,
+            from: Self.replacing(rule.chapter?.replacements, in: payload.paragraphs)
+        )
         guard !paragraphs.isEmpty else { throw ServiceError.emptyChapter }
         // The page names the chapter too, and names it in full where the catalog
         // truncated. Written here because this is the only moment both halves are in
@@ -206,6 +218,18 @@ final class BookService {
         return paragraphs.filter { paragraph in
             let range = NSRange(paragraph.startIndex..., in: paragraph)
             return !regexes.contains { $0.firstMatch(in: paragraph, range: range) != nil }
+        }
+    }
+
+    /// Applies a rule's `replacements`, in key order so the result never depends on
+    /// dictionary order. Pure, for the reason `dropping` is.
+    nonisolated static func replacing(
+        _ replacements: [String: String]?, in paragraphs: [String]
+    ) -> [String] {
+        guard let replacements, !replacements.isEmpty else { return paragraphs }
+        let pairs = replacements.filter { !$0.key.isEmpty }.sorted { $0.key < $1.key }
+        return paragraphs.map { paragraph in
+            pairs.reduce(paragraph) { $0.replacingOccurrences(of: $1.key, with: $1.value) }
         }
     }
 }

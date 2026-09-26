@@ -130,12 +130,6 @@ struct ReadingAppearanceSections: View {
                 // unnamed rows of segments is a reader guessing which is which.
                 Text("reader.settings.mode")
             } footer: {
-                // The one place the asymmetry between the two renderers can be stated
-                // where it is actionable. Both modes make marks and both show them; how
-                // finely they can aim differs, because only the paginated renderer knows
-                // where each character sits — and the moment a reader picks a mode is the
-                // moment that difference is worth knowing, rather than after they press a
-                // paragraph and get more of it than they meant.
                 Text("reader.settings.mode.footer")
             }
 
@@ -205,11 +199,9 @@ struct ReadingAppearanceSections: View {
                     .accessibilityIdentifier("reader.settings.chinese.target")
                 }
             } header: {
-                Text("reader.settings.chinese")
-            } footer: {
                 // The difference between the two tiers is one example long, and the
                 // example is the only form of it anybody can act on.
-                Text("reader.settings.chinese.footer")
+                HelpLabel("reader.settings.chinese", help: "reader.settings.chinese.footer")
             }
 
             Section("reader.settings.theme") {
@@ -230,23 +222,23 @@ struct ReadingAppearanceSections: View {
             .pickerStyle(.segmented)
             .accessibilityIdentifier("reader.settings.pageTurn")
         } header: {
-            Text("reader.settings.pageTurn")
-        } footer: {
             // Which part of the screen does what, and the one thing this cannot promise:
             // scrolling stays. A reader who has to find the zones by tapping finds the
             // wrong one first, and one who picks 點擊 expecting the page to stop moving
             // under their thumb has been told something untrue.
-            Text("reader.settings.pageTurn.footer")
+            HelpLabel("reader.settings.pageTurn", help: "reader.settings.pageTurn.footer")
         }
 
         Section {
-            Toggle("reader.settings.swipeToGoBack", isOn: $settings.swipeToGoBack)
-                .accessibilityIdentifier("reader.settings.swipeToGoBack")
-        } footer: {
-            // Both halves of the bargain, because both are visible changes to a screen
-            // the reader is about to be looking at: the button goes away, and in the
-            // paginated reader the edge stops turning pages.
-            Text("reader.settings.swipeToGoBack.footer")
+            // Both halves of the bargain in the help, because both are visible changes to
+            // a screen the reader is about to be looking at: the button goes away, and in
+            // the paginated reader the edge stops turning pages.
+            Toggle(isOn: $settings.swipeToGoBack) {
+                HelpLabel(
+                    "reader.settings.swipeToGoBack", help: "reader.settings.swipeToGoBack.footer"
+                )
+            }
+            .accessibilityIdentifier("reader.settings.swipeToGoBack")
         }
 
         Section {

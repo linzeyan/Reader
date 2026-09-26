@@ -51,8 +51,7 @@ struct ArticleBlock: Codable, Equatable {
     /// The block as one line of plain text.
     ///
     /// What everything that has not been taught about structure still asks for: the
-    /// highlight gesture selecting a whole paragraph, the bookmark excerpt, the
-    /// accessibility label of a laid-out frame. An image answers with its alt text,
+    /// bookmark excerpt, the accessibility label of a laid-out frame. An image answers with its alt text,
     /// which is exactly what it is for.
     var plainText: String {
         switch kind {

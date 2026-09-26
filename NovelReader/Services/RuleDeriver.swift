@@ -371,7 +371,10 @@ final class RuleDeriver {
                 stripSelectors: chapter.stripSelectors,
                 dropParagraphPatterns: chapter.dropParagraphPatterns,
                 prevSelector: chapter.prevSelector,
-                nextSelector: chapter.nextSelector
+                nextSelector: chapter.nextSelector,
+                waitFor: chapter.waitFor,
+                visibleOnly: chapter.visibleOnly,
+                replacements: chapter.replacements
             ),
             notes: rule.notes
         )

@@ -23,19 +23,22 @@ struct DiagnosticsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("trace.record", isOn: recording)
-                    .accessibilityIdentifier("trace.record")
-            } footer: {
-                Text("trace.record.footer")
+                Toggle(isOn: recording) {
+                    HelpLabel("trace.record", help: "trace.record.footer")
+                }
+                .accessibilityIdentifier("trace.record")
             }
 
             Section {
-                LabeledContent("trace.size", value: env.trace.size.formatted(.byteCount(style: .file)))
+                // What is in the log, beside how much of it there is.
+                LabeledContent {
+                    Text(env.trace.size.formatted(.byteCount(style: .file)))
+                } label: {
+                    HelpLabel("trace.size", help: "trace.privacy.footer")
+                }
                 Button("trace.export", systemImage: "square.and.arrow.up") { export() }
                     .disabled(env.trace.isEmpty)
                     .accessibilityIdentifier("trace.export")
-            } footer: {
-                Text("trace.privacy.footer")
             }
         }
         .navigationTitle("trace.title")

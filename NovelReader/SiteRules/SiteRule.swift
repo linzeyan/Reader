@@ -119,6 +119,36 @@ struct SiteRule: Codable, Identifiable, Hashable {
         let resultTitleSelector: String?
         let resultAuthorSelector: String?
         let resultCoverSelector: String?
+        /// See `Catalog.waitFor`. The same race, on the results page: a site whose
+        /// results arrive by XHR after load. A comma list is allowed and worth using
+        /// here — naming the site's "no results" marker alongside the row lets an
+        /// empty search end as soon as the site says so, instead of waiting out the
+        /// bound.
+        let waitFor: String?
+
+        /// Spelled out for the reason `Catalog` gives: `waitFor` came later, and the
+        /// places that build a search block by hand should not have to name it.
+        init(
+            method: Method,
+            url: String,
+            queryField: String,
+            resultContainer: String?,
+            resultLinkSelector: String,
+            resultTitleSelector: String?,
+            resultAuthorSelector: String?,
+            resultCoverSelector: String?,
+            waitFor: String? = nil
+        ) {
+            self.method = method
+            self.url = url
+            self.queryField = queryField
+            self.resultContainer = resultContainer
+            self.resultLinkSelector = resultLinkSelector
+            self.resultTitleSelector = resultTitleSelector
+            self.resultAuthorSelector = resultAuthorSelector
+            self.resultCoverSelector = resultCoverSelector
+            self.waitFor = waitFor
+        }
     }
 
     /// How to read one field: either an `og:`/`name=` meta tag or a CSS selector.
@@ -168,6 +198,45 @@ struct SiteRule: Codable, Identifiable, Hashable {
         /// When this resolves it decides; when the page does not define it at all,
         /// `order` still does.
         let descendingWhen: Condition?
+        /// A selector the page has to match before the catalog is read.
+        ///
+        /// Exists because the fetcher reads a page at its load event, and on two of
+        /// these sites the chapter list is not there yet: it is filled in by an XHR
+        /// the page starts after load. Measured on one of them, the list had landed
+        /// by the load event in 12 loads of 21, and in every load given five more
+        /// seconds — late, never missing. So the fetch waits for this to match,
+        /// bounded (`WebFetcher.lateContentGrace`), and reads the page either way:
+        /// a list that never arrives ends as an empty catalog, the same error as
+        /// before, only later.
+        let waitFor: String?
+        /// Read the container's text as the catalog, one chapter per non-empty line,
+        /// instead of reading links.
+        ///
+        /// For the site whose table of contents has no links at all: the chapter
+        /// names are lines of a `<pre>`, and its own script paints them at load into
+        /// a grid of one-character cells, paged to the screen. The chapter id is the
+        /// line's position counted from 1 — the number that site's reader addresses a
+        /// chapter by — and the address is built from `urls.chapter`, as it is for
+        /// `linkAttribute`. `linkSelector` is not read.
+        let lines: Bool?
+        /// Read the page as a JSON document instead of HTML: the catalog is the array
+        /// at `arrayPath`, each item naming its chapter id and title under the keys
+        /// given. `container` and `linkSelector` are not read.
+        ///
+        /// For the site whose own reader builds its chapter list from an API it calls
+        /// after load — on some loads, and on others never at all, so no amount of
+        /// `waitFor` makes the list arrive. The API is a plain GET that answers the
+        /// whole list, so `urls.catalog` points at it and the page is never involved.
+        /// The document comes back through `JSON.parse` and is only walked, never run,
+        /// and ids are rebuilt into addresses with `urls.chapter`, as for `lines`.
+        let json: JSONList?
+
+        struct JSONList: Codable, Hashable {
+            /// Dot path to the array, walked like an image strategy's paths.
+            let arrayPath: String
+            let idKey: String
+            let titleKey: String
+        }
 
         /// A value on the page compared against an expected one.
         struct Condition: Codable, Hashable {
@@ -183,14 +252,24 @@ struct SiteRule: Codable, Identifiable, Hashable {
             linkSelector: String,
             order: Order,
             linkAttribute: String? = nil,
-            descendingWhen: Condition? = nil
+            descendingWhen: Condition? = nil,
+            waitFor: String? = nil,
+            lines: Bool? = nil,
+            json: JSONList? = nil
         ) {
             self.container = container
             self.linkSelector = linkSelector
             self.order = order
             self.linkAttribute = linkAttribute
             self.descendingWhen = descendingWhen
+            self.waitFor = waitFor
+            self.lines = lines
+            self.json = json
         }
+
+        /// Whether the extractor hands back chapter ids rather than link text to
+        /// recover them from — true for the two catalogs that have no links.
+        var carriesChapterIds: Bool { lines == true || json != nil }
     }
 
     /// How to read one comic chapter's page images.
@@ -345,6 +424,58 @@ struct SiteRule: Codable, Identifiable, Hashable {
         let dropParagraphPatterns: [String]?
         let prevSelector: String?
         let nextSelector: String?
+        /// See `Catalog.waitFor`. For the site that ships a chapter's paragraphs
+        /// shuffled and has its own script put them in order shortly after load,
+        /// marking the container once it has: read at the load event the text is out
+        /// of order, read after the mark it is the chapter. Nothing here knows how the
+        /// order was scrambled — the site's script does for the app what it does for
+        /// any reader. Pairs with `visibleOnly`, because the same site also hides
+        /// decoy copies.
+        let waitFor: String?
+        /// Leave out elements the page does not display (`display: none`).
+        ///
+        /// Off by default because the extractor reads `textContent`, which is right
+        /// for every other site — some keep real text in collapsed containers. On for
+        /// the site that seeds its chapter body with a dozen repeated paragraphs, each
+        /// hidden by a class its stylesheet sets to `display: none`, so that anything
+        /// reading the markup rather than the screen reads them too. Display, not
+        /// visibility: the same site holds its real paragraphs at `visibility: hidden`
+        /// until the reader scrolls to them.
+        let visibleOnly: Bool?
+        /// Plain-text substitutions applied to every paragraph and every catalog
+        /// title, each key replaced by its value. Paragraphs get them before
+        /// `dropParagraphPatterns` is matched, so those patterns are written against
+        /// the text as the reader will see it.
+        ///
+        /// For the site whose source text is typeset for its own vertical reader:
+        /// quotes are ﹁﹂, book-title marks ︽︾, the ellipsis ︙. In a horizontal
+        /// column those draw rotated. Text, not regex, and applied in key order, so a
+        /// rule's keys should not overlap.
+        let replacements: [String: String]?
+
+        /// Spelled out for the reason `Catalog` gives: the last three fields came
+        /// later, and every chapter block built by hand leaves them absent.
+        init(
+            titleSelectors: [String],
+            contentSelectors: [String],
+            stripSelectors: [String],
+            dropParagraphPatterns: [String]?,
+            prevSelector: String?,
+            nextSelector: String?,
+            waitFor: String? = nil,
+            visibleOnly: Bool? = nil,
+            replacements: [String: String]? = nil
+        ) {
+            self.titleSelectors = titleSelectors
+            self.contentSelectors = contentSelectors
+            self.stripSelectors = stripSelectors
+            self.dropParagraphPatterns = dropParagraphPatterns
+            self.prevSelector = prevSelector
+            self.nextSelector = nextSelector
+            self.waitFor = waitFor
+            self.visibleOnly = visibleOnly
+            self.replacements = replacements
+        }
     }
 
     // MARK: - Decoding

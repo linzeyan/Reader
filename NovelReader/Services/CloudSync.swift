@@ -13,27 +13,52 @@ import Foundation
 ///
 /// **Saved positions (`ReadingBookmark`) and highlights (`TextHighlight`) are not
 /// synced either**, for the same class of reason. Both name a paragraph inside a
-/// chapter as the site rule on *this* device split it, and rules are installed and
-/// derived per device — the same paragraph index under a different build of a rule is a
-/// different sentence. A reading position that lands a screen off corrects itself as
+/// chapter as the site rule on *this* device split it, and even synced, two devices can
+/// hold different builds of a rule for a while — the same paragraph index under a
+/// different build of a rule is a different sentence. A reading position that lands a screen off corrects itself as
 /// soon as the reader scrolls; a bookmark that jumps to the wrong sentence is just
 /// wrong, with nothing to correct it, and a highlight is worse still — it would come
 /// out of the sync drawn over text nobody chose. The key budget says the same thing
 /// from the other side: this store is one key per book, and marks per book are
 /// unbounded.
 ///
-/// **A subscription's read articles are synced**, which looks like an exception to that
-/// last sentence and is not. An article's id comes from the feed document rather than from
-/// a rule, so it means the same thing on every device — the objection to bookmarks does not
-/// apply — and what travels is the *unread* set, which shrinks as the feed is read and is
-/// refused outright past `unreadLimit`. It has to travel at all because it is not a
-/// convenience: until `v12.articleRead` this state was the reading position, and the
-/// position has always synced.
+/// **How far each subscription has been read is synced**, as one date: that of the newest
+/// article read. Everything published up to it counts as read on the other device — an
+/// article skipped past is taken as one the reader is not coming back for — which keeps a
+/// subscription's record the size of any book's, where a list of ids grew with the feed.
+/// It has to travel at all because it is not a convenience: until `v12.articleRead` this
+/// state was the reading position, and the position has always synced.
+///
+/// **A removal travels as a key of its own**, `removed.<id>` holding when it happened,
+/// because a missing `book.` key cannot say it: every device re-publishes its whole
+/// library on each launch, so a book taken off one shelf came straight back from the
+/// next device to start up. The removal has to outlast those re-publishings to win
+/// against them. Last-writer-wins still decides — a book read on another device after it
+/// was removed here is kept, on both — with one exception, below `joinedAtDefaultsKey`.
+///
+/// **Sources travel too**, a `rule.<id>` key each, compared by when they were installed and
+/// removed the same way books are. A rule is a document the reader chose to install rather
+/// than a fact about this device, so none of the reasons above for keeping things here
+/// apply to it.
 @MainActor
 @Observable
 final class CloudSync {
     static let enabledDefaultsKey = "icloud.sync.enabled"
     private static let keyPrefix = "book."
+    private static let removedPrefix = "removed."
+    private static let rulePrefix = "rule."
+    private static let removedRulePrefix = "removedRule."
+    /// When this device last turned sync on. Removals older than that do not reach its
+    /// shelf: the first sync is a union (see `mergeOnEnable`), and a book this device kept
+    /// while it was not syncing is part of what it brings, not something to delete.
+    private static let joinedAtDefaultsKey = "icloud.sync.joinedAt"
+    /// How long a removal is kept before it is dropped to save the store's key budget.
+    // ponytail: a device offline longer than this re-publishes the book and it returns
+    // everywhere; a count cap instead of an age would trade that for a size ceiling.
+    private static let removalLifetime: TimeInterval = 90 * 24 * 3600
+    /// Apple's ceiling on a key, in UTF-16 units. Past it a write raises an exception
+    /// instead of failing, which Swift cannot catch.
+    private static let keyLimit = 128
 
     /// One book as it travels between devices.
     private struct Record: Codable {
@@ -42,8 +67,8 @@ final class CloudSync {
         /// What the book is, carried rather than looked up.
         ///
         /// A merge *creates* book rows on the other device, and that device may not have
-        /// the rule this book names: rules travel by hand, one file at a time, so the
-        /// normal case is a library that syncs before its sources do. A kind looked up
+        /// the rule this book names: a rule can arrive after its books, or be one this
+        /// build cannot install, or have been removed there. A kind looked up
         /// locally would come back nil there, filing a comic under novels and opening it
         /// in the text reader until the day its rule arrives.
         ///
@@ -82,34 +107,24 @@ final class CloudSync {
         /// before this field existed, which decodes to nil and reads as "which chapter,
         /// and nothing finer" — the same thing a fresh install shows.
         var fraction: Double?
-        /// Which of a subscription's articles are still unread, by the id the feed gave
-        /// them. Absent for novels and comics, which have no such thing.
+        /// How far a subscription has been read: the publication date of the newest article
+        /// read on the sending device. Absent for novels and comics, and for a feed with
+        /// nothing read yet.
         ///
-        /// The *unread* set rather than the read one, because it is the smaller of the two
-        /// by construction and this store has a byte budget: a subscription anybody reads
-        /// holds far more read articles than unread ones, and the payload therefore shrinks
-        /// as the thing it describes gets used. See `unreadLimit` for what happens when it
-        /// does not.
-        var unreadArticles: [String]?
-        /// The newest article the sending device's catalog held, which is where its
-        /// knowledge stops.
-        ///
-        /// Load-bearing, and the reason an absent unread id cannot simply be read as
-        /// "read": a refresh on the receiving device can easily beat the sync, and without
-        /// a cutoff every article that arrived in the meantime would be marked read for
-        /// not appearing on a list written before it existed.
-        var articlesThrough: Date?
+        /// That article's date rather than its id, so a device that has not fetched it yet
+        /// can still apply it — see `fillInReadState`.
+        var readThrough: Date?
     }
 
-    /// How many unread ids a subscription may publish before its read state stops being
-    /// synced at all.
+    /// One source as it travels: the rule, and when it was installed.
     ///
-    /// This store is a megabyte across every book, so an unbounded list is a way to lose
-    /// the whole library's sync to one feed nobody reads. The cap is not a compromise on
-    /// what gets synced so much as a statement about what is worth syncing: a subscription
-    /// sitting on three hundred unread articles is one nobody has read on either device,
-    /// and "everything is unread" is already what the receiving device shows.
-    private static let unreadLimit = 250
+    /// Without its notes, which are for whoever maintains the rule and run to 20 KB on some
+    /// against a megabyte shared with every book; the rule itself is a couple of kilobytes.
+    /// The cost is a source page with no notes on the device it arrived at.
+    private struct RuleRecord: Codable {
+        var updatedAt: Date
+        var rule: SiteRule
+    }
 
     private(set) var lastSyncedAt: Date?
     private(set) var lastError: String?
@@ -118,25 +133,40 @@ final class CloudSync {
         didSet {
             guard isEnabled != oldValue else { return }
             defaults.set(isEnabled, forKey: Self.enabledDefaultsKey)
-            if isEnabled { enable() } else { disable() }
+            if isEnabled {
+                defaults.set(Date(), forKey: Self.joinedAtDefaultsKey)
+                enable()
+            } else {
+                disable()
+            }
         }
     }
 
     private let repo: LibraryRepo
+    private let sites: SiteStore
     private let store: NSUbiquitousKeyValueStore
     private let defaults: UserDefaults
+    private let trace: TraceLog
     private var observer: (any NSObjectProtocol)?
     /// Called after a pull changes local rows, so the UI can reload.
     var onRemoteChange: (() -> Void)?
+    /// Takes a book off this shelf because another device removed it, without telling
+    /// the store again. The owner's job rather than this class's: the downloaded files
+    /// have to go before the row does, since the row's cascade is what names them.
+    var onRemoteRemoval: ((Book) -> Void)?
 
     init(
         repo: LibraryRepo,
+        sites: SiteStore,
         store: NSUbiquitousKeyValueStore = .default,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        trace: TraceLog = .makeShared()
     ) {
         self.repo = repo
+        self.sites = sites
         self.store = store
         self.defaults = defaults
+        self.trace = trace
         self.isEnabled = defaults.bool(forKey: Self.enabledDefaultsKey)
         // Observing only. The first sync is `startSyncing`, called once the app is on
         // screen: `synchronize` talks to the iCloud daemon and `mergeOnEnable` walks
@@ -175,9 +205,26 @@ final class CloudSync {
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: store,
             queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.pull() }
+        ) { [weak self] notification in
+            let reason = notification.userInfo?[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int
+            MainActor.assumeIsolated {
+                // Not a change from another device: a write of this one's did not fit.
+                if reason == NSUbiquitousKeyValueStoreQuotaViolationChange {
+                    self?.quotaExceeded()
+                } else {
+                    self?.pull()
+                }
+            }
         }
+    }
+
+    /// Says so where the sync switch is. Nothing else would: the store drops the write
+    /// without an error, and the book it carried simply never arrives anywhere else.
+    ///
+    /// Cleared by the next removal — see `markRemoved`.
+    private func quotaExceeded() {
+        lastError = String(localized: "settings.icloud.quotaExceeded")
+        trace.note("icloud quota exceeded keys=\(store.dictionaryRepresentation.count)")
     }
 
     private func sync() {
@@ -205,6 +252,7 @@ final class CloudSync {
         guard isEnabled else { return }
         do {
             for book in try repo.allBooks() { write(book) }
+            for rule in sites.rules { write(rule) }
             store.synchronize()
         } catch {
             lastError = error.localizedDescription
@@ -220,10 +268,68 @@ final class CloudSync {
         // own schedule. Forcing it per turn was pure battery.
     }
 
-    func removed(bookId: String) {
+    func removed(_ book: Book) {
+        guard isEnabled, !book.isLocal else { return }
+        markRemoved(Self.keyPrefix + book.id, by: Self.removedPrefix + book.id)
+    }
+
+    func push(_ rule: SiteRule) {
         guard isEnabled else { return }
-        store.removeObject(forKey: Self.keyPrefix + bookId)
+        write(rule)
         store.synchronize()
+    }
+
+    func removedRule(id: String) {
+        guard isEnabled else { return }
+        markRemoved(Self.rulePrefix + id, by: Self.removedRulePrefix + id)
+    }
+
+    private func markRemoved(_ key: String, by removal: String) {
+        guard fits(removal) else { return }
+        // What makes room, so the error that asked for it goes; anything still wrong says so
+        // again at the next write or pull.
+        lastError = nil
+        store.removeObject(forKey: key)
+        store.set(Date(), forKey: removal)
+        store.synchronize()
+    }
+
+    /// Every write comes after a pull has had its chance to remove the thing, so a removal
+    /// still on file lost last-writer-wins, or predates this device joining. Only one this
+    /// device has seen: removing a key it never had could erase a removal still on its way
+    /// here, which is the resurrection that key exists to stop.
+    private func put(_ data: Data, forKey key: String, clearing removal: String) {
+        guard fits(removal) else { return }
+        store.set(data, forKey: key)
+        if store.object(forKey: removal) != nil { store.removeObject(forKey: removal) }
+    }
+
+    /// Whether a key can be written at all. Checked on the removal key, the longer of the
+    /// two a thing is stored under, so one check covers both.
+    ///
+    /// A subscription's key carries its address, and a long enough address runs past
+    /// `keyLimit`. That one does not sync, and the trace says so — by length and kind only,
+    /// since the trace may not hold an address.
+    // ponytail: skipped, not shortened; hash the id into the key if long addresses show up
+    // in traces often enough to matter.
+    private func fits(_ key: String) -> Bool {
+        guard key.utf16.count > Self.keyLimit else { return true }
+        trace.note("icloud key too long len=\(key.utf16.count) kind=\(key.prefix { $0 != "." })")
+        return false
+    }
+
+    private func write(_ rule: SiteRule) {
+        let bare = SiteRule(
+            id: rule.id, name: rule.name, host: rule.host, kind: rule.kind, urls: rule.urls,
+            idPatterns: rule.idPatterns, search: rule.search, book: rule.book,
+            catalog: rule.catalog, chapter: rule.chapter, images: rule.images,
+            signIn: rule.signIn, notes: nil
+        )
+        let record = RuleRecord(
+            updatedAt: sites.modificationDate(ofRule: rule.id) ?? Date(), rule: bare
+        )
+        guard let data = try? JSONEncoder().encode(record) else { return }
+        put(data, forKey: Self.rulePrefix + rule.id, clearing: Self.removedRulePrefix + rule.id)
     }
 
     /// Books imported from a file on the device are skipped.
@@ -241,23 +347,11 @@ final class CloudSync {
             addedAt: book.addedAt, updatedAt: book.updatedAt,
             position: book.readingPosition, fraction: book.lastReadFraction
         )
-        if book.kind == .feed { attachReadState(to: &record, bookId: book.id) }
+        if book.kind == .feed {
+            record.readThrough = try? repo.newestReadArticleDate(bookId: book.id)
+        }
         guard let data = try? JSONEncoder().encode(record) else { return }
-        store.set(data, forKey: Self.keyPrefix + book.id)
-    }
-
-    /// Puts a subscription's read state on the record, unless there is too much of it.
-    ///
-    /// Both fields or neither: an unread list without the cutoff it was written against
-    /// cannot be applied safely, so a feed over the cap publishes nothing rather than half
-    /// of it.
-    private func attachReadState(to record: inout Record, bookId: String) {
-        guard let unread = try? repo.unreadArticleIds(bookId: bookId),
-              unread.count <= Self.unreadLimit,
-              let through = try? repo.newestArticleDate(bookId: bookId)
-        else { return }
-        record.unreadArticles = unread
-        record.articlesThrough = through
+        put(data, forKey: Self.keyPrefix + book.id, clearing: Self.removedPrefix + book.id)
     }
 
     /// Fills in the read state another device published for a subscription whose articles
@@ -268,47 +362,96 @@ final class CloudSync {
     /// time the first refresh brings the articles in, the record has already been merged
     /// and will not be looked at again — last-writer-wins says this device's row is as new
     /// as the one in the store.
-    ///
-    /// Marks read only. It is recovering state the other device already published, not
-    /// arbitrating between two devices, so it must not be able to reach forward over an
-    /// article somebody has deliberately put back to unread here since.
     func fillInReadState(bookId: String) {
         guard isEnabled,
               let data = store.data(forKey: Self.keyPrefix + bookId),
               let record = try? JSONDecoder().decode(Record.self, from: data),
-              let through = record.articlesThrough
+              let through = record.readThrough
         else { return }
-        try? repo.applyRemoteReadState(
-            bookId: bookId, unread: Set(record.unreadArticles ?? []),
-            through: through, monotonic: true
-        )
+        try? repo.markReadThrough(bookId: bookId, through: through)
     }
 
     // MARK: - Pull
 
-    /// Applies remote records that are newer than the local row. Whole-key
-    /// last-writer-wins: a book is small enough that field-level merging would
-    /// add real complexity for no user-visible benefit.
+    /// Applies remote records that are newer than the local copy, and removals that are
+    /// newer than it. Whole-key last-writer-wins: a book is small enough that
+    /// field-level merging would add real complexity for no user-visible benefit.
     func pull() {
         guard isEnabled else { return }
         var changed = false
         do {
-            let local = Dictionary(uniqueKeysWithValues: try repo.allBooks().map { ($0.id, $0) })
-            for (key, value) in store.dictionaryRepresentation
-            where key.hasPrefix(Self.keyPrefix) {
-                guard let data = value as? Data,
-                      let record = try? JSONDecoder().decode(Record.self, from: data)
-                else { continue }
-                let id = String(key.dropFirst(Self.keyPrefix.count))
-                if let existing = local[id], existing.updatedAt >= record.updatedAt { continue }
-                try apply(record, id: id)
-                changed = true
+            let entries = store.dictionaryRepresentation
+            // Sources first, so a book arriving in the same pull is filed under its
+            // source's name rather than the bare id it shows until the source is here.
+            let rules = changes(
+                in: entries, records: Self.rulePrefix, removals: Self.removedRulePrefix,
+                decode: { try? JSONDecoder().decode(RuleRecord.self, from: $0) },
+                stamp: \.updatedAt,
+                local: Dictionary(uniqueKeysWithValues: sites.rules.compactMap { rule in
+                    sites.modificationDate(ofRule: rule.id).map { (rule.id, $0) }
+                })
+            )
+            for id in rules.remove { try? sites.remove(id: id, publish: false) }
+            for record in rules.apply.values {
+                // One this build refuses to install stays in the store for a device that can.
+                _ = try? sites.importRule(
+                    data: JSONEncoder().encode(record.rule), syncedAt: record.updatedAt
+                )
             }
+
+            let local = Dictionary(uniqueKeysWithValues: try repo.allBooks().map { ($0.id, $0) })
+            let books = changes(
+                in: entries, records: Self.keyPrefix, removals: Self.removedPrefix,
+                decode: { try? JSONDecoder().decode(Record.self, from: $0) },
+                stamp: \.updatedAt, local: local.mapValues(\.updatedAt)
+            )
+            for id in books.remove { if let book = local[id] { onRemoteRemoval?(book) } }
+            for (id, record) in books.apply { try apply(record, id: id) }
+            // Sources count too: the shelf groups its books under them.
+            changed = !(rules.remove.isEmpty && rules.apply.isEmpty
+                        && books.remove.isEmpty && books.apply.isEmpty)
         } catch {
             lastError = error.localizedDescription
         }
         lastSyncedAt = Date()
         if changed { onRemoteChange?() }
+    }
+
+    /// What the store asks of this device for one kind of thing it holds: the records newer
+    /// than the local copy, and the local ids whose removal is newer still.
+    ///
+    /// Books and sources share it because the hard part is the same for both: a removal
+    /// has to outlast the copies other devices keep re-publishing until they hear of it.
+    private func changes<Item>(
+        in entries: [String: Any], records recordPrefix: String, removals removalPrefix: String,
+        decode: (Data) -> Item?, stamp: (Item) -> Date, local: [String: Date]
+    ) -> (apply: [String: Item], remove: [String]) {
+        var records: [String: Item] = [:]
+        var removals: [String: Date] = [:]
+        for (key, value) in entries {
+            if key.hasPrefix(recordPrefix), let data = value as? Data, let item = decode(data) {
+                records[String(key.dropFirst(recordPrefix.count))] = item
+            } else if key.hasPrefix(removalPrefix), let removedAt = value as? Date {
+                removals[String(key.dropFirst(removalPrefix.count))] = removedAt
+            }
+        }
+        let joinedAt = defaults.object(forKey: Self.joinedAtDefaultsKey) as? Date ?? .distantPast
+        var remove: [String] = []
+        for (id, removedAt) in removals {
+            if removedAt < Date().addingTimeInterval(-Self.removalLifetime) {
+                store.removeObject(forKey: removalPrefix + id)
+            }
+            // Changed somewhere after it was removed: that device's copy wins.
+            if let item = records[id], stamp(item) > removedAt { continue }
+            // A device that had not heard of the removal yet published its copy again.
+            if records.removeValue(forKey: id) != nil {
+                store.removeObject(forKey: recordPrefix + id)
+            }
+            guard let at = local[id], at <= removedAt, removedAt > joinedAt else { continue }
+            remove.append(id)
+        }
+        let apply = records.filter { id, item in local[id].map { $0 < stamp(item) } ?? true }
+        return (apply, remove)
     }
 
     private func apply(_ record: Record, id: String) throws {
@@ -323,12 +466,9 @@ final class CloudSync {
                 bookId: id, position: position, fraction: record.fraction, now: record.updatedAt
             )
         }
-        // After the bookmark, which may have created the row this points into. Not
-        // monotonic: this record won last-writer-wins, so an article it calls unread was
-        // put back to unread on the other device more recently than anything here.
-        try repo.applyRemoteReadState(
-            bookId: id, unread: Set(record.unreadArticles ?? []),
-            through: record.articlesThrough, monotonic: false, now: record.updatedAt
-        )
+        // After the bookmark, which may have created the row this points into.
+        if let through = record.readThrough {
+            try repo.markReadThrough(bookId: id, through: through, now: record.updatedAt)
+        }
     }
 }

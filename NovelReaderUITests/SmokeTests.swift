@@ -67,7 +67,10 @@ final class SmokeTests: XCTestCase {
         let sources = app.buttons["settings.sources"]
         XCTAssertTrue(sources.waitForExistence(timeout: 5))
         sources.tap()
-        XCTAssertTrue(app.staticTexts["tw.hjwzw.com"].waitForExistence(timeout: 5),
+        // Sorted by name, and the seeded rules outgrew one screen — see `reveal`.
+        let hjwzw = app.staticTexts["tw.hjwzw.com"]
+        app.reveal(hjwzw)
+        XCTAssertTrue(hjwzw.waitForExistence(timeout: 5),
                       "The seeded rules should be listed by host")
         XCTAssertGreaterThanOrEqual(app.cells.count, 5)
     }
@@ -257,13 +260,16 @@ final class SmokeTests: XCTestCase {
         add.tap()
         XCTAssertTrue(app.textFields["add.url"].waitForExistence(timeout: 5))
         // The sheet lists the installed sources so the user can see what a
-        // pasteable link looks like.
-        XCTAssertTrue(app.staticTexts["tw.hjwzw.com"].exists)
+        // pasteable link looks like. More of them than one screen holds — see `reveal`.
+        let hjwzw = app.staticTexts["tw.hjwzw.com"]
+        app.reveal(hjwzw)
+        XCTAssertTrue(hjwzw.exists)
     }
 
     func testSearchTabShowsScopePicker() {
         searchTab.tap()
-        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5),
+                      "The search field should be on screen without pulling the list down")
         XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5),
                       "The scope picker row should be present")
     }

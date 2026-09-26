@@ -257,6 +257,7 @@ final class WebFetcher: NSObject {
         extracting script: String,
         as type: T.Type,
         signIn: SiteRule.SignIn? = nil,
+        waitingFor selector: String? = nil,
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
@@ -265,6 +266,7 @@ final class WebFetcher: NSObject {
             }
             try await self.failIfChallenged()
             try await self.failIfTurnedAway(by: signIn, timeout: timeout)
+            await self.waitForLateContent(matching: selector)
             let value = try await self.evaluate(script, as: type, in: self.webView)
             await self.parkAfterExtraction()
             return value
@@ -284,6 +286,7 @@ final class WebFetcher: NSObject {
         extracting script: String,
         as type: T.Type,
         signIn: SiteRule.SignIn? = nil,
+        waitingFor selector: String? = nil,
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
@@ -297,6 +300,7 @@ final class WebFetcher: NSObject {
             }
             try await self.failIfChallenged()
             try await self.failIfTurnedAway(by: signIn, timeout: timeout)
+            await self.waitForLateContent(matching: selector)
             let value = try await self.evaluate(script, as: type, in: self.webView)
             await self.parkAfterExtraction()
             return value
@@ -546,7 +550,10 @@ final class WebFetcher: NSObject {
         while ContinuousClock.now < deadline {
             try? await Task.sleep(for: Self.readabilityPollInterval)
             do {
-                guard let stillChallenged = try await detectChallenge() else { return }
+                guard let stillChallenged = try await detectChallenge() else {
+                    await waitUntilParsed()
+                    return
+                }
                 challenged = stillChallenged
             } catch {
                 // A probe that throws is a document being swapped out from under it,
@@ -566,6 +573,24 @@ final class WebFetcher: NSObject {
     /// Paid at most once per clearance window: a passed check leaves `cf_clearance`
     /// behind, and the requests riding on it see no challenge at all.
     private static let challengeSelfClearGrace: Duration = .seconds(8)
+
+    /// Waits, bounded, for the page a cleared check handed over to to finish parsing.
+    ///
+    /// A check clears by navigating, and the first probe to see no challenge can land
+    /// while the new document is still streaming in. A catalog read at that moment is
+    /// the first few hundred chapters of however many the page lists — and a catalog
+    /// refresh writes what it read over the book's chapter index. `interactive` is
+    /// enough: the parser is done, and content a page adds later is `waitFor`'s
+    /// business.
+    private func waitUntilParsed() async {
+        struct Probe: Decodable { let parsed: Bool }
+        let script = "(function () { return { parsed: document.readyState !== 'loading' }; })()"
+        let deadline = ContinuousClock.now + Self.challengeSelfClearGrace
+        while ContinuousClock.now < deadline {
+            if (try? await evaluate(script, as: Probe.self, in: webView))?.parsed == true { return }
+            try? await Task.sleep(for: Self.readabilityPollInterval)
+        }
+    }
 
     /// Stops the fetch when the site bounced us to its "members only" page, and
     /// leaves the web view showing the sign-in form instead.
@@ -636,6 +661,37 @@ final class WebFetcher: NSObject {
         """
         return try await evaluate(script, as: Probe.self, in: webView).empty
     }
+
+    /// Holds the extraction until the page matches `selector`, for content a site
+    /// fills in after its load event (`Catalog.waitFor`, `Search.waitFor`).
+    ///
+    /// Never throws, and reads the page anyway when the bound runs out: a rule's
+    /// extractor already knows what an empty page means — an empty catalog, a
+    /// search with no hits — and a timeout error here would replace that with a
+    /// vaguer one. A selector the page cannot parse counts as found, so a typo in
+    /// a rule costs nothing rather than the full bound on every fetch.
+    private func waitForLateContent(matching selector: String?) async {
+        guard let selector, !selector.isEmpty,
+              let literal = try? JSONEncoder().encode(selector),
+              let quoted = String(data: literal, encoding: .utf8)
+        else { return }
+        struct Probe: Decodable { let found: Bool }
+        let script = """
+        (function () {
+          try { return { found: !!document.querySelector(\(quoted)) }; }
+          catch (e) { return { found: true }; }
+        })()
+        """
+        let deadline = ContinuousClock.now + Self.lateContentGrace
+        while ContinuousClock.now < deadline {
+            if (try? await evaluate(script, as: Probe.self, in: webView))?.found == true { return }
+            try? await Task.sleep(for: Self.readabilityPollInterval)
+        }
+    }
+
+    /// Twice what the slowest site measured needed: its chapter list was complete in
+    /// every load given five seconds past the load event.
+    private static let lateContentGrace: Duration = .seconds(10)
 
     /// Runs `body` after every previously queued fetch has settled.
     private func serialised<T>(_ body: @escaping () async throws -> T) async throws -> T {
@@ -807,16 +863,24 @@ final class WebFetcher: NSObject {
     ///
     /// Detection is deliberately shallow — we only need to know *that* we were
     /// challenged so we can hand control to the user.
-    /// What a Cloudflare challenge looks like, as a JavaScript expression.
+    /// What a bot check looks like, as a JavaScript expression.
     ///
     /// One definition, because two callers need the same answer for opposite
     /// reasons — one to stop the fetch, one to keep waiting — and a copy that
     /// drifted would leave the second silently settling on the page the first is
     /// still looking for.
+    ///
+    /// Cloudflare's, and one site's self-hosted proof-of-work page ("正在验证浏览器",
+    /// served from `/__gatekeeper_challenge/`). That one clears itself in about a
+    /// second, but only if it is left to run: unrecognised, it was read as the page
+    /// and then parked on `about:blank` mid-proof, so no fetch ever earned the
+    /// clearance cookie. Recognised, it takes the same wait as Cloudflare's own
+    /// non-interactive check.
     private static let challengeMarkers = """
     !!window._cf_chl_opt \
     || !!document.querySelector('script[src*="challenges.cloudflare.com"]') \
-    || !!document.querySelector('#challenge-form, #cf-challenge-running')
+    || !!document.querySelector('#challenge-form, #cf-challenge-running') \
+    || !!document.querySelector('script[src*="/__gatekeeper_challenge/"]')
     """
 
     private func detectChallenge() async throws -> URL? {

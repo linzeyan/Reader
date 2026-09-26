@@ -2,42 +2,30 @@ import Foundation
 
 /// Where one sentence ends and the next begins.
 ///
-/// Two things in this app read the same text a sentence at a time and ask opposite
-/// questions of it: a press-and-drag grows a selection outwards from a point — "which
-/// sentence is this offset inside" — while the voice works forwards through a paragraph
-/// — "give me every sentence in order". Both are the same rule about punctuation, and
-/// two sets of punctuation marks is how a highlight ends up covering a passage the voice
-/// read out as two.
+/// What the voice reads by, working forwards through a paragraph — "give me every
+/// sentence in order" — and what the band under the spoken words covers. Selection used
+/// to snap to the same sentences; it now picks out words and characters instead (see
+/// `ChapterText.word(at:)`), so this is the voice's rule alone.
 ///
 /// Stated over an `NSString` and a paragraph range rather than over any type that owns
-/// text, because the callers own different ones: `ChapterText` holds a composed chapter,
-/// and the voice is handed loose paragraphs before anything has been laid out.
+/// text, because the voice is handed loose paragraphs before anything has been laid out.
 enum SentenceRules {
     /// What ends a sentence.
     ///
     /// The CJK terminators this app mostly reads, plus the Latin ones. `.` is included
-    /// knowing it splits "Mr. Smith" wrongly: over-splitting is recoverable — by sliding
-    /// the finger further, or by one more breath in the voice — whereas a paragraph with
-    /// no terminator at all can only be marked, or read out, whole.
+    /// knowing it splits "Mr. Smith" wrongly: over-splitting costs one more breath in the
+    /// voice, whereas a paragraph with no terminator at all can only be read out whole.
     static let terminators = Set("。．！？!?；;…⋯.".unicodeScalars.map { UInt16($0.value) })
 
     /// Punctuation that belongs to the sentence it closes, so 「…。」 ends after the
     /// bracket rather than between the two marks.
     static let closers = Set("」』〉》】）)］]｝}”’\"'".unicodeScalars.map { UInt16($0.value) })
 
-    /// The sentence boundary at or before `offset`, never leaving the paragraph.
-    static func start(at offset: Int, in paragraph: NSRange, of text: NSString) -> Int {
-        var index = clamp(offset, to: paragraph)
-        while index > paragraph.location, !endsSentence(before: index, in: paragraph, of: text) {
-            index -= 1
-        }
-        return index
-    }
-
     /// The sentence boundary after `offset`, never leaving the paragraph.
     ///
-    /// Starts one past the offset so that pressing *on* a full stop selects the
-    /// sentence it ends rather than the one after it.
+    /// Starts one past the offset, so a sentence asked about from a full stop is the one
+    /// that stop ends — and a walk forwards from each sentence's first character always
+    /// advances, even over a sentence that is nothing but a stop.
     static func end(at offset: Int, in paragraph: NSRange, of text: NSString) -> Int {
         let end = NSMaxRange(paragraph)
         var index = min(clamp(offset, to: paragraph) + 1, end)

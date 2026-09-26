@@ -22,11 +22,9 @@ struct ReaderToolbarEditor: View {
                 }
                 .onMove(perform: move)
             } header: {
-                Text("reader.toolbar.order")
-            } footer: {
                 // The whole of what the editor promises, and the thing a reader cannot
                 // work out from a list of switches: nothing is ever lost by folding it.
-                Text("reader.toolbar.footer")
+                HelpLabel("reader.toolbar.order", help: "reader.toolbar.footer")
             }
 
             Section {

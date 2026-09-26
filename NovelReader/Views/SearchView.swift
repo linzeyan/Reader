@@ -81,7 +81,14 @@ struct SearchView: View {
             // shelf to say so.
             .toolbar { ToolbarItem(placement: .topBarLeading) { MediaModePicker() } }
             .navigationDestination(for: Book.self) { BookDetailView(book: $0) }
-            .searchable(text: $query, prompt: Text(prompt))
+            // Pinned open: on this tab the field is the screen. Left to `.automatic`,
+            // iOS 27 tucks it away until the list is pulled down whenever the list is
+            // what fills the stack — which is how this screen shipped until the mode
+            // switch happened to sit above it, and it opened with nothing to type into.
+            .searchable(
+                text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                prompt: Text(prompt)
+            )
             .onSubmit(of: .search) { start() }
             // Results name the sites they came from, and those sites are all of the
             // other medium now. Cleared rather than re-run: the query was typed for

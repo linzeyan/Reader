@@ -130,9 +130,8 @@ struct PaginatedChapterView: View {
     /// because the system's own light-or-dark answer is a trait of the view tree and this
     /// view's owner is the one holding it.
     let palette: ReaderPalette
-    /// This chapter's stored highlights. Painted here, and created here to sentence
-    /// precision — see `ChapterPaginator.offset(at:onPage:)` for why the scrolling
-    /// renderer can only mark a paragraph whole.
+    /// This chapter's stored highlights. Painted here, and created here by the same rules
+    /// the scrolling renderer creates them by — see `ChapterText.word(at:)`.
     let highlights: [TextHighlight]
     /// Whether a stroke from the leading edge belongs to iOS rather than to this book —
     /// see `ReaderSettings.swipeToGoBack` and `isLeavingTheBook(_:)`. A flag rather than
@@ -186,13 +185,13 @@ struct PaginatedChapterView: View {
     /// as anchors because it is redrawn on every movement of the finger and only has to
     /// become a storable pair once, at the moment it is committed.
     @State private var selection: NSRange?
-    /// The end of the selection the finger is *not* holding, as an offset into the
-    /// composed chapter.
+    /// The end of the selection the finger is *not* holding, and the grain the other end
+    /// moves in. Set by the first report of a gesture and cleared when it lifts.
     ///
     /// Kept rather than re-derived from the point the press began at: once a page has
     /// turned under the finger, that point on screen names a different character. Only
     /// the far end of a selection follows the finger.
-    @State private var selectionAnchor: Int?
+    @State private var extending: Extending?
     /// Where the finger last was, in the page's own coordinates. Re-read while the finger
     /// is still, because standing still is what turns the page here and a gesture
     /// recogniser says nothing at all until the touch moves.
@@ -222,6 +221,15 @@ struct PaginatedChapterView: View {
     private struct EdgeHold {
         let turn: PageTurn
         let since: Date
+    }
+
+    /// How the finger is growing the selection — see `ChapterText.word(at:)` for why
+    /// there are two grains.
+    private enum Extending: Equatable {
+        /// A press: from the word it began in, a word at a time.
+        case words(from: Int)
+        /// A grip: one end held still, the other a character at a time.
+        case characters(fixed: Int)
     }
 
     private static let edgeRule = SelectionEdgeRule()
@@ -304,22 +312,21 @@ struct PaginatedChapterView: View {
                     highlights: highlights.flatMap { paginator.text.ranges(of: $0) },
                     selection: selection,
                     spoken: speaking.flatMap { paginator.text.range(of: $0) },
+                    isChoosing: isChoosing,
                     highlightColor: UIColor(palette.highlight),
                     selectionColor: UIColor(palette.selection),
-                    onSelectionDrag: { drag in select(drag, in: paginator) }
+                    gripColor: palette.foreground.uiColor,
+                    onSelectionDrag: { drag in select(drag, in: paginator) },
+                    // "Tap anywhere" puts the bar away instead of moving the book. The
+                    // page's own taps are masked while a bar is up — see
+                    // `isSelectingText` — so this is the only thing a tap can do then.
+                    onDismiss: { clearSelection() }
                 )
                 .id(pageTransition)
                 .transition(.asymmetric(
                     insertion: .move(edge: turningForward ? .trailing : .leading),
                     removal: .move(edge: turningForward ? .leading : .trailing)
                 ))
-            }
-            if isChoosing {
-                // Swallows the taps and presses the page would otherwise read as turns,
-                // so "tap anywhere" puts the bar away instead of moving the book.
-                Color.clear
-                    .contentShape(.rect)
-                    .onTapGesture { clearSelection() }
             }
         }
         .frame(width: size.width, height: size.height)
@@ -410,49 +417,34 @@ struct PaginatedChapterView: View {
     /// No permanent button in the reader's control bar: marking a passage needs to say
     /// *which* passage, so the gesture has to come first and a button that could only
     /// ever report "select something first" would be a button that never works.
+    /// The same bar the scrolling reader asks with.
     @ViewBuilder
     private var actionBar: some View {
         if let picked {
-            bar("reader.highlight.remove", icon: "trash") {
-                onRemoveHighlight(picked)
-                clearSelection()
-            }
+            MarkActionBar(
+                title: "reader.highlight.remove", icon: "trash",
+                text: paginator?.text.text(of: picked),
+                confirm: {
+                    onRemoveHighlight(picked)
+                    clearSelection()
+                },
+                cancel: clearSelection
+            )
         } else if let selection, !isDragging {
-            bar("reader.highlight.add", icon: "highlighter") {
-                commit(selection)
-            }
+            MarkActionBar(
+                title: "reader.highlight.add", icon: "highlighter",
+                text: paginator?.text.selection(for: selection)?.text,
+                confirm: { commit(selection) },
+                cancel: clearSelection
+            )
         }
     }
 
-    private func bar(
-        _ title: LocalizedStringKey, icon: String, action: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 12) {
-            Button(action: action) {
-                Label(title, systemImage: icon).font(.footnote.weight(.medium))
-            }
-            .accessibilityIdentifier("reader.highlight.action")
-            Divider().frame(height: 18)
-            Button("common.cancel") { clearSelection() }
-                .font(.footnote)
-                .tint(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar, in: .capsule)
-        // Clear of the reader's own control bar, which may well be up when a passage is
-        // marked: two bars stacked on each other at the bottom of the screen is the one
-        // way to make a confirm button unhittable. Lands where the end-of-book notice
-        // lands, and for the same reason.
-        .padding(.bottom, 60)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
-    }
-
-    /// Turns a press-and-slide into a sentence-bounded selection.
+    /// Turns a press-and-slide, or a grip being dragged, into a selection.
     ///
-    /// The range is not clipped to the page: a sentence that runs over the page break
-    /// is still one sentence, and marking half of it because the other half is not on
-    /// screen would store a highlight the reader never chose.
+    /// The range is not clipped to the page: a passage that runs over the page break is
+    /// still one passage, and marking half of it because the other half is not on screen
+    /// would store a highlight the reader never chose.
     ///
     /// Called again on a timer while the finger rests (see the dwell in `page(in:)`), so
     /// nothing here writes state it is not changing: a page redrawn twenty times a second
@@ -475,13 +467,35 @@ struct PaginatedChapterView: View {
             edgeHold = nil
         }
         if picked != nil { picked = nil }
-        guard let to = paginator.offset(at: drag.point, onPage: page) else { return }
-        // The anchor is whatever the first report of this press landed on, and it stays
-        // put for the rest of the press however many pages the finger travels.
-        let from = selectionAnchor ?? to
-        if selectionAnchor == nil { selectionAnchor = from }
-        let range = paginator.text.sentenceRange(from: from, to: to)
-        if selection != range { selection = range }
+        // After this report is answered: the next gesture takes hold of whatever this one
+        // left, and a grip grabbed next must hold the *new* far end still.
+        defer { if drag.phase == .finished, extending != nil { extending = nil } }
+        guard let to = paginator.offset(at: drag.point, onPage: page, caret: drag.grip != nil)
+        else { return }
+        // Decided by the first report of the gesture, and kept for the rest of it however
+        // many pages the finger travels.
+        if extending == nil { extending = extending(for: drag, at: to) }
+        switch extending {
+        case .words(let from):
+            let range = paginator.text.wordSelection(from: from, to: to)
+            if selection != range { selection = range }
+        case .characters(let fixed):
+            // Nil is the grip meeting the other end, and keeps the last real passage.
+            if let range = paginator.text.caretSelection(fixed: fixed, moving: to),
+               selection != range {
+                selection = range
+            }
+        case nil:
+            break
+        }
+    }
+
+    /// What a gesture's first report makes of the selection: a press starts a new one
+    /// from the word under the finger; a grip holds the far end of the one there is.
+    private func extending(for drag: TextSelectionDrag, at offset: Int) -> Extending? {
+        guard let grip = drag.grip else { return .words(from: offset) }
+        guard let selection else { return nil }
+        return .characters(fixed: grip == .start ? NSMaxRange(selection) : selection.location)
     }
 
     /// The page under the finger, turned first if the finger has rested against an edge
@@ -540,7 +554,7 @@ struct PaginatedChapterView: View {
 
     private func clearSelection() {
         selection = nil
-        selectionAnchor = nil
+        extending = nil
         dragPoint = nil
         edgeHold = nil
         isDragging = false
@@ -790,11 +804,11 @@ struct PaginatedChapterView: View {
     }
 }
 
-/// One press-and-slide over a page's text.
+/// One press-and-slide, or one grip dragged, over a page's text.
 ///
 /// A point rather than character offsets: the view reports where the finger is and the
-/// reader view decides what that means, so the sentence-snapping rules live next to
-/// the text that defines them instead of inside a `UIView`.
+/// reader view decides what that means, so the rules for what a press picks out live
+/// next to the text that defines them instead of inside a `UIView`.
 ///
 /// The current point only, not the pair. The far end of a selection is the finger; the
 /// near end is an offset the reader view remembers, because the page under the finger can
@@ -811,6 +825,9 @@ struct TextSelectionDrag {
 
     let point: CGPoint
     let phase: Phase
+    /// Which end of the selection is being moved, for a grip. Nil for a press, which
+    /// starts a selection of its own.
+    var grip: SelectionGrips.End?
 }
 
 /// Draws one page of an already-measured chapter.
@@ -823,9 +840,16 @@ private struct ChapterPageRenderer: UIViewRepresentable {
     /// The sentence being read out loud, painted the way a selection is: both mean "this
     /// is the passage in hand", and a reader is only ever doing one of the two.
     let spoken: NSRange?
+    /// Whether a bar is waiting for an answer, which is when a tap on the page means
+    /// "never mind" rather than a page turn.
+    let isChoosing: Bool
     let highlightColor: UIColor
     let selectionColor: UIColor
+    /// The grips are the ink, solid, over the ink's own wash: one colour family for the
+    /// whole of a selection, on every theme a reader can pick.
+    let gripColor: UIColor
     let onSelectionDrag: (TextSelectionDrag) -> Void
+    let onDismiss: () -> Void
 
     func makeUIView(context: Context) -> ChapterPageView {
         let view = ChapterPageView()
@@ -839,13 +863,17 @@ private struct ChapterPageRenderer: UIViewRepresentable {
 
     private func update(_ view: ChapterPageView) {
         view.onSelectionDrag = onSelectionDrag
+        view.onDismiss = onDismiss
         view.show(
             page: pageIndex,
             from: paginator,
             highlights: highlights,
             picked: [selection, spoken].compactMap { $0 },
+            selection: selection,
+            isChoosing: isChoosing,
             highlightColor: highlightColor,
-            selectionColor: selectionColor
+            selectionColor: selectionColor,
+            gripColor: gripColor
         )
     }
 }
@@ -865,8 +893,17 @@ final class ChapterPageView: UIView {
     private var picked: [NSRange] = []
     private var highlightColor: UIColor = .clear
     private var selectionColor: UIColor = .clear
+    /// The passage being picked out, which is the one thing on the page that has grips.
+    /// Apart from `picked` because that also carries the sentence being read aloud.
+    private var selection: NSRange?
+    private var isChoosing = false
+    private var gripColor: UIColor = .clear
 
     var onSelectionDrag: ((TextSelectionDrag) -> Void)?
+    var onDismiss: (() -> Void)?
+
+    private lazy var grips = SelectionGrips(host: self)
+    private let dismissTap = UITapGestureRecognizer()
 
     init() {
         super.init(frame: .zero)
@@ -882,12 +919,26 @@ final class ChapterPageView: UIView {
         // location it began at, which is the anchor of the whole selection. A SwiftUI
         // `LongPressGesture` reports no location at all, and the sequenced-drag
         // workaround only gets one once the finger has moved — so a press that marks a
-        // sentence without moving would select nothing.
+        // word without moving would select nothing.
         let press = UILongPressGestureRecognizer(target: self, action: #selector(handlePress))
         // Long enough that a page-turn tap never trips it, short enough that marking a
-        // sentence feels like a decision rather than a wait.
+        // passage feels like a decision rather than a wait.
         press.minimumPressDuration = 0.4
         addGestureRecognizer(press)
+
+        grips.carets = { [weak self] in self?.gripCarets() }
+        grips.onDrag = { [weak self] end, point, phase in
+            self?.onSelectionDrag?(TextSelectionDrag(
+                point: point, phase: phase == .ended ? .finished : .active, grip: end
+            ))
+        }
+
+        // Here rather than as a SwiftUI layer over the page, which is what used to catch
+        // "tap anywhere to put the bar away": a layer over the page would also be over
+        // the grips, and nothing under it could be taken hold of. See
+        // `gestureRecognizerShouldBegin`, which keeps it to the moments a bar is up.
+        dismissTap.addTarget(self, action: #selector(handleDismiss))
+        addGestureRecognizer(dismissTap)
     }
 
     /// Never loaded from a nib: the reader builds this view in code.
@@ -898,30 +949,70 @@ final class ChapterPageView: UIView {
         from paginator: ChapterPaginator,
         highlights: [NSRange],
         picked: [NSRange],
+        selection: NSRange?,
+        isChoosing: Bool,
         highlightColor: UIColor,
-        selectionColor: UIColor
+        selectionColor: UIColor,
+        gripColor: UIColor
     ) {
         self.paginator = paginator
         self.highlights = highlights
         self.picked = picked
+        self.selection = selection
+        self.isChoosing = isChoosing
         self.highlightColor = highlightColor
         self.selectionColor = selectionColor
+        self.gripColor = gripColor
         pageIndex = page
         setNeedsDisplay()
+    }
+
+    /// The dismissing tap only while a bar is waiting for an answer. The rest of the time
+    /// taps belong to the page — turns and the controls, which the reader view reads
+    /// off the SwiftUI side — and this one must not fire alongside them.
+    override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        guard gesture === dismissTap else { return super.gestureRecognizerShouldBegin(gesture) }
+        return isChoosing
+    }
+
+    @objc private func handleDismiss() {
+        onDismiss?()
     }
 
     @objc private func handlePress(_ gesture: UILongPressGestureRecognizer) {
         let point = gesture.location(in: self)
         switch gesture.state {
         case .began, .changed:
+            grips.showLoupe(at: point)
             onSelectionDrag?(TextSelectionDrag(point: point, phase: .active))
         case .ended:
+            grips.hideLoupe()
             onSelectionDrag?(TextSelectionDrag(point: point, phase: .finished))
         case .cancelled, .failed:
+            grips.hideLoupe()
             onSelectionDrag?(TextSelectionDrag(point: point, phase: .cancelled))
         default:
             break
         }
+    }
+
+    /// Where the two ends of the selection are on this page. An end on another page has
+    /// no grip here — it is taken hold of on the page that shows it.
+    private func gripCarets() -> SelectionGrips.Carets? {
+        guard let selection, let paginator, paginator.pages.indices.contains(pageIndex)
+        else { return nil }
+        let rects = paginator.rects(for: selection, onPage: pageIndex)
+        guard let first = rects.first, let last = rects.last else { return nil }
+        let page = paginator.pages[pageIndex].range
+        let end = NSMaxRange(selection)
+        return SelectionGrips.Carets(
+            start: NSLocationInRange(selection.location, page)
+                ? CGRect(x: first.minX, y: first.minY, width: 0, height: first.height)
+                : nil,
+            end: end > page.location && end <= NSMaxRange(page)
+                ? CGRect(x: last.maxX, y: last.minY, width: 0, height: last.height)
+                : nil
+        )
     }
 
     override func draw(_ rect: CGRect) {
@@ -931,6 +1022,10 @@ final class ChapterPageView: UIView {
         fill(highlights, with: highlightColor, from: paginator)
         fill(picked, with: selectionColor, from: paginator)
         paginator.draw(page: pageIndex, in: context, clippedTo: bounds)
+        // Over the glyphs: a grip is something to take hold of, not a mark on the text.
+        if let carets = gripCarets() {
+            SelectionGrips.draw(carets, color: gripColor, keptInside: bounds, in: context)
+        }
     }
 
     /// Fills the bands behind a set of ranges. Draws through `UIBezierPath`, which

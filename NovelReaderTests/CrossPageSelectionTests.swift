@@ -262,7 +262,7 @@ final class CrossPageSelectionTests: XCTestCase {
         let held = CGPoint(x: 40, y: 120)
         let ended = try XCTUnwrap(paginator.offset(at: held, onPage: page + 1))
 
-        let range = try XCTUnwrap(paginator.text.sentenceRange(from: pressed, to: ended))
+        let range = try XCTUnwrap(paginator.text.wordSelection(from: pressed, to: ended))
         XCTAssertLessThanOrEqual(range.location, pressed, "snapping may only widen the passage")
         XCTAssertGreaterThanOrEqual(NSMaxRange(range), ended)
         XCTAssertTrue(
@@ -346,11 +346,11 @@ final class CrossPageSelectionTests: XCTestCase {
         }
     }
 
-    /// Sentence snapping is arithmetic on the composed chapter, so where the page breaks
-    /// fall must not change its answer. A sentence cut in half by a page break is still
-    /// one sentence: the reader who marks it gets the whole of it, and gets the same whole
-    /// of it in a layout where that sentence sits in the middle of a page.
-    func testWhereThePagesBreakDoesNotChangeWhichSentenceIsPickedOut() throws {
+    /// Word snapping is arithmetic on the composed chapter, so where the page breaks fall
+    /// must not change its answer. A word cut in half by a page break is still one word:
+    /// the reader who slides over it gets the whole of it, and gets the same whole of it
+    /// in a layout where that word sits in the middle of a page.
+    func testWhereThePagesBreakDoesNotChangeWhichWordsArePickedOut() throws {
         let paragraphs = longChapter()
         let paginator = paginator(paragraphs: paragraphs)
         let straddle = try XCTUnwrap(
@@ -361,14 +361,14 @@ final class CrossPageSelectionTests: XCTestCase {
         for size in [CGSize(width: 350, height: 900), CGSize(width: 700, height: 300)] {
             let relaid = self.paginator(paragraphs: paragraphs, size: size)
             XCTAssertEqual(
-                relaid.text.sentenceRange(from: straddle.from, to: straddle.to), straddle.range,
-                "the same two positions must pick out the same sentence at \(size)"
+                relaid.text.wordSelection(from: straddle.from, to: straddle.to), straddle.range,
+                "the same two positions must pick out the same words at \(size)"
             )
         }
         for typeSize in [CGFloat(13), 32] {
             XCTAssertEqual(
                 chapterText(paragraphs, typeSize: typeSize)
-                    .sentenceRange(from: straddle.from, to: straddle.to),
+                    .wordSelection(from: straddle.from, to: straddle.to),
                 straddle.range,
                 "and at \(typeSize)pt, which re-breaks every page in the chapter"
             )
@@ -378,7 +378,7 @@ final class CrossPageSelectionTests: XCTestCase {
     // MARK: - Finding a break to drag over
 
     /// A press-and-drag that lands either side of a page break: the page it starts on, the
-    /// two positions the finger touched, and the sentence they snap to.
+    /// two positions the finger touched, and the words they snap to.
     private struct Straddle {
         let page: Int
         let from: Int
@@ -401,10 +401,10 @@ final class CrossPageSelectionTests: XCTestCase {
                 paginator.text.anchor(atOffset: boundary).paragraph
             ]
             guard boundary - paragraph.location > reach, NSMaxRange(paragraph) - boundary > reach,
-                  let range = paginator.text.sentenceRange(
+                  let range = paginator.text.wordSelection(
                       from: boundary - reach, to: boundary + reach
                   ),
-                  // Two pages, not three: a sentence spilling onto a third page would be a
+                  // Two pages, not three: a passage spilling onto a third page would be a
                   // different claim than the one being made.
                   NSMaxRange(range) <= NSMaxRange(next.range)
             else { continue }

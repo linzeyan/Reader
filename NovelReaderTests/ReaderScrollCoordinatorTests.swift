@@ -108,7 +108,7 @@ final class ReaderScrollCoordinatorTests: XCTestCase {
             onPlaceChange: onPlaceChange, onNeedsNext: onNeedsNext, onNeedsPrevious: {},
             onRanOut: onRanOut,
             onTouch: { _ in }, onTurning: onTurning,
-            onTap: { _ in false }, onMark: { _, _ in },
+            onTap: { _ in false }, onSelect: { _ in },
             onTargetReached: {},
             autoScroll: autoScroll, onAutoScrollEnded: onAutoScrollEnded,
             speaking: speaking,

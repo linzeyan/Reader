@@ -196,7 +196,7 @@ final class AppEnvironment {
         self.comicImporter = ComicArchiveImporter(
             repo: repo, downloads: self.downloads, covers: coverFiles
         )
-        self.cloud = CloudSync(repo: repo)
+        self.cloud = CloudSync(repo: repo, sites: sites, trace: trace)
         let monitor = NetworkMonitor()
         self.monitor = monitor
         let downloadSettings = DownloadSettings()
@@ -222,6 +222,9 @@ final class AppEnvironment {
             connection: { monitor.connection }
         )
         self.cloud.onRemoteChange = { [weak self] in self?.reloadLibrary() }
+        self.cloud.onRemoteRemoval = { [weak self] in self?.removeBookmark($0, publish: false) }
+        sites.onImport = { [weak self] in self?.cloud.push($0) }
+        sites.onRemove = { [weak self] in self?.cloud.removedRule(id: $0) }
         monitor.onChange = { [weak self] _ in self?.networkChanged() }
         // Last of the wiring, because every closure in it calls back into this object.
         // `unowned` rather than `weak`: the queue is owned here and cannot outlive it.
@@ -946,13 +949,17 @@ final class AppEnvironment {
     /// Requirement 3.1 + 4.3: removing a bookmark also reclaims its downloads.
     /// Files first — a cascade-deleted chapter row can no longer tell us which
     /// files belonged to the book.
-    func removeBookmark(_ book: Book) {
+    ///
+    /// - Parameter publish: whether iCloud hears about it. Off for a removal another
+    ///   device made, which is already in the store with the time it happened; writing
+    ///   it again would move that time forward, past reads it should have lost to.
+    func removeBookmark(_ book: Book, publish: Bool = true) {
         try? downloads.delete(.book(book))
         // And what reading it online left behind. Nothing else would ever come back for
         // it: the cache is found by book, and this is the moment the book stops existing.
         cache.clear(book)
         try? repo.removeBookmark(bookId: book.id)
-        cloud.removed(bookId: book.id)
+        if publish { cloud.removed(book) }
         // The one place a book stops existing, and the only chance to drop what is
         // kept about it outside the database.
         covers.remove(book)

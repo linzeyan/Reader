@@ -157,4 +157,146 @@ final class SiteRuleTests: XCTestCase {
         // Absent optional fields must not leak a null placeholder into the JS.
         XCTAssertFalse(book.contains("\"status\":null"))
     }
+
+    // MARK: - Pages whose text is not where a plain read finds it
+
+    /// Shaped on haodoo: a table of contents with no links, whose chapter names are
+    /// lines of a `<pre>` and whose chapters are addressed by position.
+    private static let linesJSON = """
+    {
+      "id": "lines", "name": "Lines", "host": "www.lines.test",
+      "urls": {
+        "book": "https://www.lines.test/?P={bookId}:0",
+        "catalog": "https://www.lines.test/?P={bookId}:0",
+        "chapter": "https://www.lines.test/?P={bookId}:{chapterId}"
+      },
+      "idPatterns": { "bookId": "[?&]P=([A-Za-z0-9]+):\\\\d", "chapterId": "[?&]P=[A-Za-z0-9]+:([1-9]\\\\d*)" },
+      "book": { "title": { "selector": "title" } },
+      "catalog": { "container": "#SourceText", "linkSelector": "", "order": "ascending", "lines": true },
+      "chapter": {
+        "titleSelectors": [], "contentSelectors": ["#content"], "stripSelectors": [],
+        "visibleOnly": true,
+        "replacements": { "︵": "（", "︶": "）" }
+      }
+    }
+    """
+
+    /// The site paints these lines into a grid of one-character cells, so reading
+    /// links would title every chapter 「第」. Read as lines, each chapter keeps its
+    /// whole name, is numbered the way the site's reader numbers it — a blank line
+    /// is not a chapter — and gets an address built from the template, since the
+    /// page links to none. The catalog is typeset like the text, so the preface's
+    /// vertical brackets come back horizontal.
+    @MainActor
+    func testALineCatalogKeepsWholeNamesAndBuildsEachChaptersAddress() async throws {
+        let rule = try JSONDecoder().decode(SiteRule.self, from: Data(Self.linesJSON.utf8))
+        let page = ScriptedPage()
+        await page.load("""
+        <html><body>
+          <pre id="SourceText" style="display:none">內容簡介
+
+        原序︵趙苕狂︶
+        第一回　風雪驚變</pre>
+          <table><tr><td class="Char" onclick="GoToChapter(1)">內</td></tr></table>
+        </body></html>
+        """)
+        let payload = try await page.evaluate(
+            try ExtractorScript.catalog(rule), as: ExtractorScript.CatalogPayload.self
+        )
+        let entries = BookService.entries(from: payload, rule: rule, siteBookId: "I09D2")
+
+        XCTAssertEqual(entries.map(\.siteChapterId), ["1", "2", "3"])
+        XCTAssertEqual(entries.map(\.title), ["內容簡介", "原序（趙苕狂）", "第一回 風雪驚變"])
+        XCTAssertEqual(entries.last?.url, "https://www.lines.test/?P=I09D2:3")
+    }
+
+    /// Shaped on qimao: the book's pages build their chapter list in a script that
+    /// races the load event, but the site's own API answers the whole list as JSON.
+    private static let jsonCatalogJSON = """
+    {
+      "id": "api", "name": "API", "host": "www.api.test",
+      "urls": {
+        "book": "https://www.api.test/shuku/{bookId}/",
+        "catalog": "https://www.api.test/api/chapter-list?book_id={bookId}",
+        "chapter": "https://www.api.test/shuku/{bookId}-{chapterId}/"
+      },
+      "idPatterns": { "bookId": "/shuku/(\\\\d+)", "chapterId": "/shuku/\\\\d+-(\\\\d+)/" },
+      "book": { "title": { "selector": "h1" } },
+      "catalog": {
+        "container": "body", "linkSelector": "", "order": "ascending",
+        "json": { "arrayPath": "data.chapters", "idKey": "id", "titleKey": "title" }
+      },
+      "chapter": { "titleSelectors": [], "contentSelectors": ["#content"], "stripSelectors": [] }
+    }
+    """
+
+    /// The list comes whole, chapter 1 included — the page's own panel leaves out
+    /// the chapter it is showing. Each chapter is addressed through the template
+    /// with the id the API gave, whether that came as a number or a string, and a
+    /// row without an id or a title is not a chapter.
+    @MainActor
+    func testAJSONCatalogListsEveryChapterByTheIdsTheSiteGave() async throws {
+        let rule = try JSONDecoder().decode(SiteRule.self, from: Data(Self.jsonCatalogJSON.utf8))
+        let page = ScriptedPage()
+        await page.load("""
+        {"code":0,"data":{"chapters":[
+          {"id":"499610","title":"第1章 红杏出墙","is_vip":"0"},
+          {"id":520725,"title":"第2章 漂亮的女上司","is_vip":"0"},
+          {"id":"","title":"没有 id"},
+          {"id":"521841","title":"  "},
+          {"id":"521842","title":"第3章 有仇必报","is_vip":"1"}
+        ]}}
+        """)
+        let payload = try await page.evaluate(
+            try ExtractorScript.catalog(rule), as: ExtractorScript.CatalogPayload.self
+        )
+        let entries = BookService.entries(from: payload, rule: rule, siteBookId: "195958")
+
+        XCTAssertEqual(entries.map(\.siteChapterId), ["499610", "520725", "521842"])
+        XCTAssertEqual(entries.map(\.title), ["第1章 红杏出墙", "第2章 漂亮的女上司", "第3章 有仇必报"])
+        XCTAssertEqual(entries.first?.url, "https://www.api.test/shuku/195958-499610/")
+    }
+
+    /// Shaped on 99csw: decoy copies sit in the chapter hidden by a stylesheet
+    /// class, and the real paragraphs wait at `visibility: hidden` until the reader
+    /// scrolls to them. Only the decoys go: a paragraph not yet revealed is still the
+    /// chapter, and a check on visibility rather than display would drop nearly all
+    /// of it — on the live site 3 of 44 paragraphs are visible at load.
+    @MainActor
+    func testAChapterKeepsParagraphsTheSiteHasNotRevealedAndDropsItsDecoys() async throws {
+        let rule = try JSONDecoder().decode(SiteRule.self, from: Data(Self.linesJSON.utf8))
+        let chapter = """
+        <html><head><style>
+          #content > div { visibility: hidden }
+          #content .v1 { visibility: visible }
+          #content .x9 { display: none }
+        </style></head><body>
+          <div id="content">
+            <div class="v1">第一段</div>
+            <div class="x9">誘餌段落</div>
+            <div>第二段</div>
+            <div>第三段</div>
+          </div>
+        </body></html>
+        """
+        let page = ScriptedPage()
+        await page.load(chapter)
+        let read = try await page.evaluate(
+            try ExtractorScript.chapter(rule), as: ExtractorScript.ChapterPayload.self
+        )
+        XCTAssertEqual(read.paragraphs, ["第一段", "第二段", "第三段"])
+
+        // The control: the same page read the ordinary way carries the decoy, which
+        // is what makes the assertion above mean anything.
+        let plain = SiteRule.Chapter(
+            titleSelectors: [], contentSelectors: ["#content"], stripSelectors: [],
+            dropParagraphPatterns: nil, prevSelector: nil, nextSelector: nil
+        )
+        let untouched = ScriptedPage()
+        await untouched.load(chapter)
+        let asMarkup = try await untouched.evaluate(
+            try ExtractorScript.chapter(plain), as: ExtractorScript.ChapterPayload.self
+        )
+        XCTAssertEqual(asMarkup.paragraphs, ["第一段", "誘餌段落", "第二段", "第三段"])
+    }
 }

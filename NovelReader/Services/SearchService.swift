@@ -75,7 +75,7 @@ final class SearchService {
             }
             payload = try await fetcher.fetch(
                 url, extracting: extractor, as: ExtractorScript.SearchPayload.self,
-                signIn: rule.signIn
+                signIn: rule.signIn, waitingFor: search.waitFor
             )
         case .post:
             // Land on the site first so the submitted form inherits the site's
@@ -89,7 +89,8 @@ final class SearchService {
             let submit = try ExtractorScript.submitSearch(rule, query: query)
             payload = try await fetcher.fetch(
                 origin, submitting: submit, extracting: extractor,
-                as: ExtractorScript.SearchPayload.self, signIn: rule.signIn
+                as: ExtractorScript.SearchPayload.self, signIn: rule.signIn,
+                waitingFor: search.waitFor
             )
         }
 

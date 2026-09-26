@@ -151,6 +151,53 @@ final class SearchTests: XCTestCase {
         XCTAssertEqual(payload.titles, ["劍來", "劍來（1-42冊）精校版"])
     }
 
+    // MARK: - Finding the search box
+
+    /// m.wfxs.tw's header: no box on the homepage, only a magnifier linking to the page
+    /// that has one, with no text for a person to read and none for a probe either.
+    @MainActor
+    func testAHomepageWithoutASearchBoxPointsTheWayToOne() async throws {
+        let page = ScriptedPage(baseURL: URL(string: "https://demo.test/")!)
+        await page.load("""
+        <html><body><div class="pull_right">
+          <a href="/history.html" class="book"></a>
+          <a href="/s/" class="search_new"></a>
+        </div><a href="/book/1.html">劍來</a></body></html>
+        """)
+        let found = try await page.evaluate(SearchDeriver.formProbe, as: SearchDeriver.FormsPayload.self)
+        XCTAssertTrue(found.forms.isEmpty)
+        XCTAssertEqual(found.searchLink, "https://demo.test/s/")
+    }
+
+    /// 85novel's header, whose search runs on Enter or on the magnifier, and whose
+    /// nearest button is the × that empties the box. Clicking that one was the whole
+    /// search: the query typed in and wiped straight back out.
+    @MainActor
+    func testTheButtonThatEmptiesTheBoxIsNotTakenForTheSearch() async throws {
+        let did = try await submitTyping(in: """
+        <div><div class="relative">
+          <input id="head-search" type="text" onkeydown="if (event.key === 'Enter') window.did = 'entered'">
+          <button onclick="window.did = 'cleared'">×</button>
+        </div><button onclick="window.did = 'searched'"><svg></svg></button></div>
+        """)
+        XCTAssertEqual(did, "searched")
+
+        let alone = try await submitTyping(in: """
+        <div><input id="head-search" type="text" onkeydown="if (event.key === 'Enter') window.did = 'entered'">
+        <button class="clear" onclick="window.did = 'cleared'"><svg></svg></button></div>
+        """)
+        XCTAssertEqual(alone, "entered", "with only the × beside it, the box is sent with Enter")
+    }
+
+    @MainActor
+    private func submitTyping(in body: String) async throws -> String {
+        let page = ScriptedPage(baseURL: URL(string: "https://demo.test/")!)
+        await page.load("<html><body>\(body)</body></html>")
+        let submit = SearchDeriver.typeAndSubmit(selector: "#head-search", query: "劍來")
+        _ = try await page.evaluate("({ ok: \(submit) })", as: [String: Bool].self)
+        return try await page.evaluate("({ did: window.did || 'nothing' })", as: [String: String].self)["did"]!
+    }
+
     @MainActor
     private func extract<T: Decodable>(_ script: String, as type: T.Type) async throws -> T {
         let page = ScriptedPage(baseURL: URL(string: "https://demo.test/modules/article/search.php")!)

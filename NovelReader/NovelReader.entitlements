@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Bookmarks, reading progress and the download index are metadata only and
-	     fit comfortably inside the 1 MB KVS quota. Chapter text never syncs. -->
+	<!-- Sources, the shelf and reading progress are metadata only and fit
+	     comfortably inside the 1 MB KVS quota. Chapter text never syncs. -->
 	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
 	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
 	<!-- "Use Installed Fonts". Without it a face the reader installed themselves is
