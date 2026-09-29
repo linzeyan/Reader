@@ -56,13 +56,11 @@ final class NewChapterTests: XCTestCase {
         let book = try XCTUnwrap(repo.book(id: bookId))
         let chapters = try repo.chapters(bookId: bookId)
         let lastReadIndex = book.lastReadIndex(in: chapters)
-        // The kind decides which question is asked at all, which is what the shelf's
-        // `CASE` restates in SQL: a subscription asks whether the article has been read,
-        // everything else whether the site published it while the reader was away. Read
-        // off the book here so this helper stays what it claims to be — the per-row rule
-        // as a screen would ask it.
-        guard book.kind != .feed else { return chapters.filter(\.isUnread) }
-        return chapters.filter { $0.isNew(lastReadIndex: lastReadIndex, now: now) }
+        // Through `isMarked`, the call every catalog screen makes, so the comparisons
+        // with the shelf's SQL below are comparisons with what the screens show.
+        return chapters.filter {
+            $0.isMarked(for: book.kind, lastReadIndex: lastReadIndex, now: now)
+        }
     }
 
     // MARK: - Migration
@@ -320,6 +318,44 @@ final class NewChapterTests: XCTestCase {
         XCTAssertNil(
             try chapter("1", of: repo, bookId: book.id).addedAt,
             "a chapter that only moved is not a chapter that appeared"
+        )
+    }
+
+    /// A refresh writes the rows that changed and no others.
+    ///
+    /// Most refreshes find the catalog the book already had, and rewriting every row of
+    /// it held the database for over half a second for a 1,838-chapter serial on an XR,
+    /// with opening a chapter queued behind it. Counted in rows because a test cannot pin
+    /// a duration, and the rows are what the duration was made of.
+    func testARefreshWritesOnlyWhatChanged() throws {
+        let repo = try makeRepo()
+        let book = try repo.bookmark(siteId: "demo", siteBookId: "1", title: "t")
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        try repo.replaceCatalog(bookId: book.id, entries: entries(100), now: first)
+        let writer = repo.database.writer
+        func rowsWritten(by refresh: () throws -> Void) throws -> Int {
+            let before = try writer.read { $0.totalChangesCount }
+            try refresh()
+            return try writer.read { $0.totalChangesCount } - before
+        }
+
+        XCTAssertEqual(
+            try rowsWritten {
+                try repo.replaceCatalog(
+                    bookId: book.id, entries: entries(100), now: first.addingTimeInterval(day)
+                )
+            },
+            1,
+            "the same catalog again is the book's stamp and nothing else"
+        )
+        XCTAssertEqual(
+            try rowsWritten {
+                try repo.replaceCatalog(
+                    bookId: book.id, entries: entries(101), now: first.addingTimeInterval(2 * day)
+                )
+            },
+            2,
+            "one new chapter is that chapter and the stamp"
         )
     }
 

@@ -16,6 +16,7 @@ struct DeriveRuleView: View {
     @State private var isWorking = false
     @State private var draft: RuleDeriver.Draft?
     @State private var error: String?
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         Form {
@@ -24,6 +25,7 @@ struct DeriveRuleView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
+                    .focused($fieldFocused)
                     .accessibilityIdentifier("derive.url")
                 Button {
                     Task { await analyse() }
@@ -55,6 +57,8 @@ struct DeriveRuleView: View {
         }
         .navigationTitle("derive.title")
         .navigationBarTitleDisplayMode(.inline)
+        // Focused on arrival so the first tap offers Paste — see `AddBookSheet`.
+        .onAppear { fieldFocused = true }
     }
 
     @ViewBuilder
@@ -159,6 +163,7 @@ struct RemoteRuleImportView: View {
     @State private var urlText = ""
     @State private var isWorking = false
     @State private var error: String?
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -168,6 +173,7 @@ struct RemoteRuleImportView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                        .focused($fieldFocused)
                         .accessibilityIdentifier("sources.importURL.field")
                 } footer: {
                     Text("settings.sources.importURL.footer")
@@ -189,6 +195,8 @@ struct RemoteRuleImportView: View {
                 }
             }
             .overlay { if isWorking { ProgressView() } }
+            // Focused on arrival so the first tap offers Paste — see `AddBookSheet`.
+            .onAppear { fieldFocused = true }
         }
     }
 

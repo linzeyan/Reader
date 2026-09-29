@@ -22,6 +22,7 @@ struct SearchView: View {
     @State private var pending: Set<String> = []
     @State private var task: Task<Void, Never>?
     @State private var hasSearched = false
+    @FocusState private var fieldFocused: Bool
 
     @State private var mode: Mode = .sites
 
@@ -89,6 +90,11 @@ struct SearchView: View {
                 text: $query, placement: .navigationBarDrawer(displayMode: .always),
                 prompt: Text(prompt)
             )
+            // Focused on arrival so the first tap offers Paste — see `AddBookSheet`. Only
+            // into an empty field: coming back to results, a keyboard would cover them.
+            // Nothing on iOS 17, which has no way to focus a search field from code.
+            .searchFocusedIfAvailable($fieldFocused)
+            .onAppear { if query.isEmpty { fieldFocused = true } }
             .onSubmit(of: .search) { start() }
             // Results name the sites they came from, and those sites are all of the
             // other medium now. Cleared rather than re-run: the query was typed for
@@ -263,6 +269,17 @@ private struct ResultRow: View {
             }
             Spacer()
             Image(systemName: "plus.circle").foregroundStyle(.tint)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func searchFocusedIfAvailable(_ focused: FocusState<Bool>.Binding) -> some View {
+        if #available(iOS 18, *) {
+            searchFocused(focused)
+        } else {
+            self
         }
     }
 }

@@ -307,56 +307,79 @@ struct LibraryRepo {
         now: Date = Date()
     ) throws {
         try writer.write { db in
-            let keptIds = Set(entries.map { Chapter.makeId(bookId: bookId, siteChapterId: $0.siteChapterId) })
             let stored = try Book.fetchOne(db, key: bookId)
             // Nothing is new on the first fetch: a book whose every chapter is
             // flagged is a book with no flags worth reading.
             let isFirstCatalog = stored?.catalogUpdatedAt == nil
 
-            // Every number below is about to be reassigned, and `chapter_book_index` is
-            // unique and checked row by row: giving chapter 3 its new index while the
-            // chapter that currently holds that index is still waiting its turn fails the
-            // whole write. Which is to say a catalog could only ever be *appended* to —
-            // one inserted or withdrawn chapter and the refresh threw, silently for the
-            // background one, leaving the book stuck on the catalog it already had.
-            //
-            // Parking the current numbering in the negative range clears the way: the
-            // mapping is injective, so the unique index stays satisfied throughout, and
-            // nothing non-negative is left for a new number to collide with. Rows that
-            // are gone from the catalog keep their parked number until they are deleted
-            // below; nothing reads a chapter index inside this transaction.
-            try db.execute(
-                sql: #"UPDATE "chapter" SET "index" = -1 - "index" WHERE "bookId" = ?"#,
-                arguments: [bookId]
-            )
-
+            // Each chapter's place in the new catalog. A repeated id takes its last place,
+            // as it did when every entry was written in turn over the one before.
+            typealias Place = (index: Int, siteChapterId: String, title: String, url: String)
+            var places: [String: Place] = [:]
             for (index, entry) in entries.enumerated() {
                 let id = Chapter.makeId(bookId: bookId, siteChapterId: entry.siteChapterId)
-                if var existing = try Chapter.fetchOne(db, key: id) {
-                    existing.index = index
-                    // The stored name wins when it is this one made whole: a chapter
-                    // read once carries the full title its own page gave it (see
-                    // `BookService.fetchParagraphs`), and a refresh must not put the
-                    // catalog's truncation back over it every time it runs.
-                    existing.title =
-                        Chapter.fullerTitle(existing.title, extending: entry.title) ?? entry.title
-                    existing.url = entry.url
-                    // `addedAt` is intentionally not touched: rewriting it every
-                    // refresh would either clear the marker the reader has not
-                    // seen yet or re-raise it daily on chapters they have read.
-                    try existing.update(db)
-                } else {
-                    try Chapter(
-                        id: id, bookId: bookId, siteChapterId: entry.siteChapterId,
-                        index: index, title: entry.title, url: entry.url,
-                        addedAt: isFirstCatalog ? nil : now, downloadedAt: nil
-                    ).insert(db)
+                places[id] = (index, entry.siteChapterId, entry.title, entry.url)
+            }
+
+            // Only what changed is written. A refresh nearly always finds the catalog it
+            // already had, a chapter or two longer, and rewriting every row to say so held
+            // the database for over half a second for a 1,838-chapter serial on an XR —
+            // with every read the app made meanwhile, opening a chapter included, queued
+            // behind it.
+            let current = try Chapter.filter(Column("bookId") == bookId).fetchAll(db)
+            for chapter in current where places[chapter.id] == nil {
+                try chapter.delete(db)
+            }
+
+            // `chapter_book_index` is unique and checked row by row: giving chapter 3 its
+            // new index while the chapter that currently holds that index is still waiting
+            // its turn fails the whole write. Which is to say a catalog could only ever be
+            // *appended* to — one inserted or withdrawn chapter and the refresh threw,
+            // silently for the background one, leaving the book stuck on the catalog it
+            // already had.
+            //
+            // Parking every row that moves in the negative range clears the way: the
+            // mapping is injective, and with the withdrawn rows deleted above, the only
+            // non-negative numbers still held are those of rows staying where they are —
+            // numbers no other chapter is about to be given.
+            var kept: [String: Chapter] = [:]
+            for chapter in current {
+                guard let place = places[chapter.id] else { continue }
+                kept[chapter.id] = chapter
+                if chapter.index != place.index {
+                    try db.execute(
+                        sql: #"UPDATE "chapter" SET "index" = -1 - "index" WHERE "id" = ?"#,
+                        arguments: [chapter.id]
+                    )
                 }
             }
 
-            let stale = try Chapter.filter(Column("bookId") == bookId).fetchAll(db)
-                .filter { !keptIds.contains($0.id) }
-            for chapter in stale { try chapter.delete(db) }
+            for (id, place) in places {
+                guard var chapter = kept[id] else {
+                    try Chapter(
+                        id: id, bookId: bookId, siteChapterId: place.siteChapterId,
+                        index: place.index, title: place.title, url: place.url,
+                        addedAt: isFirstCatalog ? nil : now, downloadedAt: nil
+                    ).insert(db)
+                    continue
+                }
+                // The stored name wins when it is this one made whole: a chapter read once
+                // carries the full title its own page gave it (see
+                // `BookService.fetchParagraphs`), and a refresh must not put the catalog's
+                // truncation back over it every time it runs.
+                let title =
+                    Chapter.fullerTitle(chapter.title, extending: place.title) ?? place.title
+                guard chapter.index != place.index || chapter.title != title
+                    || chapter.url != place.url
+                else { continue }
+                chapter.index = place.index
+                chapter.title = title
+                chapter.url = place.url
+                // `addedAt` is intentionally not touched: rewriting it every
+                // refresh would either clear the marker the reader has not
+                // seen yet or re-raise it daily on chapters they have read.
+                try chapter.update(db)
+            }
 
             // Stamped here rather than by the caller: the freshness of the
             // catalog is a property of this write, and a caller that forgot to

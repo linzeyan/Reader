@@ -72,11 +72,18 @@ final class BookService {
             waitingFor: rule.catalog.waitFor
         )
 
-        let entries = Self.entries(from: payload, rule: rule, siteBookId: book.siteBookId)
-        guard !entries.isEmpty else { throw ServiceError.emptyCatalog }
-
-        try repo.replaceCatalog(bookId: book.id, entries: entries)
-        return try repo.chapters(bookId: book.id)
+        // Off the main actor. A long serial's catalog is rewritten row by row — on an XR
+        // 1,838 chapters took 530–610ms — and it lands while the book screen is on show
+        // and being scrolled, so on the main actor it was a freeze the reader could feel.
+        let repo = self.repo
+        let bookId = book.id
+        let siteBookId = book.siteBookId
+        return try await Task.detached(priority: .userInitiated) {
+            let entries = Self.entries(from: payload, rule: rule, siteBookId: siteBookId)
+            guard !entries.isEmpty else { throw ServiceError.emptyCatalog }
+            try repo.replaceCatalog(bookId: bookId, entries: entries)
+            return try repo.chapters(bookId: bookId)
+        }.value
     }
 
     /// Turns what the extractor found on a catalog page into chapter index rows.

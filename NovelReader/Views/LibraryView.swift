@@ -2,6 +2,27 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+/// Pushes a chapter onto the shelf's stack, for the book screen: its catalog rows are
+/// tapped rather than linked — see `BookDetailView.catalogRow` for what a link per
+/// chapter cost — and a tap, unlike a link, has to be handed the stack it pushes onto.
+///
+/// An action in the manner of `OpenURLAction` rather than the path itself: the book screen
+/// pushes a chapter and has no business rewriting the route beneath it.
+struct OpenReadingAction: Equatable {
+    fileprivate let append: (ReadingTarget) -> Void
+
+    func callAsFunction(_ target: ReadingTarget) { append(target) }
+
+    // Every one of these appends to the same stack, so any two are the same action. Left
+    // to compare closures, which cannot be compared, each redraw of the shelf would hand
+    // the book screen a "different" action and redraw it too.
+    static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+
+extension EnvironmentValues {
+    @Entry var openReading: OpenReadingAction? = nil
+}
+
 /// Requirement 3: bookmarks, grouped per source.
 ///
 /// Grouping is by site *by default* rather than one flat list because the same
@@ -175,6 +196,7 @@ struct LibraryView: View {
                 Text("library.rename.hint")
             }
         }
+        .environment(\.openReading, OpenReadingAction { path.append($0) })
     }
 
     private var importButton: some View {
@@ -257,21 +279,20 @@ struct LibraryView: View {
     /// handoff means "take me to this sentence", and pushing on top of an old stack
     /// would put an unrelated book on the way back.
     ///
-    /// Two steps rather than one assignment of the whole route. Laid down together, the
-    /// book screen is never on screen before the reader covers it, so it gets its first
-    /// layout inside the swipe back — and its search drawer comes out of that expanded:
-    /// a bar 54 pt taller than the shelf route's, drawn over the reader mid-swipe, and on
-    /// iOS 18 over the book's own cover. Pushing the book on its own first, unanimated,
-    /// lets it lay out like any other book screen; measured on iOS 26, the swipe back
-    /// then lands on the same bar and the same first row as a book opened from the
-    /// shelf. The price is that screen showing for a frame before the reader slides in.
+    /// The whole route in one unanimated assignment, so the reader is the first thing on
+    /// screen. Pushing the book on its own first, then the reader, put the catalog in
+    /// front of someone who asked for the text: on an XR with a 4,232-chapter book the
+    /// book screen was up for about a second, building its list, before the reader slid
+    /// in. That was done for the search drawer, which a book screen first laid out inside
+    /// the swipe back used to come out of open — see `BookDetailView`'s `.searchable`.
     private func consumeHandoff() {
         guard let target = env.readingHandoff else { return }
         env.readingHandoff = nil
+        var route = NavigationPath([target.book])
+        route.append(target)
         var quiet = Transaction()
         quiet.disablesAnimations = true
-        withTransaction(quiet) { path = NavigationPath([target.book]) }
-        DispatchQueue.main.async { path.append(target) }
+        withTransaction(quiet) { path = route }
     }
 
     /// Sort, grouping and filter in one menu.

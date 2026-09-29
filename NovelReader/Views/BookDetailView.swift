@@ -8,7 +8,14 @@ struct BookDetailView: View {
     let book: Book
 
     @Environment(AppEnvironment.self) private var env
+    /// Nil off the shelf's stack. The search tab declares a destination for a book as
+    /// well, though nothing there ever pushes one; a catalog row on that stack would do
+    /// what a link with no destination did, which is nothing.
+    @Environment(\.openReading) private var openReading
     @State private var chapters: [Chapter] = []
+    /// Whether the stored catalog has been read yet, which is not the same as having
+    /// chapters: until it has, an empty list says nothing about the book.
+    @State private var hasLoaded = false
     @State private var isRefreshing = false
     @State private var query = ""
     /// 0…1 while an export runs, nil otherwise — so it doubles as "busy", the
@@ -87,12 +94,7 @@ struct BookDetailView: View {
                 }
             } else {
                 Section { actions }
-                // Only while there is a run to show. A finished run clears its
-                // progress, so this section cannot outlive the download.
-                if env.downloader.progress?.bookId == book.id,
-                   env.downloader.status == .running || env.downloader.status == .paused {
-                    Section("book.downloading") { downloadStatus }
-                }
+                BookDownloadSection(bookId: book.id) { Task { await loadChapters() } }
             }
             catalogSection(catalog)
         }
@@ -100,8 +102,14 @@ struct BookDetailView: View {
         // names one: articles, not chapters, and a feed rather than a catalog. The
         // machinery underneath is a book's — see `FeedService` — but the reader of a blog
         // is not reading a novel and should not be told they are.
+        //
+        // Always shown, not tucked under the bar. A collapsible drawer settles open or shut
+        // on the screen's first layout, and a book opened from the reading history is first
+        // laid out inside the swipe back out of its reader — where it came out open, over
+        // the top of the list (`ReadingHandoffRouteTests`). Shown always, the first layout
+        // has nothing to decide, whichever way the book was reached.
         .searchable(
-            text: $query, placement: .navigationBarDrawer,
+            text: $query, placement: .navigationBarDrawer(displayMode: .always),
             prompt: Text(current.kind == .feed ? "book.articles.search" : "book.catalog.search")
         )
         .navigationTitle(current.shownName)
@@ -287,15 +295,22 @@ struct BookDetailView: View {
                     ? "book.articles.loading" : "book.catalog.loading"
                 let empty: LocalizedStringKey = current.kind == .feed
                     ? "book.articles.empty" : "book.catalog.empty"
-                Text(isRefreshing ? loading : empty)
-                    .foregroundStyle(.secondary)
+                // Nothing before the stored catalog has been read. That read lands a
+                // moment after the push, and "no chapters, try refreshing" during the
+                // push is a claim about a book that may have eighteen hundred of them.
+                if hasLoaded || isRefreshing {
+                    Text(isRefreshing ? loading : empty)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 // Read into a local before the loop: `lastReadIndex` is computed, and
                 // computing it scans the catalog, so touching it per row makes drawing
                 // a thirteen-hundred-chapter list quadratic.
                 let lastRead = lastReadIndex
                 ForEach(catalog.chapters) { chapter in
-                    catalogRow(chapter, lastReadIndex: lastRead)
+                    catalogRow(
+                        chapter, isMarked: chapter.isMarked(for: book.kind, lastReadIndex: lastRead)
+                    )
                 }
             }
         } header: {
@@ -324,13 +339,34 @@ struct BookDetailView: View {
     /// chapters have nothing to toggle — "read" is not a fact a novel chapter carries, see
     /// `Chapter.readAt` — so they get no swipe rather than an inert one.
     @ViewBuilder
-    private func catalogRow(_ chapter: Chapter, lastReadIndex: Int?) -> some View {
-        let row = NavigationLink(
-            value: ReadingTarget(book: current, position: .chapterStart(chapter.siteChapterId))
-        ) {
-            ChapterRow(chapter: chapter, lastReadIndex: lastReadIndex, kind: current.kind)
+    private func catalogRow(_ chapter: Chapter, isMarked: Bool) -> some View {
+        // `book`, the value this screen was pushed with, and not `current`: nothing the
+        // row reads off it — identity, kind, name — can change on this screen, and the
+        // position the reader's catalog sheet marks new chapters against was already a
+        // snapshot (see `Chapter.isNew`). The live row changes with every chapter read.
+        //
+        // A tap gesture, not a button or a link: List pays for every row a catalog has, on
+        // screen or not, and an interactive control in a row is what it pays for. On an XR
+        // the 4,232 rows of one serial took the main thread 560ms as buttons and 250ms
+        // with a tap gesture, against 195ms for rows nothing could tap; an 1,838-chapter
+        // one took 680ms as links, 270ms bare. A selectable List measured the same as the
+        // gesture, but inside one the "continue reading" link above could no longer be
+        // backed out of: on iOS 27 the reader it pushed would not pop.
+        let row = HStack {
+            ChapterRow(chapter: chapter, isMarked: isMarked, kind: book.kind)
+            // The chevron a link would have drawn.
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        if current.kind == .feed {
+        // The whole row, not only the text and the chevron.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            openReading?(ReadingTarget(book: book, position: .chapterStart(chapter.siteChapterId)))
+        }
+        // What the button used to say about the row, for VoiceOver.
+        .accessibilityAddTraits(.isButton)
+        if book.kind == .feed {
             row.swipeActions(edge: .leading) {
                 Button {
                     toggleRead(chapter)
@@ -579,40 +615,6 @@ struct BookDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private var downloadStatus: some View {
-        if let progress = env.downloader.progress {
-            VStack(alignment: .leading, spacing: 8) {
-                ProgressView(value: progress.fraction) {
-                    Text("book.download.progress \(progress.completed) \(progress.total)")
-                        .font(.footnote)
-                }
-                if let error = env.downloader.lastError {
-                    Text(error).font(.caption).foregroundStyle(.orange)
-                }
-                HStack {
-                    if env.downloader.isBusy {
-                        Button("book.download.pause") { env.downloader.pause() }
-                    } else if env.downloader.canResume {
-                        Button("book.download.resume") { env.requestResume() }
-                    }
-                    Spacer()
-                    Button("common.cancel", role: .destructive) {
-                        env.downloader.cancel()
-                        Task { await loadChapters() }
-                    }
-                }
-                .font(.footnote)
-                // Not decoration. A `List` row is one tappable control, so two
-                // buttons sharing a row both fire on any tap in it: "pause" ran
-                // `pause()` and then `cancel()`, and the download queue the reader
-                // meant to keep was gone — with the row that would have explained it.
-                // `.borderless` is what gives each button its own hit area back.
-                .buttonStyle(.borderless)
-            }
-        }
-    }
-
     /// Counted lazily: the eager `filter` allocated a second array of every downloaded
     /// chapter — a hundred and fifty kilobytes on a long book — to arrive at an integer,
     /// and this is read several times per pass.
@@ -678,7 +680,13 @@ struct BookDetailView: View {
     /// → fetch and wait (there is nothing else to display); older than a day →
     /// fetch quietly behind the list that is already on screen.
     private func loadChapters() async {
-        chapters = (try? env.repo.chapters(bookId: book.id)) ?? []
+        let stored = (try? env.repo.chapters(bookId: book.id)) ?? []
+        // Only when it differs. This runs every time the screen comes back into view —
+        // from the reader, most often — and a fresh copy of an unchanged catalog still
+        // has the List re-evaluate every row, about 50ms for 1,838 chapters on an XR,
+        // to find nothing. Comparing first is under a millisecond.
+        if stored != chapters { chapters = stored }
+        hasLoaded = true
         if chapters.isEmpty {
             await refreshCatalog()
         } else if current.isCatalogStale {
@@ -697,7 +705,9 @@ struct BookDetailView: View {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            chapters = try await refetched()
+            // Guarded for the reason `loadChapters` is: most refreshes find nothing new.
+            let fresh = try await refetched()
+            if fresh != chapters { chapters = fresh }
             // The write went to the database, not to the in-memory library, and
             // this is the moment new chapters appear — without this the shelf
             // keeps showing yesterday's count until something else reloads it.
@@ -820,18 +830,15 @@ extension ReadingTarget {
 
 struct ChapterRow: View {
     let chapter: Chapter
-    /// How far the reader got, in reading order, which is what makes "new" answerable —
-    /// the flag is a comparison against their position. Resolved by the caller from the
-    /// book and its catalog (`Book.lastReadIndex(in:)`), because the position names a
-    /// chapter and only the catalog can say what number that is. Passed explicitly, with
-    /// no default: three screens draw this row, and a default would let one of them
-    /// silently stop showing the marker.
-    let lastReadIndex: Int?
-    /// What the book is, for the one thing the marker asks it: which question to ask at
-    /// all. A novel and a comic ask `Chapter.isNew` — did the site publish this while I
-    /// was away — and a subscription asks `Chapter.isUnread`, which is a flag on the
-    /// article itself. Passed for the same reason the index above is, and it has to agree
-    /// with the shelf's count, which restates both rules in SQL.
+    /// Whether the row carries the marker, as `Chapter.isMarked(for:lastReadIndex:)`
+    /// answers it. The answer and not the position it is worked out from: SwiftUI tells
+    /// which rows changed by comparing what they hold, and a position moved one chapter
+    /// changes the answer for a row or two but would have changed every row's position.
+    /// Passed explicitly, with no default: three screens draw this row, and a default
+    /// would let one of them silently stop showing the marker.
+    let isMarked: Bool
+    /// What the book is: an article's row is a headline with a date under it, a chapter's
+    /// a numbered line.
     let kind: SiteRule.Kind
 
     var body: some View {
@@ -862,7 +869,7 @@ struct ChapterRow: View {
             // answer means the same thing to the person scanning the list — this is the
             // one to open — and two words for one dot of red was a distinction being drawn
             // for the code's benefit rather than the reader's.
-            if kind == .feed ? chapter.isUnread : chapter.isNew(lastReadIndex: lastReadIndex) {
+            if isMarked {
                 Text("chapter.new")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.red)
@@ -871,6 +878,59 @@ struct ChapterRow: View {
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.green)
+            }
+        }
+    }
+}
+
+/// A download of this book, as the book screen shows it: how far it has got, why it
+/// stopped, and pause, resume and cancel.
+///
+/// A view of its own so that a chapter landing redraws this section and not the book
+/// screen. Read in that screen's body, `progress` had every landing re-walk its whole
+/// catalog — about 120ms a chapter on an XR with a 4,232-chapter book — and just the same
+/// with the screen hidden under the reader or the download page, where nobody could see it.
+private struct BookDownloadSection: View {
+    let bookId: String
+    /// Run after a cancel, for the book screen to reload its chapters.
+    let onCancel: () -> Void
+
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        // Only while there is a run to show. A finished run clears its
+        // progress, so this section cannot outlive the download.
+        if let progress = env.downloader.progress, progress.bookId == bookId,
+           env.downloader.status == .running || env.downloader.status == .paused {
+            Section("book.downloading") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ProgressView(value: progress.fraction) {
+                        Text("book.download.progress \(progress.completed) \(progress.total)")
+                            .font(.footnote)
+                    }
+                    if let error = env.downloader.lastError {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                    }
+                    HStack {
+                        if env.downloader.isBusy {
+                            Button("book.download.pause") { env.downloader.pause() }
+                        } else if env.downloader.canResume {
+                            Button("book.download.resume") { env.requestResume() }
+                        }
+                        Spacer()
+                        Button("common.cancel", role: .destructive) {
+                            env.downloader.cancel()
+                            onCancel()
+                        }
+                    }
+                    .font(.footnote)
+                    // Not decoration. A `List` row is one tappable control, so two
+                    // buttons sharing a row both fire on any tap in it: "pause" ran
+                    // `pause()` and then `cancel()`, and the download queue the reader
+                    // meant to keep was gone — with the row that would have explained it.
+                    // `.borderless` is what gives each button its own hit area back.
+                    .buttonStyle(.borderless)
+                }
             }
         }
     }

@@ -912,7 +912,9 @@ struct ReaderView: View {
                         // session keep their marker until the reader leaves.
                         ChapterRow(
                             chapter: chapter,
-                            lastReadIndex: lastReadIndex,
+                            isMarked: chapter.isMarked(
+                                for: book.kind, lastReadIndex: lastReadIndex
+                            ),
                             kind: book.kind
                         )
                         if chapter.index == model?.currentChapterIndex {

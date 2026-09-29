@@ -91,6 +91,7 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.textViews["derive.url"].waitForExistence(timeout: 5)
                       || app.textFields["derive.url"].waitForExistence(timeout: 1),
                       "The derivation screen should expose a URL field")
+        XCTAssertTrue(isFocused("derive.url"), "Arriving focused is what puts Paste on the first tap")
 
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.navigationBars.buttons.element(boundBy: 1).tap()
@@ -100,7 +101,23 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.textViews["sources.importURL.field"].waitForExistence(timeout: 5)
                           || app.textFields["sources.importURL.field"].waitForExistence(timeout: 1),
                           "The URL import sheet should expose a URL field")
+            XCTAssertTrue(isFocused("sources.importURL.field"),
+                          "Arriving focused is what puts Paste on the first tap")
         }
+    }
+
+    /// Whether typing would land in the field with this identifier, waited for. Asked of
+    /// the element rather than by looking for a keyboard: with a hardware keyboard attached
+    /// there is no software one to find, and the field is focused all the same.
+    private func isFocused(_ identifier: String, timeout: TimeInterval = 5) -> Bool {
+        isFocused(app.descendants(matching: .any).matching(identifier: identifier).firstMatch, timeout: timeout)
+    }
+
+    private func isFocused(_ field: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field
+        )
+        return XCTWaiter.wait(for: [focused], timeout: timeout) == .completed
     }
 
     func testStorageScreenOpens() {
@@ -259,6 +276,7 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(add.waitForExistence(timeout: 5))
         add.tap()
         XCTAssertTrue(app.textFields["add.url"].waitForExistence(timeout: 5))
+        XCTAssertTrue(isFocused("add.url"), "Arriving focused is what puts Paste on the first tap")
         // The sheet lists the installed sources so the user can see what a
         // pasteable link looks like. More of them than one screen holds — see `reveal`.
         let hjwzw = app.staticTexts["tw.hjwzw.com"]
@@ -270,6 +288,8 @@ final class SmokeTests: XCTestCase {
         searchTab.tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5),
                       "The search field should be on screen without pulling the list down")
+        XCTAssertTrue(isFocused(app.searchFields.firstMatch),
+                      "An empty search arrives focused, so the first tap offers Paste")
         XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5),
                       "The scope picker row should be present")
     }

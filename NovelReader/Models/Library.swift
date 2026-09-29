@@ -228,8 +228,8 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     ///
     /// A question only a subscription answers meaningfully: every novel and comic chapter
     /// is "unread" by this measure for ever, because nothing writes the column for them.
-    /// Callers branch on `Book.kind` before asking — `ChapterRow` and the shelf's counting
-    /// query both do, and `LibraryRepo.newChapterCounts` restates this in SQL.
+    /// Callers branch on `Book.kind` before asking — `isMarked(for:lastReadIndex:)` and the
+    /// shelf's counting query both do, and `LibraryRepo.newChapterCounts` restates this in SQL.
     var isUnread: Bool { readAt == nil }
 
     /// The page this chapter came from, where that is an address worth opening.
@@ -292,6 +292,16 @@ struct Chapter: Codable, Identifiable, Hashable, FetchableRecord, PersistableRec
     /// How long a chapter stays marked. Shared with the shelf's counting query so the
     /// two statements of this rule cannot drift to different numbers.
     static let newWindow: TimeInterval = 24 * 60 * 60
+
+    /// Whether a catalog row carries the marker: the one per-row statement of the rule
+    /// `LibraryRepo.newChapterCounts` restates in SQL for the shelf, which has to agree.
+    ///
+    /// The kind decides which question is asked at all. A novel and a comic ask `isNew` —
+    /// did the site publish this while the reader was away — and a subscription asks
+    /// `isUnread`, which is a fact about the article itself.
+    func isMarked(for kind: SiteRule.Kind, lastReadIndex: Int?, now: Date = .now) -> Bool {
+        kind == .feed ? isUnread : isNew(lastReadIndex: lastReadIndex, now: now)
+    }
 
     static func makeId(bookId: String, siteChapterId: String) -> String {
         "\(bookId)|\(siteChapterId)"

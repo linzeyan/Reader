@@ -360,7 +360,7 @@ struct SiteListView: View {
         }
         .sheet(isPresented: $pasting) {
             NavigationStack {
-                TextEditor(text: $pasted)
+                FocusedTextEditor(text: $pasted)
                     .font(.system(.footnote, design: .monospaced))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -449,6 +449,21 @@ struct SiteListView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// The paste-JSON sheet's editor, focused on arrival so the first tap offers Paste — see
+/// `AddBookSheet`. A view of its own because the focus has to be declared inside the
+/// sheet: a sheet is a hierarchy of its own, and `@FocusState` held by the list that
+/// presents it never reaches the editor.
+private struct FocusedTextEditor: View {
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextEditor(text: $text)
+            .focused($focused)
+            .onAppear { focused = true }
     }
 }
 

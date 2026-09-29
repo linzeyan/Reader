@@ -20,6 +20,7 @@ struct AddBookSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var text = ""
+    @FocusState private var fieldFocused: Bool
 
     private var additions: BookAdditions { env.additions }
 
@@ -48,6 +49,13 @@ struct AddBookSheet: View {
                 ToolbarItem(placement: .topBarLeading) { leadingButton }
                 ToolbarItem(placement: .topBarTrailing) { trailingButton }
             }
+            // Pasting is the whole job of this sheet. An unfocused field spends the first
+            // tap on raising the keyboard and only offers Paste on the second — and on a
+            // device that second menu can come up with nothing but AutoFill in it. Already
+            // focused, the first tap is the one that offers Paste. On the form rather than
+            // the row: a row's onAppear fires again each time the source list scrolls it
+            // back into view, and would throw the keyboard up mid-scroll.
+            .onAppear { fieldFocused = true }
             // Nothing left to report and nothing to decide: the shelf behind the sheet is
             // already showing the books. A run with failures in it stays up, because
             // *which* address failed is the only thing this screen knows that the shelf
@@ -68,6 +76,7 @@ struct AddBookSheet: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
+                .focused($fieldFocused)
                 .accessibilityIdentifier("add.url")
         } footer: {
             Text(env.mediaMode == .feed ? "library.subscribe.hint" : "library.add.hint")

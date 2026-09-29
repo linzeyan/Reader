@@ -3,13 +3,14 @@ import XCTest
 /// The book screen a swipe out of the reader reveals, reached two ways.
 ///
 /// Opening a book from the reading history lays down the shelf's route for it — book
-/// screen, then reader — while opening it from the shelf pushes one screen at a time. The
-/// reader cannot tell which way they came in, so the screen behind the reader has to be
-/// the same either way. It was not: with the whole route laid down in one assignment, the
-/// book screen got its first layout inside the swipe back and came out of it with its
-/// search drawer open — a bar 54 pt taller and the list pushed down beneath it (measured
-/// on iOS 26: bar 108, first row 170, against the shelf route's 54 and 116), which on
-/// iOS 18 put the search field over the cover.
+/// screen, then reader — in one assignment, while opening it from the shelf pushes one
+/// screen at a time. The reader cannot tell which way they came in, so the screen behind
+/// the reader has to be the same either way. It was not: laid down with the reader, the
+/// book screen gets its first layout inside the swipe back, and while its search drawer
+/// could collapse it came out of that layout open — a bar 54 pt taller over a list that
+/// had not moved down for it (bar 108, first row 170, against the shelf route's 54 and
+/// 116, on iOS 26 and again on iOS 27), which on iOS 18 put the search field over the
+/// cover. The drawer is now always shown, which leaves the first layout nothing to decide.
 ///
 /// Compared route against route rather than against those numbers: the bar's height is
 /// the OS's to choose, and the claim is only that the way in does not change it.
