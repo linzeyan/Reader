@@ -729,6 +729,45 @@ struct LibraryView: View {
     }
 }
 
+/// Where a book stands in the download queue, said on its row, so a download started
+/// from one book can be followed from the shelf without opening the queue.
+///
+/// A view of its own, and the only part of the row that reads the downloader: every
+/// landed chapter changes `jobs`, and read from the shelf's own body that would redraw
+/// the whole shelf per chapter — the cost 1.7.3 took out of the catalog. Here it costs
+/// the rows on screen one small body each.
+private struct ShelfDownloadState: View {
+    let bookId: String
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        let downloader = env.downloader
+        if let job = downloader.job(for: bookId) {
+            Group {
+                switch job.hold {
+                case .wall:
+                    Text("challenge.title").foregroundStyle(.orange)
+                case .paused:
+                    Text("downloads.state.paused").foregroundStyle(.orange)
+                // Stopped as a whole — the app left the screen, the network went — rather
+                // than this book held.
+                case nil where !downloader.isBusy:
+                    Text("downloads.state.paused").foregroundStyle(.orange)
+                case nil where job.id == downloader.activeBookId:
+                    Label(
+                        "book.download.progress \(job.completed) \(job.total)",
+                        systemImage: "arrow.down.circle"
+                    )
+                    .foregroundStyle(.tint)
+                case nil:
+                    Text("downloads.state.queued").foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("library.book.download")
+        }
+    }
+}
+
 /// One bookmark. Shared with the search results screen so an already-bookmarked
 /// hit looks identical to its library entry.
 struct BookRow: View {
@@ -773,6 +812,9 @@ struct BookRow: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.red)
                     }
+                    ShelfDownloadState(bookId: book.id)
+                        .font(.caption2)
+                        .monospacedDigit()
                 }
             }
         }
