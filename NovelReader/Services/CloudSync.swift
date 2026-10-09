@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Mirrors the library into `NSUbiquitousKeyValueStore` when the user opts in.
@@ -59,6 +60,19 @@ final class CloudSync {
     /// Apple's ceiling on a key, in UTF-16 units. Past it a write raises an exception
     /// instead of failing, which Swift cannot catch.
     private static let keyLimit = 128
+
+    /// What follows the prefix in a thing's keys: its id while that fits, its digest once
+    /// it would not.
+    ///
+    /// A subscription's id carries its address, and a long enough address runs past
+    /// `keyLimit`. Judged on the removal prefix, the longer of a thing's two, so both its
+    /// keys share one slot. Every id that fitted before still does and keeps its key
+    /// as it was, so a device on an older build reads the store exactly as before; only
+    /// what used to be left out of the sync travels as a digest.
+    private static func slot(_ id: String, removals: String) -> String {
+        guard (removals + id).utf16.count > keyLimit else { return id }
+        return "#" + SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
 
     /// One book as it travels between devices.
     private struct Record: Codable {
@@ -270,7 +284,8 @@ final class CloudSync {
 
     func removed(_ book: Book) {
         guard isEnabled, !book.isLocal else { return }
-        markRemoved(Self.keyPrefix + book.id, by: Self.removedPrefix + book.id)
+        let slot = Self.slot(book.id, removals: Self.removedPrefix)
+        markRemoved(Self.keyPrefix + slot, by: Self.removedPrefix + slot)
     }
 
     func push(_ rule: SiteRule) {
@@ -281,11 +296,11 @@ final class CloudSync {
 
     func removedRule(id: String) {
         guard isEnabled else { return }
-        markRemoved(Self.rulePrefix + id, by: Self.removedRulePrefix + id)
+        let slot = Self.slot(id, removals: Self.removedRulePrefix)
+        markRemoved(Self.rulePrefix + slot, by: Self.removedRulePrefix + slot)
     }
 
     private func markRemoved(_ key: String, by removal: String) {
-        guard fits(removal) else { return }
         // What makes room, so the error that asked for it goes; anything still wrong says so
         // again at the next write or pull.
         lastError = nil
@@ -299,23 +314,8 @@ final class CloudSync {
     /// device has seen: removing a key it never had could erase a removal still on its way
     /// here, which is the resurrection that key exists to stop.
     private func put(_ data: Data, forKey key: String, clearing removal: String) {
-        guard fits(removal) else { return }
         store.set(data, forKey: key)
         if store.object(forKey: removal) != nil { store.removeObject(forKey: removal) }
-    }
-
-    /// Whether a key can be written at all. Checked on the removal key, the longer of the
-    /// two a thing is stored under, so one check covers both.
-    ///
-    /// A subscription's key carries its address, and a long enough address runs past
-    /// `keyLimit`. That one does not sync, and the trace says so — by length and kind only,
-    /// since the trace may not hold an address.
-    // ponytail: skipped, not shortened; hash the id into the key if long addresses show up
-    // in traces often enough to matter.
-    private func fits(_ key: String) -> Bool {
-        guard key.utf16.count > Self.keyLimit else { return true }
-        trace.note("icloud key too long len=\(key.utf16.count) kind=\(key.prefix { $0 != "." })")
-        return false
     }
 
     private func write(_ rule: SiteRule) {
@@ -329,7 +329,8 @@ final class CloudSync {
             updatedAt: sites.modificationDate(ofRule: rule.id) ?? Date(), rule: bare
         )
         guard let data = try? JSONEncoder().encode(record) else { return }
-        put(data, forKey: Self.rulePrefix + rule.id, clearing: Self.removedRulePrefix + rule.id)
+        let slot = Self.slot(rule.id, removals: Self.removedRulePrefix)
+        put(data, forKey: Self.rulePrefix + slot, clearing: Self.removedRulePrefix + slot)
     }
 
     /// Books imported from a file on the device are skipped.
@@ -351,7 +352,8 @@ final class CloudSync {
             record.readThrough = try? repo.newestReadArticleDate(bookId: book.id)
         }
         guard let data = try? JSONEncoder().encode(record) else { return }
-        put(data, forKey: Self.keyPrefix + book.id, clearing: Self.removedPrefix + book.id)
+        let slot = Self.slot(book.id, removals: Self.removedPrefix)
+        put(data, forKey: Self.keyPrefix + slot, clearing: Self.removedPrefix + slot)
     }
 
     /// Fills in the read state another device published for a subscription whose articles
@@ -364,7 +366,9 @@ final class CloudSync {
     /// as the one in the store.
     func fillInReadState(bookId: String) {
         guard isEnabled,
-              let data = store.data(forKey: Self.keyPrefix + bookId),
+              let data = store.data(
+                  forKey: Self.keyPrefix + Self.slot(bookId, removals: Self.removedPrefix)
+              ),
               let record = try? JSONDecoder().decode(Record.self, from: data),
               let through = record.readThrough
         else { return }
@@ -392,7 +396,7 @@ final class CloudSync {
                 })
             )
             for id in rules.remove { try? sites.remove(id: id, publish: false) }
-            for record in rules.apply.values {
+            for record in rules.apply {
                 // One this build refuses to install stays in the store for a device that can.
                 _ = try? sites.importRule(
                     data: JSONEncoder().encode(record.rule), syncedAt: record.updatedAt
@@ -406,7 +410,7 @@ final class CloudSync {
                 stamp: \.updatedAt, local: local.mapValues(\.updatedAt)
             )
             for id in books.remove { if let book = local[id] { onRemoteRemoval?(book) } }
-            for (id, record) in books.apply { try apply(record, id: id) }
+            for record in books.apply { try apply(record) }
             // Sources count too: the shelf groups its books under them.
             changed = !(rules.remove.isEmpty && rules.apply.isEmpty
                         && books.remove.isEmpty && books.apply.isEmpty)
@@ -422,10 +426,14 @@ final class CloudSync {
     ///
     /// Books and sources share it because the hard part is the same for both: a removal
     /// has to outlast the copies other devices keep re-publishing until they hear of it.
+    ///
+    /// Keys are matched by slot, not by id, since a long id's keys carry only its digest:
+    /// local ids are put through `slot` to meet them, and a record that arrives names its
+    /// own id.
     private func changes<Item>(
         in entries: [String: Any], records recordPrefix: String, removals removalPrefix: String,
         decode: (Data) -> Item?, stamp: (Item) -> Date, local: [String: Date]
-    ) -> (apply: [String: Item], remove: [String]) {
+    ) -> (apply: [Item], remove: [String]) {
         var records: [String: Item] = [:]
         var removals: [String: Date] = [:]
         for (key, value) in entries {
@@ -435,31 +443,42 @@ final class CloudSync {
                 removals[String(key.dropFirst(removalPrefix.count))] = removedAt
             }
         }
+        let localIds = Dictionary(
+            local.keys.map { (Self.slot($0, removals: removalPrefix), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let joinedAt = defaults.object(forKey: Self.joinedAtDefaultsKey) as? Date ?? .distantPast
         var remove: [String] = []
-        for (id, removedAt) in removals {
+        for (slot, removedAt) in removals {
             if removedAt < Date().addingTimeInterval(-Self.removalLifetime) {
-                store.removeObject(forKey: removalPrefix + id)
+                store.removeObject(forKey: removalPrefix + slot)
             }
             // Changed somewhere after it was removed: that device's copy wins.
-            if let item = records[id], stamp(item) > removedAt { continue }
+            if let item = records[slot], stamp(item) > removedAt { continue }
             // A device that had not heard of the removal yet published its copy again.
-            if records.removeValue(forKey: id) != nil {
-                store.removeObject(forKey: recordPrefix + id)
+            if records.removeValue(forKey: slot) != nil {
+                store.removeObject(forKey: recordPrefix + slot)
             }
-            guard let at = local[id], at <= removedAt, removedAt > joinedAt else { continue }
+            guard let id = localIds[slot], let at = local[id], at <= removedAt,
+                  removedAt > joinedAt
+            else { continue }
             remove.append(id)
         }
-        let apply = records.filter { id, item in local[id].map { $0 < stamp(item) } ?? true }
-        return (apply, remove)
+        let apply = records.filter { slot, item in
+            guard let at = localIds[slot].flatMap({ local[$0] }) else { return true }
+            return at < stamp(item)
+        }
+        return (Array(apply.values), remove)
     }
 
-    private func apply(_ record: Record, id: String) throws {
-        try repo.bookmark(
+    private func apply(_ record: Record) throws {
+        // The id the record's key was written under, recomputed: a long one's key holds
+        // only its digest.
+        let id = try repo.bookmark(
             siteId: record.siteId, siteBookId: record.siteBookId, kind: record.kind ?? .novel,
             title: record.title, author: record.author, coverURL: record.coverURL,
             now: record.updatedAt
-        )
+        ).id
         try repo.rename(bookId: id, to: record.displayName, now: record.updatedAt)
         if let position = record.position {
             try repo.updateProgress(

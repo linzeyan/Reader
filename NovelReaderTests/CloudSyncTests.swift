@@ -206,25 +206,37 @@ final class CloudFeedReadTests: XCTestCase {
 @MainActor
 final class CloudSyncLimitTests: XCTestCase {
     /// Apple raises an exception for a key past 128 UTF-16 units, and a subscription's key
-    /// carries its address. That one is left out; the rest of the shelf still goes.
-    func testASubscriptionWhoseAddressIsTooLongForAKeyIsLeftOut() throws {
-        let device = try Device()
+    /// carries its address. A long one travels under its digest instead — there, and off
+    /// again — while a short one keeps the very key a device on an older build reads.
+    func testASubscriptionWhoseAddressIsTooLongForAKeyStillSyncs() throws {
+        let a = try Device(), b = try Device()
         let long = "https://news.example/rss/search?q=" + String(repeating: "%E5%8A%8D", count: 12)
-        let tooLong = try device.repo.bookmark(
-            siteId: Book.feedSiteId, siteBookId: long, kind: .feed, title: "long"
+        let tooLong = try a.repo.bookmark(
+            siteId: Book.feedSiteId, siteBookId: long, kind: .feed, title: "long",
+            now: Date(timeIntervalSinceNow: -60)
         )
-        let fine = try device.repo.bookmark(
+        let fine = try a.repo.bookmark(
             siteId: Book.feedSiteId, siteBookId: "https://demo.test/feed.xml", kind: .feed, title: "fine"
         )
+        func noKeyTooLong(_ device: Device) -> Bool {
+            !device.store.values.keys.contains { $0.utf16.count > 128 }
+        }
 
-        device.sync.pushAll()
-        device.sync.removed(tooLong)
+        a.sync.pushAll()
+        XCTAssertTrue(noKeyTooLong(a), "no key Apple would refuse with an exception is written")
+        XCTAssertNotNil(a.store.values["book.\(fine.id)"], "a short address keeps its plain key")
 
-        XCTAssertNotNil(device.store.values["book.\(fine.id)"])
-        XCTAssertFalse(
-            device.store.values.keys.contains { $0.utf16.count > 128 },
-            "no key Apple would refuse with an exception is ever written"
-        )
+        b.store.values = a.store.values
+        b.sync.pull()
+        XCTAssertEqual(try b.repo.book(id: tooLong.id)?.title, "long", "the long one arrives")
+
+        try a.repo.removeBookmark(bookId: tooLong.id)
+        a.sync.removed(tooLong)
+        XCTAssertTrue(noKeyTooLong(a), "nor by its removal")
+        b.store.values = a.store.values
+        b.sync.pull()
+        XCTAssertNil(try b.repo.book(id: tooLong.id), "and so does taking it off the shelf")
+        XCTAssertNotNil(try b.repo.book(id: fine.id))
     }
 
     /// The store reports a write that did not fit as a change notification, not an error.
