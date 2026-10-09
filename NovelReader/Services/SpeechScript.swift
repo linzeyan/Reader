@@ -84,25 +84,44 @@ enum SpeechScript {
         return result
     }
 
-    /// Whether two sentences belong in one breath, and therefore in one utterance.
+    /// How long a run may grow before the next paragraph starts one of its own, in the
+    /// UTF-16 units of what is said.
     ///
-    /// One paragraph. A heading belongs to nothing — it is announced on its own, and a
-    /// chapter's first paragraph must not be read as part of its name.
-    static func belongTogether(_ one: SpokenSentence, _ next: SpokenSentence) -> Bool {
-        !one.isTitle && !next.isTitle
-            && one.chapterIndex == next.chapterIndex
-            && one.paragraph == next.paragraph
+    /// About thirty seconds of voice. Every utterance boundary restarts the audio pipeline,
+    /// and in dialogue — a line a paragraph — one utterance a paragraph was still nine
+    /// restarts a minute; at this size it is two or three. Larger buys little more and
+    /// costs where it shows: the sleep timer lets the run in the voice's mouth finish.
+    static let runBudget = 120
+
+    /// Whether `next` is said in the same utterance as `run`, the sentences gathered so far.
+    ///
+    /// The rest of a paragraph always: a paragraph is never split, however long. Another
+    /// paragraph only while the run is short, and only in the same language, because the
+    /// voice is chosen once for the whole utterance — see `SpeechReader.language(of:)`.
+    /// A heading joins nothing, either way: it is announced on its own, and a chapter's
+    /// first paragraph must not be read as part of its name.
+    static func continues(_ run: [SpokenSentence], with next: SpokenSentence) -> Bool {
+        guard let last = run.last, !last.isTitle, !next.isTitle,
+              last.chapterIndex == next.chapterIndex
+        else { return false }
+        if last.paragraph == next.paragraph { return true }
+        let said = spoken(run).text
+        return (said as NSString).length < runBudget && hasHan(said) == hasHan(next.text)
+    }
+
+    private static func hasHan(_ text: String) -> Bool {
+        text.unicodeScalars.contains(where: ChineseText.isHan)
     }
 
     /// Sentences regrouped into the runs a voice should be handed.
     ///
     /// The single statement of what goes into one utterance, so the two callers that need
     /// it — taking the next run out of the book, and handing the rest of it back at a new
-    /// speed — cannot come to different answers about where a paragraph ends.
+    /// speed — cannot come to different answers about where a run ends.
     static func runs(of sentences: [SpokenSentence]) -> [[SpokenSentence]] {
         var result: [[SpokenSentence]] = []
         for sentence in sentences {
-            if let last = result.last?.last, belongTogether(last, sentence) {
+            if let last = result.last, continues(last, with: sentence) {
                 result[result.count - 1].append(sentence)
             } else {
                 result.append([sentence])
@@ -118,14 +137,23 @@ enum SpeechScript {
     /// whitespace between sentences and the runs of punctuation that are nothing to say,
     /// so a paragraph's own text is not what its sentences add up to. The offsets are
     /// UTF-16, which is what `willSpeakRangeOfSpeechString` reports in.
+    ///
+    /// Paragraphs meet at a line break, which the voice takes as the end of a thought —
+    /// the pause between utterances that used to fall there.
     static func spoken(_ run: [SpokenSentence]) -> (text: String, starts: [Int]) {
         var text = ""
         var starts: [Int] = []
         var length = 0
+        var previous: SpokenSentence?
         for sentence in run {
+            if let previous, previous.paragraph != sentence.paragraph {
+                text += "\n"
+                length += 1
+            }
             starts.append(length)
             text += sentence.text
             length += (sentence.text as NSString).length
+            previous = sentence
         }
         return (text, starts)
     }

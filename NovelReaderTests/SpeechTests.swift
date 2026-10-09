@@ -91,20 +91,46 @@ final class SpeechTests: XCTestCase {
 
     // MARK: - What goes into one utterance
 
-    /// A paragraph is one thing to say, and a heading is its own.
+    /// Short paragraphs are one thing to say, and a heading is its own.
     ///
     /// The synthesiser is handed a run at a time rather than a sentence at a time because
     /// every utterance boundary restarts the audio pipeline — measured at fifteen restarts
-    /// a minute when the unit was the sentence. Glue a chapter's name to its first
-    /// paragraph, though, and the voice reads the title as the opening clause.
-    func testAParagraphIsOneThingToSayAndAHeadingIsItsOwn() {
+    /// a minute when the unit was the sentence, and still nine at a paragraph in dialogue,
+    /// where a paragraph is one line. Glue a chapter's name to its first paragraph, though,
+    /// and the voice reads the title as the opening clause.
+    func testShortParagraphsAreOneThingToSayAndAHeadingIsItsOwn() {
         XCTAssertEqual(
             SpeechScript.runs(of: script(paragraphs)).map { $0.map(\.text) },
             [
                 ["第一章　渡口"],
-                ["他推開門。", "雪落在渡口的燈上。"],
-                ["船還沒有來。"]
+                ["他推開門。", "雪落在渡口的燈上。", "船還沒有來。"]
             ]
+        )
+    }
+
+    /// A run takes paragraphs until it is past its budget, and then the next one starts
+    /// afresh — but a paragraph is never cut, however long: the seam between utterances is
+    /// a pause, and in the middle of a paragraph it would be a pause the author never wrote.
+    func testARunStopsTakingParagraphsPastItsBudgetAndNeverSplitsOne() {
+        // 51 units each: two and a line break are still under 120, three are past it.
+        let short = String(repeating: "雪", count: 50) + "。"
+        // Seventy sentences, 140 units: past the budget on its own.
+        let long = String(repeating: "燈。", count: 70)
+        let runs = SpeechScript.runs(of: script([short, short, short, short, long, short]))
+        // Which paragraphs each run says; a split paragraph would turn up in two of them.
+        XCTAssertEqual(
+            runs.map { Set($0.filter { !$0.isTitle }.map(\.paragraph)) },
+            [[], [0, 1, 2], [3, 4], [5]]
+        )
+        XCTAssertEqual(runs[2].count, 71, "the long paragraph goes whole, all seventy sentences")
+    }
+
+    /// The voice is chosen once per utterance, so a paragraph in another language is never
+    /// folded into a run: an English line read by the Mandarin voice is what that would do.
+    func testAParagraphInAnotherLanguageStartsARunOfItsOwn() {
+        XCTAssertEqual(
+            SpeechScript.runs(of: script(["他推開門。", "The ferry is late."])).map { $0.map(\.text) },
+            [["第一章　渡口"], ["他推開門。"], ["The ferry is late."]]
         )
     }
 
@@ -136,27 +162,33 @@ final class SpeechTests: XCTestCase {
         )
     }
 
-    /// Taking a paragraph takes all of it and stops, so the run handed to the voice is
-    /// one breath rather than whatever happened to be buffered.
-    func testTakingAParagraphTakesAllOfItAndStopsAtTheNext() async {
-        let sequence = SpeechSequence { [self] index in
-            index == 0 ? script(paragraphs, chapterIndex: 0) : nil
-        }
+    /// Paragraphs said as one meet at a line break, and the offsets count it: one unit
+    /// short and every sentence after the first paragraph is banded one character early.
+    func testParagraphsSaidAsOneMeetAtALineBreakTheOffsetsCount() {
+        let (text, starts) = SpeechScript.spoken(Array(script(paragraphs).dropFirst()))
+        XCTAssertEqual(text, "他推開門。雪落在渡口的燈上。\n船還沒有來。")
+        XCTAssertEqual(starts, [0, 5, 15])
+        XCTAssertEqual((text as NSString).substring(from: 15), "船還沒有來。")
+    }
+
+    /// Taking a run takes what `runs(of:)` would have grouped, and nothing else.
+    ///
+    /// They are the two callers of one rule — the next run out of the book, and the rest
+    /// of it handed back at a new speed — and a disagreement between them is a paragraph
+    /// said twice or skipped the moment the reader touches the slider.
+    func testTakingARunTakesWhatTheRestOfItWouldBeGroupedInto() async {
+        let short = String(repeating: "雪", count: 50) + "。"
+        let chapter = script(paragraphs + [short, short, short, "The ferry is late."])
+        let sequence = SpeechSequence { index in index == 0 ? chapter : nil }
         _ = await sequence.begin(chapterIndex: 0, anchor: .start)
-        var said: [[String]] = []
+        var said: [[SpokenSentence]] = []
         while true {
-            let run = await sequence.takeParagraph()
+            let run = await sequence.takeRun()
             guard !run.isEmpty else { break }
-            said.append(run.map(\.text))
+            said.append(run)
         }
-        XCTAssertEqual(
-            said,
-            [
-                ["第一章　渡口"],
-                ["他推開門。", "雪落在渡口的燈上。"],
-                ["船還沒有來。"]
-            ]
-        )
+        XCTAssertEqual(said, SpeechScript.runs(of: chapter))
+        XCTAssertGreaterThan(said.count, 3, "a fixture that groups into one run proves nothing")
     }
 
     /// A run never spans two chapters: the next chapter's name is its own utterance, and
@@ -169,7 +201,7 @@ final class SpeechTests: XCTestCase {
         _ = await sequence.begin(chapterIndex: 0, anchor: .start)
         var said: [[String]] = []
         while true {
-            let run = await sequence.takeParagraph()
+            let run = await sequence.takeRun()
             guard !run.isEmpty else { break }
             said.append(run.map(\.text))
         }
@@ -181,15 +213,15 @@ final class SpeechTests: XCTestCase {
     /// Picking up mid-paragraph hands over the rest of it and not the whole of it — the
     /// reader who pressed the headphones halfway down a paragraph must not hear the half
     /// they have already read.
-    func testTakingAParagraphTheReaderIsInsideStartsWhereTheyAre() async {
+    func testTakingARunTheReaderIsInsideStartsWhereTheyAre() async {
         let sequence = SpeechSequence { [self] index in
             index == 0 ? script(paragraphs, chapterIndex: 0) : nil
         }
         _ = await sequence.begin(
             chapterIndex: 0, anchor: TextAnchor(paragraph: 0, characterOffset: 5)
         )
-        let run = await sequence.takeParagraph()
-        XCTAssertEqual(run.map(\.text), ["雪落在渡口的燈上。"])
+        let run = await sequence.takeRun()
+        XCTAssertEqual(run.map(\.text), ["雪落在渡口的燈上。", "船還沒有來。"])
     }
 
     // MARK: - Where to pick up

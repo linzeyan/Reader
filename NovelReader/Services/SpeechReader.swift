@@ -74,20 +74,21 @@ final class SpeechSequence {
         }
     }
 
-    /// The next run of sentences to say as one: a paragraph, or a heading on its own.
+    /// The next run of sentences to say as one: a paragraph, or a few short ones, or a
+    /// heading on its own — see `SpeechScript.continues`.
     ///
-    /// A paragraph rather than a sentence, because a sentence is not the right size to
-    /// hand a synthesiser — every utterance boundary is the audio pipeline starting over,
-    /// and at one per sentence that was fifteen restarts a minute. See `SpeechReader.say`.
+    /// Never a single sentence, because a sentence is not the right size to hand a
+    /// synthesiser — every utterance boundary is the audio pipeline starting over, and at
+    /// one per sentence that was fifteen restarts a minute. See `SpeechReader.say`.
     ///
     /// Empty only where `take` answers nil: the end of the book.
-    func takeParagraph() async -> [SpokenSentence] {
+    func takeRun() async -> [SpokenSentence] {
         guard let first = await take() else { return [] }
         var run = [first]
         // Only out of the buffer already in hand. Reaching past it would mean loading the
-        // next chapter to find out whether its opening continues this paragraph — and it
-        // never does, because a chapter starts with its own name.
-        while next < buffer.count, SpeechScript.belongTogether(first, buffer[next]) {
+        // next chapter to find out whether its opening continues this run — and it never
+        // does, because a chapter starts with its own name.
+        while next < buffer.count, SpeechScript.continues(run, with: buffer[next]) {
             run.append(buffer[next])
             next += 1
         }
@@ -172,11 +173,11 @@ final class SpeechReader {
 
     var isSpeaking: Bool { state == .speaking }
 
-    /// How many paragraphs are handed to the synthesiser ahead of the one being said.
+    /// How many runs are handed to the synthesiser ahead of the one being said.
     ///
     /// One, which is enough for a seam nobody hears — `AVSpeechSynthesizer` speaks its
     /// queue without a gap. Deeper costs nothing to say and everything to un-say: a change
-    /// of pace has to hand every queued paragraph back at the new rate.
+    /// of pace has to hand every queued run back at the new rate.
     private static let readAhead = 1
 
     /// One utterance and the sentences it says.
@@ -493,7 +494,7 @@ final class SpeechReader {
         Task { @MainActor in
             defer { filling = false }
             while state == .speaking, !hasSleptIn, queue.count <= Self.readAhead,
-                  let run = await sequence?.takeParagraph(), !run.isEmpty {
+                  let run = await sequence?.takeRun(), !run.isEmpty {
                 say(run)
             }
             // The book ran out under the voice. Nothing is queued, nothing is coming,
@@ -502,7 +503,8 @@ final class SpeechReader {
         }
     }
 
-    /// Hands one paragraph to the synthesiser as a single utterance.
+    /// Hands one run — a paragraph, or a few short ones — to the synthesiser as a single
+    /// utterance.
     ///
     /// Not one per sentence, which is what this was. Measured over two eight-minute
     /// listening sessions with nobody touching the phone: every utterance boundary
@@ -528,7 +530,8 @@ final class SpeechReader {
                 + "voice=\(voiceMisses > missesBefore ? "miss" : "hit")"
         )
         // A breath between paragraphs, which is where one belongs — inside a paragraph
-        // the punctuation being read is already doing it. Prose read with no gap at all
+        // the punctuation being read is already doing it, and between the paragraphs of
+        // one run the line break `SpeechScript.spoken` puts there. Prose read with no gap at all
         // is the one thing that makes a synthesised voice tiring to follow for an hour.
         utterance.postUtteranceDelay = 0.15
         queue.append(Chunk(utterance: utterance, sentences: run, starts: starts))
