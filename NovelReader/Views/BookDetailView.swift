@@ -901,11 +901,14 @@ private struct BookDownloadSection: View {
         // Only while the book is queued. A finished book leaves the queue, so this
         // section cannot outlive its download.
         if let job = env.downloader.job(for: bookId) {
-            Section("book.downloading") {
+            let running = env.downloader.isBusy
+            Section {
                 DownloadJobRow(job: job, showsTitle: false, onCancel: onCancel)
                 // From the one book to the whole queue, once there is more than this
                 // book in it — the question "what else is it doing first?" starts here.
-                if env.downloader.jobs.count > 1 {
+                // And whenever it runs, one book or not: the queue is where focus download
+                // is, and a download just started is a phone about to be put down.
+                if env.downloader.jobs.count > 1 || running {
                     NavigationLink {
                         DownloadQueueView()
                     } label: {
@@ -913,6 +916,15 @@ private struct BookDownloadSection: View {
                             .font(.footnote)
                     }
                     .accessibilityIdentifier("downloads.queue.link")
+                }
+            } header: {
+                Text("book.downloading")
+            } footer: {
+                // Said before it happens. Locked, the queue stops; what nobody is told
+                // reads as a download that broke overnight.
+                if running {
+                    Text("downloads.focus.hint")
+                        .accessibilityIdentifier("downloads.focus.hint")
                 }
             }
         }

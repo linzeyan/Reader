@@ -2940,6 +2940,30 @@
         }
       }
     },
+    "downloads.focus.hint" : {
+      "comment" : "Footer under a running download on the book screen: leaving the app stops it, and where focus download is.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaving the app or locking the screen pauses the download until you come back. To leave it running, turn on Focus Download in the Download Queue."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离开 App 或锁定屏幕，下载会暂停，回来后自动继续。想放着让它下载，到「下载队列」打开「专注下载」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "離開 App 或鎖定螢幕，下載會暫停，回來後自動繼續。想放著讓它下載，到「下載佇列」打開「專注下載」。"
+          }
+        }
+      }
+    },
     "downloads.focus.stop" : {
       "comment" : "Button in the focus download countdown bar that ends focus download.",
       "extractionState" : "manual",
