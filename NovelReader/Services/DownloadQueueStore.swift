@@ -17,17 +17,25 @@ struct PersistedDownloadQueue: Codable, Equatable {
     /// treated exactly like a corrupt file — thrown away — because a queue
     /// guessed out of a format we cannot read would fetch the wrong chapters,
     /// and the worst a clean drop costs is one tap on "download" again.
-    static let currentVersion = 1
+    static let currentVersion = 2
+
+    /// One book's share of the queue.
+    struct Entry: Codable, Equatable {
+        var bookId: String
+        /// Site chapter ids, in queue order.
+        var siteChapterIds: [String]
+        /// Paused by the reader, and to stay that way until they say otherwise.
+        var paused = false
+    }
 
     var version: Int
-    var bookId: String
-    /// Site chapter ids, in queue order.
-    var siteChapterIds: [String]
+    /// In download order: the book being worked on first, then the ones waiting
+    /// behind it.
+    var books: [Entry]
 
-    init(bookId: String, siteChapterIds: [String], version: Int = currentVersion) {
+    init(books: [Entry], version: Int = currentVersion) {
         self.version = version
-        self.bookId = bookId
-        self.siteChapterIds = siteChapterIds
+        self.books = books
     }
 }
 
@@ -88,10 +96,9 @@ struct DownloadQueueStore {
     /// `DownloadStore` are the truth for what is finished, so the worst a write
     /// lost to a power cut costs is reading back a queue a few chapters out of
     /// date — which the restore filters for free.
-    func save(bookId: String, siteChapterIds: [String]) {
-        guard let data = try? JSONEncoder().encode(
-            PersistedDownloadQueue(bookId: bookId, siteChapterIds: siteChapterIds)
-        ) else { return }
+    func save(_ books: [PersistedDownloadQueue.Entry]) {
+        guard let data = try? JSONEncoder().encode(PersistedDownloadQueue(books: books))
+        else { return }
         try? fileManager.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
@@ -115,14 +122,8 @@ final class DownloadQueueRestorer {
     private let downloader: DownloadManager
     private let repo: LibraryRepo
     private let settings: DownloadSettings
-    /// Where a dropped queue is reported. The same record a background window
-    /// writes, rather than a second channel: "the download did not happen and
-    /// here is why" is one question, and the settings screen is already where a
-    /// user goes to ask it.
-    private let record: BackgroundDownloads
-    /// Closures rather than the stores behind them, for the reason
-    /// `BackgroundDownloads` takes its connection that way: a test has to be able
-    /// to pin both, and a `SiteStore` can only answer by reading real rule files.
+    /// Closures rather than the stores behind them: a test has to be able to pin
+    /// both, and a `SiteStore` can only answer by reading real rule files.
     private let rule: @MainActor (String) -> SiteRule?
     private let connection: @MainActor () -> NetworkMonitor.Connection
 
@@ -134,7 +135,6 @@ final class DownloadQueueRestorer {
         downloader: DownloadManager,
         repo: LibraryRepo,
         settings: DownloadSettings,
-        record: BackgroundDownloads,
         rule: @escaping @MainActor (String) -> SiteRule?,
         connection: @escaping @MainActor () -> NetworkMonitor.Connection
     ) {
@@ -142,7 +142,6 @@ final class DownloadQueueRestorer {
         self.downloader = downloader
         self.repo = repo
         self.settings = settings
-        self.record = record
         self.rule = rule
         self.connection = connection
     }
@@ -151,13 +150,11 @@ final class DownloadQueueRestorer {
     /// once, at launch.
     func restore() {
         switch store.load() {
-        case .empty:
+        case .empty, .unreadable:
+            // An unreadable file is dropped, never repaired: the user loses one
+            // "download" tap, where a queue pieced together from a file this build
+            // cannot parse would cost them the wrong chapters.
             return
-        case .unreadable:
-            // Loud rather than repaired. The user loses one "download" tap; a
-            // queue pieced together from a file this build cannot parse would
-            // cost them the wrong chapters, and they would never know why.
-            record.recordQueueLost()
         case .queue(let queue):
             install(queue)
         }
@@ -170,15 +167,25 @@ final class DownloadQueueRestorer {
     }
 
     private func install(_ queue: PersistedDownloadQueue) {
-        // A book the user has since deleted, or a source whose rule has been
-        // removed, leaves nothing to fetch with. Dropped whole rather than
-        // half-installed.
-        guard let book = (try? repo.book(id: queue.bookId)) ?? nil,
-              let rule = rule(book.siteId)
-        else {
+        let jobs = queue.books.compactMap(job)
+        guard !jobs.isEmpty else {
             store.clear()
             return
         }
+        downloader.restore(jobs)
+        awaitingConnection = true
+        decide()
+    }
+
+    /// One book's entry, or nil when nothing of it is left to fetch. Judged per
+    /// book, so one deleted book does not take the ones queued behind it down.
+    private func job(_ entry: PersistedDownloadQueue.Entry) -> DownloadManager.Job? {
+        // A book the user has since deleted, or a source whose rule has been
+        // removed, leaves nothing to fetch with. Dropped whole rather than
+        // half-installed.
+        guard let book = (try? repo.book(id: entry.bookId)) ?? nil,
+              let rule = rule(book.siteId)
+        else { return nil }
         let catalog = (try? repo.chapters(bookId: book.id)) ?? []
         let byId = Dictionary(
             catalog.map { ($0.siteChapterId, $0) }, uniquingKeysWith: { first, _ in first }
@@ -189,14 +196,11 @@ final class DownloadQueueRestorer {
         // `DownloadStore` stamps in the same breath as it writes the file — is the
         // truth for the second, which is what lets the queue file be a few
         // chapters out of date without costing a single repeated request.
-        let chapters = queue.siteChapterIds.compactMap { byId[$0] }.filter { !$0.isDownloaded }
-        guard !chapters.isEmpty else {
-            store.clear()
-            return
-        }
-        downloader.restore(book: book, rule: rule, chapters: chapters)
-        awaitingConnection = true
-        decide()
+        let chapters = entry.siteChapterIds.compactMap { byId[$0] }.filter { !$0.isDownloaded }
+        guard !chapters.isEmpty else { return nil }
+        return DownloadManager.Job(
+            book: book, rule: rule, chapters: chapters, hold: entry.paused ? .paused : nil
+        )
     }
 
     /// The policy check a restored queue has to pass before one request goes out.

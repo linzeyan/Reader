@@ -50,11 +50,11 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         let second = try relaunch(first)
         second.restorer.restore()
 
-        XCTAssertEqual(second.downloader.remaining.map(\.siteChapterId), ["1", "2", "3"])
+        XCTAssertEqual(ids(second), ["1", "2", "3"])
         XCTAssertEqual(second.downloader.status, .paused)
         XCTAssertTrue(second.downloader.canResume)
-        XCTAssertEqual(second.downloader.progress?.total, 3)
-        XCTAssertEqual(second.downloader.progress?.bookId, book.id)
+        XCTAssertEqual(second.downloader.current?.total, 3)
+        XCTAssertEqual(second.downloader.current?.id, book.id)
     }
 
     /// The queue file is allowed to be out of date — it is written when the queue
@@ -72,7 +72,7 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         let second = try relaunch(first)
         second.restorer.restore()
 
-        XCTAssertEqual(second.downloader.remaining.map(\.siteChapterId), ["1", "3"])
+        XCTAssertEqual(ids(second), ["1", "3"])
     }
 
     /// A chapter the site has taken down since the queue was written no longer has a
@@ -97,7 +97,7 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         second.restorer.restore()
 
         XCTAssertEqual(
-            second.downloader.remaining.map(\.siteChapterId), ["1", "3"],
+            ids(second), ["1", "3"],
             "A dead id must be dropped, not left at the head of the queue failing forever"
         )
     }
@@ -117,7 +117,7 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         second.restorer.restore()
 
         XCTAssertFalse(second.downloader.isBusy, "Not one request may go out")
-        XCTAssertEqual(second.downloader.remaining.count, 3, "…and the queue is still there")
+        XCTAssertEqual(second.downloader.remainingCount, 3, "…and the queue is still there")
         XCTAssertTrue(second.downloader.canResume)
         XCTAssertEqual(
             second.downloader.lastError, String(localized: "downloads.cellular.paused"),
@@ -165,19 +165,15 @@ final class DownloadQueuePersistenceTests: XCTestCase {
     /// A file this build cannot parse is thrown away whole rather than salvaged. The
     /// user loses one tap on "download"; a queue pieced together from bytes we do
     /// not understand would fetch the wrong chapters and never say so.
-    func testAnUnreadableQueueIsThrownAwayAndRecorded() throws {
+    func testAnUnreadableQueueIsThrownAway() throws {
         let harness = try makeHarness()
         try Data("{ not a queue".utf8).write(to: harness.queueStore.url)
 
         harness.restorer.restore()
 
         XCTAssertEqual(harness.downloader.status, .idle)
-        XCTAssertTrue(harness.downloader.remaining.isEmpty)
+        XCTAssertTrue(harness.downloader.jobs.isEmpty)
         XCTAssertFalse(fileExists(harness), "A file that cannot be read is not kept around")
-        XCTAssertEqual(
-            harness.background.lastRun?.outcome, .queueLost,
-            "Losing a queue silently is the failure this record exists to prevent"
-        )
     }
 
     /// Same treatment for a shape that parses but comes from a version this build
@@ -185,23 +181,21 @@ final class DownloadQueuePersistenceTests: XCTestCase {
     func testAQueueFromAnUnknownFormatVersionIsThrownAway() throws {
         let harness = try makeHarness()
         let future = PersistedDownloadQueue(
-            bookId: "demo|1", siteChapterIds: ["1"],
+            books: [.init(bookId: "demo|1", siteChapterIds: ["1"])],
             version: PersistedDownloadQueue.currentVersion + 1
         )
         try JSONEncoder().encode(future).write(to: harness.queueStore.url)
 
         harness.restorer.restore()
 
-        XCTAssertTrue(harness.downloader.remaining.isEmpty)
+        XCTAssertTrue(harness.downloader.jobs.isEmpty)
         XCTAssertFalse(fileExists(harness))
-        XCTAssertEqual(harness.background.lastRun?.outcome, .queueLost)
     }
 
     // MARK: - Books that are no longer there
 
     /// A queue whose book has been deleted has nothing to download into. Dropped
-    /// rather than restored against a book that does not exist — and quietly,
-    /// because the user deleting a book is not a failure to report.
+    /// rather than restored against a book that does not exist.
     func testAQueueForADeletedBookIsDropped() throws {
         let first = try makeHarness()
         let book = try seedBook(first, siteBookId: "1", chapters: ["1", "2", "3"])
@@ -215,12 +209,8 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         second.restorer.restore()
 
         XCTAssertEqual(second.downloader.status, .idle)
-        XCTAssertTrue(second.downloader.remaining.isEmpty)
+        XCTAssertTrue(second.downloader.jobs.isEmpty)
         XCTAssertFalse(fileExists(second))
-        XCTAssertNil(
-            second.background.lastRun,
-            "Deleting a book is the user's own doing, not something to report as a fault"
-        )
     }
 
     /// And the deletion has to stay local to the book that was deleted: a queue for
@@ -235,8 +225,55 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         let second = try relaunch(first)
         second.restorer.restore()
 
-        XCTAssertEqual(second.downloader.remaining.map(\.siteChapterId), ["7", "8"])
-        XCTAssertEqual(second.downloader.progress?.bookId, queued.id)
+        XCTAssertEqual(ids(second), ["7", "8"])
+        XCTAssertEqual(second.downloader.current?.id, queued.id)
+    }
+
+    /// Books queued behind the one downloading are as much the reader's request as
+    /// that one, and come back in the order they were asked for. One that cannot
+    /// come back — deleted since — drops out without taking the others with it.
+    func testBooksWaitingInTheQueueSurviveTheProcessInOrder() throws {
+        let first = try makeHarness()
+        let a = try seedBook(first, siteBookId: "1", chapters: ["1", "2"])
+        let doomed = try seedBook(first, siteBookId: "2", chapters: ["5"])
+        let c = try seedBook(first, siteBookId: "3", chapters: ["7", "8"])
+        try queue(first, a)
+        for book in [doomed, c] {
+            first.downloader.start(
+                book: book, rule: Self.makeRule(), chapters: try first.repo.chapters(bookId: book.id)
+            )
+        }
+        first.downloader.pause()
+        try first.repo.removeBookmark(bookId: doomed.id)
+
+        let second = try relaunch(first)
+        second.restorer.restore()
+
+        XCTAssertEqual(second.downloader.current?.id, a.id)
+        XCTAssertEqual(ids(second), ["1", "2"])
+        XCTAssertEqual(second.downloader.jobs.map(\.id), [a.id, c.id])
+        XCTAssertEqual(second.downloader.job(for: c.id)?.remaining.map(\.siteChapterId), ["7", "8"])
+    }
+
+    /// A book the reader paused is a decision about that book, and a relaunch must not
+    /// quietly take it back — while the book next to it, paused only because the app
+    /// went away, is free to go as before.
+    func testABookTheReaderPausedStaysPausedAcrossALaunch() throws {
+        let first = try makeHarness()
+        let a = try seedBook(first, siteBookId: "1", chapters: ["1"])
+        let b = try seedBook(first, siteBookId: "2", chapters: ["2"])
+        try queue(first, a)
+        first.downloader.start(
+            book: b, rule: Self.makeRule(), chapters: try first.repo.chapters(bookId: b.id)
+        )
+        first.downloader.pause(bookId: b.id)
+        first.downloader.pause()
+
+        let second = try relaunch(first)
+        second.restorer.restore()
+
+        XCTAssertEqual(second.downloader.job(for: b.id)?.hold, .paused)
+        XCTAssertNil(second.downloader.job(for: a.id)?.hold)
     }
 
     // MARK: - Queues that are over
@@ -254,9 +291,8 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         XCTAssertFalse(fileExists(harness))
     }
 
-    /// Nor may a queue survive being finished — waking up to re-download a book that
-    /// is already complete is exactly the pointless wake-up the background budget
-    /// gets spent on.
+    /// Nor may a queue survive being finished — the next launch would set about
+    /// re-downloading a book that is already complete.
     func testAFinishedQueueRemovesTheFile() throws {
         let harness = try makeHarness()
         let book = try seedBook(harness, siteBookId: "1", chapters: ["1"])
@@ -291,7 +327,6 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         let repo: LibraryRepo
         let downloads: DownloadStore
         let downloader: DownloadManager
-        let background: BackgroundDownloads
         let restorer: DownloadQueueRestorer
         let queueStore: DownloadQueueStore
         let connection: ConnectionBox
@@ -322,20 +357,15 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         let settings = DownloadSettings(defaults: defaults)
         settings.network = policy
         let box = ConnectionBox(connection)
-        let background = BackgroundDownloads(
-            downloader: downloader, settings: settings, connection: { box.current },
-            scheduler: SilentScheduler(), defaults: defaults
-        )
         let rule = Self.makeRule()
         return Harness(
             database: database,
             repo: repo,
             downloads: downloads,
             downloader: downloader,
-            background: background,
             restorer: DownloadQueueRestorer(
                 store: queueStore, downloader: downloader, repo: repo, settings: settings,
-                record: background, rule: { $0 == rule.id ? rule : nil },
+                rule: { $0 == rule.id ? rule : nil },
                 connection: { box.current }
             ),
             queueStore: queueStore,
@@ -382,6 +412,10 @@ final class DownloadQueuePersistenceTests: XCTestCase {
         harness.downloader.pause()
     }
 
+    private func ids(_ harness: Harness) -> [String] {
+        harness.downloader.current?.remaining.map(\.siteChapterId) ?? []
+    }
+
     private func fileExists(_ harness: Harness) -> Bool {
         FileManager.default.fileExists(atPath: harness.queueStore.url.path)
     }
@@ -410,11 +444,4 @@ final class DownloadQueuePersistenceTests: XCTestCase {
             notes: nil
         )
     }
-}
-
-/// The scheduler seam, wired to nothing: these cases are about the queue file, and
-/// the real `BGTaskScheduler` refuses every request from a test process anyway.
-private final class SilentScheduler: BackgroundTaskScheduling {
-    func submitProcessingRequest(identifier: String) throws {}
-    func cancel(identifier: String) {}
 }

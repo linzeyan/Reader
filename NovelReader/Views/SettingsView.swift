@@ -52,6 +52,14 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        DownloadQueueView()
+                    } label: {
+                        LabeledContent("downloads.queue.title") {
+                            Text("\(env.downloader.jobs.count)")
+                        }
+                    }
+                    .accessibilityIdentifier("settings.downloadQueue")
                     Picker("settings.downloadNetwork", selection: $downloadSettings.network) {
                         Text("settings.downloadNetwork.wifiOnly")
                             .tag(DownloadSettings.NetworkPolicy.wifiOnly)
@@ -59,10 +67,6 @@ struct SettingsView: View {
                             .tag(DownloadSettings.NetworkPolicy.wifiAndCellular)
                     }
                     .accessibilityIdentifier("settings.downloadNetwork")
-                    // A report rather than a setting, and four rows of one: on the main
-                    // screen it read as something to configure.
-                    NavigationLink("settings.background") { BackgroundDownloadsView() }
-                        .accessibilityIdentifier("settings.background")
                 } header: {
                     HelpLabel("settings.section.downloads", help: "settings.downloadNetwork.footer")
                 }
@@ -205,75 +209,6 @@ private struct RecentReadingSection: View {
         ) {
             Button("settings.recent.clear", role: .destructive) { env.clearReadingHistory() }
             Button("common.cancel", role: .cancel) {}
-        }
-    }
-}
-
-// MARK: - Background downloads
-
-/// The report on its own screen, because it is a report: four rows of what happened last
-/// night, which on the main settings list read as four things to set.
-private struct BackgroundDownloadsView: View {
-    var body: some View {
-        List {
-            BackgroundDownloadsSection()
-        }
-        .navigationTitle("settings.background")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-/// The only window onto a feature that by definition runs where nobody can see
-/// it. Without this the honest answer to "did it download anything overnight?" is
-/// "look at the chapter list and guess", which cannot distinguish a background
-/// window that never got granted from one that ran and fetched nothing because
-/// iOS had suspended the web content process.
-private struct BackgroundDownloadsSection: View {
-    @Environment(AppEnvironment.self) private var env
-
-    var body: some View {
-        Section {
-            if let run = env.backgroundDownloads.lastRun {
-                LabeledContent("settings.background.when") {
-                    Text(run.startedAt, format: .relative(presentation: .named))
-                }
-                LabeledContent("settings.background.result") {
-                    Text(Self.label(for: run.outcome))
-                }
-                LabeledContent("settings.background.chapters", value: "\(run.chapters)")
-                LabeledContent("settings.background.connection") {
-                    Text(Self.label(for: run.connection))
-                }
-            } else {
-                Text("settings.background.never").foregroundStyle(.secondary)
-            }
-            if let error = env.backgroundDownloads.lastScheduleError {
-                LabeledContent("settings.background.scheduleError") { Text(error) }
-                    .foregroundStyle(.orange)
-            }
-        } header: {
-            HelpLabel("settings.background", help: "settings.background.footer")
-        }
-    }
-
-    private static func label(for outcome: BackgroundDownloadRun.Outcome) -> LocalizedStringKey {
-        switch outcome {
-        case .completed: return "settings.background.outcome.completed"
-        case .expired: return "settings.background.outcome.expired"
-        case .stalled: return "settings.background.outcome.stalled"
-        case .blockedByPolicy: return "settings.background.outcome.blockedByPolicy"
-        case .nothingToDo: return "settings.background.outcome.nothingToDo"
-        case .queueLost: return "settings.background.outcome.queueLost"
-        case .deferredToLaunch: return "settings.background.outcome.deferredToLaunch"
-        }
-    }
-
-    private static func label(for connection: NetworkMonitor.Connection) -> LocalizedStringKey {
-        switch connection {
-        case .wifi: return "settings.background.connection.wifi"
-        case .cellular: return "settings.background.connection.cellular"
-        case .offline: return "settings.background.connection.offline"
-        case .unknown: return "settings.background.connection.unknown"
         }
     }
 }

@@ -2868,6 +2868,150 @@
         }
       }
     },
+    "downloads.focus" : {
+      "comment" : "Button on the download queue that keeps the app on screen with the screen dark while the queue runs.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Focus Download"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "专注下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "專注下載"
+          }
+        }
+      }
+    },
+    "downloads.focus.countdown %lld" : {
+      "comment" : "Bar under the download queue while focus download counts down to a dark screen. The argument is seconds left.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screen goes dark in %lld s"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 秒后屏幕变黑"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 秒後螢幕變黑"
+          }
+        }
+      }
+    },
+    "downloads.focus.finished" : {
+      "comment" : "Shown on the download queue when focus download ended because every book finished.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All downloads finished"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部下载完成"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部下載完成"
+          }
+        }
+      }
+    },
+    "downloads.focus.stop" : {
+      "comment" : "Button in the focus download countdown bar that ends focus download.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop Focus"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束专注"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結束專注"
+          }
+        }
+      }
+    },
+    "downloads.focus.stopped" : {
+      "comment" : "Shown on the download queue when focus download ended with books still queued but none able to go.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopped: the remaining books need attention"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已停止：剩下的书需要处理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已停止：剩下的書需要處理"
+          }
+        }
+      }
+    },
+    "downloads.focus.wake" : {
+      "comment" : "Accessibility label of the dark screen during focus download; activating it shows the queue.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show download queue"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示下载队列"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示下載佇列"
+          }
+        }
+      }
+    },
     "downloads.paused.background" : {
       "comment" : "Shown on the download row when leaving the app stopped the queue.",
       "extractionState" : "manual",
@@ -2912,6 +3056,102 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "連續多章下載失敗，已暫停：%@"
+          }
+        }
+      }
+    },
+    "downloads.queue.empty" : {
+      "comment" : "Shown on the download queue screen when nothing is queued.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is downloading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前没有下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前沒有下載"
+          }
+        }
+      }
+    },
+    "downloads.queue.link %lld" : {
+      "comment" : "Link from a book's download section to the whole queue. The argument is how many books are queued.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download queue (%lld books)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载队列（%lld 本）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載佇列（%lld 本）"
+          }
+        }
+      }
+    },
+    "downloads.queue.resumeAll" : {
+      "comment" : "Button that sets a stopped download queue going again.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume all"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部继续"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部繼續"
+          }
+        }
+      }
+    },
+    "downloads.queue.title" : {
+      "comment" : "Title of the download queue screen, and its row in Settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Queue"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载队列"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載佇列"
           }
         }
       }
@@ -3015,6 +3255,78 @@
         }
       }
     },
+    "downloads.state.paused" : {
+      "comment" : "Under a paused book's progress bar.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paused"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暫停"
+          }
+        }
+      }
+    },
+    "downloads.state.queued" : {
+      "comment" : "Under a queued book's progress bar while another book downloads.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待中"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待中"
+          }
+        }
+      }
+    },
+    "downloads.state.wall" : {
+      "comment" : "Under a book whose site asked for verification. Other books download first; the verification sheet comes once nothing else can.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Needs verification. Other books download first; you'll be asked once they're done."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要验证。先下载其他书，完成后会请你验证。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要驗證。先下載其他書，完成後會請你驗證。"
+          }
+        }
+      }
+    },
     "downloads.title" : {
       "comment" : "Download management screen.",
       "extractionState" : "manual",
@@ -3035,6 +3347,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下載管理"
+          }
+        }
+      }
+    },
+    "downloads.wall.gaveUp" : {
+      "comment" : "Under a book paused because verification failed again right after the sheet was closed.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verification didn't go through, so this book is paused. Tap Resume to try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验证没有通过，这本已暂停。按「继续」再试一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驗證沒有通過，這本已暫停。按「繼續」再試一次。"
           }
         }
       }
@@ -8887,462 +9223,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "外觀"
-          }
-        }
-      }
-    },
-    "settings.background" : {
-      "comment" : "Header of the settings section that reports the last background download attempt.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Background downloads"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "背景下载"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "背景下載"
-          }
-        }
-      }
-    },
-    "settings.background.chapters" : {
-      "comment" : "Label for how many chapters the last background download fetched.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chapters fetched"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "取得章数"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "取得章數"
-          }
-        }
-      }
-    },
-    "settings.background.connection" : {
-      "comment" : "Label for the connection the last background download ran on.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connection"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "连接方式"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "連線方式"
-          }
-        }
-      }
-    },
-    "settings.background.connection.cellular" : {
-      "comment" : "Connection kind a background download ran on. Covers a personal hotspot too.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cellular"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移动网络"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "行動網路"
-          }
-        }
-      }
-    },
-    "settings.background.connection.offline" : {
-      "comment" : "Connection kind a background download ran on: there was none.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有连接"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "沒有連線"
-          }
-        }
-      }
-    },
-    "settings.background.connection.unknown" : {
-      "comment" : "Connection kind a background download ran on: the system had not reported one yet.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unknown"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未知"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未知"
-          }
-        }
-      }
-    },
-    "settings.background.connection.wifi" : {
-      "comment" : "Connection kind a background download ran on.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        }
-      }
-    },
-    "settings.background.footer" : {
-      "comment" : "Says what actually happens to a download when the app leaves the screen: it pauses, resumes on return, and iOS may or may not catch up while the phone is idle. Worded as a maybe on purpose — two days of device traces showed the catch-up window granted zero times out of four requests.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Downloads need the app on screen: leaving finishes the chapter in progress, then pauses, and coming back carries on. iOS may fetch the rest while the iPhone is idle — usually overnight on the charger — but when, and whether, is up to iOS. Under Wi-Fi only it never falls back to cellular in the background. That catch-up needs Background App Refresh allowed for this app in Settings."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下载需要 App 留在屏幕上：离开时会先下载完正在下载的这一章再暂停，回到 App 自动继续。系统可能在 iPhone 空闲时（通常是夜间充电）补下剩下的章节，但何时执行由系统决定，不一定会发生。“仅 Wi-Fi”在后台不会改用移动网络。补下需要在“设置 › 通用 › 后台 App 刷新”中允许本 App。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下載需要 App 留在畫面上：離開時會先抓完手上這一章再暫停，回到 App 自動繼續。系統可能在 iPhone 閒置時（通常是夜間充電）補抓剩下的章節，但何時執行由系統決定，不一定會發生。「僅 Wi-Fi」在背景不會改用行動網路。補抓需要在「設定 › 一般 › 背景 App 重新整理」中允許本 App。"
-          }
-        }
-      }
-    },
-    "settings.background.never" : {
-      "comment" : "Shown in place of the report when no background download has ever run.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Has not run in the background yet"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚未在后台下载过"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚未在背景下載過"
-          }
-        }
-      }
-    },
-    "settings.background.outcome.blockedByPolicy" : {
-      "comment" : "Background download outcome: skipped because the connection was metered under the Wi-Fi-only policy.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skipped: not on Wi-Fi"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "跳过：不在 Wi-Fi 上"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "略過：不在 Wi-Fi 上"
-          }
-        }
-      }
-    },
-    "settings.background.outcome.completed" : {
-      "comment" : "Background download outcome: the queue emptied inside the window.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Finished the queue"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已下载完"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已下載完"
-          }
-        }
-      }
-    },
-    "settings.background.outcome.deferredToLaunch" : {
-      "comment" : "Background download outcome: iOS woke the app after terminating it, so the window had no app to run the queue with; the saved queue continues at the next launch.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App had been terminated; continues next time you open it"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App 曾被系统结束，下次打开时继续"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App 曾被系統結束，下次開啟時繼續"
-          }
-        }
-      }
-    },
-    "settings.background.outcome.expired" : {
-      "comment" : "Background download outcome: iOS took the time back before the queue was done.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ran out of time"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "时间被系统收回"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "時間被系統收回"
-          }
-        }
-      }
-    },
-    "settings.background.outcome.nothingToDo" : {
-      "comment" : "Background download outcome: woken with an empty queue.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nothing left to download"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有待下载的章节"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "沒有待下載的章節"
-          }
-        }
-      }
-    },
-    "settings.background.outcome.queueLost" : {
-      "comment" : "Background download outcome: the saved queue could not be read back, so it was discarded.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Saved queue was unreadable; please download again"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保存的队列读不回来，已丢弃，请重新下载"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "儲存的佇列讀不回來，已丟棄，請重新下載"
-          }
-        }
-      }
-    },
-    "settings.background.outcome.stalled" : {
-      "comment" : "Background download outcome: the queue stopped early and needs the user.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stopped early, needs attention"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "中途停住，需要处理"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "中途停住，需要處理"
-          }
-        }
-      }
-    },
-    "settings.background.result" : {
-      "comment" : "Label for how the last background download ended.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Result"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "结果"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "結果"
-          }
-        }
-      }
-    },
-    "settings.background.scheduleError" : {
-      "comment" : "Label for the reason iOS refused to schedule a background download window.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Could not schedule"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法排程"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法排程"
-          }
-        }
-      }
-    },
-    "settings.background.when" : {
-      "comment" : "Label for when the last background download started.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Last run"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上次执行"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上次執行"
           }
         }
       }

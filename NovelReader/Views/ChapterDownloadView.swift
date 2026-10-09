@@ -60,7 +60,7 @@ struct ChapterDownloadView: View {
                     Label("downloads.downloadAll", systemImage: "arrow.down.circle")
                 }
                 .accessibilityIdentifier("downloads.all")
-                .disabled(rule == nil || downloadedCount == chapters.count || env.downloader.isBusy)
+                .disabled(rule == nil || downloadedCount == chapters.count)
 
                 Button(role: .destructive) {
                     confirmingDelete = true
@@ -177,7 +177,7 @@ struct ChapterDownloadView: View {
                 Label("downloads.download", systemImage: "arrow.down.circle")
             }
             .accessibilityIdentifier("downloads.downloadSelected")
-            .disabled(rule == nil || selectedPending.isEmpty || env.downloader.isBusy)
+            .disabled(rule == nil || selectedPending.isEmpty)
 
             Button(role: .destructive) {
                 for chapter in selectedDownloaded {
@@ -248,7 +248,7 @@ struct ChapterDownloadView: View {
 /// which is also what an accidental deselect looks like, and the only way to find out
 /// a queue existed at all was to leave for the download manager.
 ///
-/// `lastError` rides along because a *paused* queue is the case a bare progress bar
+/// The book's state line rides along because a *paused* queue is the case a bare progress bar
 /// reads worst: stalled at a third with no word about why is the reading that sends
 /// someone to the download manager all over again.
 ///
@@ -260,15 +260,14 @@ private struct DownloadQueueBar: View {
     @Environment(AppEnvironment.self) private var env
 
     var body: some View {
-        if let progress = env.downloader.progress, progress.bookId == bookId,
-           env.downloader.status == .running || env.downloader.status == .paused {
+        if let job = env.downloader.job(for: bookId) {
             VStack(alignment: .leading, spacing: 4) {
-                ProgressView(value: progress.fraction) {
-                    Text("book.download.progress \(progress.completed) \(progress.total)")
+                ProgressView(value: job.fraction) {
+                    Text("book.download.progress \(job.completed) \(job.total)")
                         .font(.footnote)
                 }
-                if let reason = env.downloader.lastError {
-                    Text(reason)
+                if let state = env.downloader.describe(job) {
+                    Text(state)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -291,6 +290,6 @@ private struct LandingWatcher: View {
     @Environment(AppEnvironment.self) private var env
 
     var body: some View {
-        Color.clear.onChange(of: env.downloader.progress?.completed) { _, _ in onLanded() }
+        Color.clear.onChange(of: env.downloader.landed) { _, _ in onLanded() }
     }
 }

@@ -81,13 +81,17 @@ final class DownloadManagerTests: XCTestCase {
         return chapter
     }
 
-    private func makeBook() -> Book {
+    private func makeBook(id: String = "book", kind: SiteRule.Kind = .novel) -> Book {
         Book(
-            id: "book", siteId: "demo", siteBookId: "1", kind: .novel, title: "t",
+            id: id, siteId: "demo", siteBookId: id, kind: kind, title: "t",
             displayName: nil, author: nil, coverURL: nil, addedAt: Date(), updatedAt: Date(),
             lastReadSiteChapterId: nil, lastReadParagraph: nil,
             lastReadCharacterOffset: nil, lastReadFraction: nil, lastReadAt: nil, catalogUpdatedAt: nil
         )
+    }
+
+    private func job(_ book: Book, _ ids: [String]) -> DownloadManager.Job {
+        DownloadManager.Job(book: book, rule: makeRule(), chapters: ids.map(makeChapter))
     }
 
     private func makeChapter(_ id: String) -> Chapter {
@@ -120,8 +124,130 @@ final class DownloadManagerTests: XCTestCase {
         // Nothing to do is the cheapest way to reach "finished" without a network.
         manager.start(book: book, rule: makeRule(), chapters: [downloadedChapter("1")])
         XCTAssertEqual(manager.status, .finished)
-        XCTAssertNil(manager.progress, "A finished run must not leave a progress row behind")
+        XCTAssertTrue(manager.jobs.isEmpty, "A finished run must not leave a progress row behind")
         XCTAssertFalse(manager.isBusy)
+    }
+
+    /// A paused book is still the reader's download. Starting another book used to
+    /// cancel it outright, throwing the rest of it away without a word; now the new
+    /// book takes its place behind it.
+    func testAnotherBookQueuesBehindAPausedOneInsteadOfReplacingIt() throws {
+        let manager = try makeManager()
+        manager.restore([job(makeBook(id: "a"), ["1", "2"])])
+        manager.start(book: makeBook(id: "b"), rule: makeRule(), chapters: [makeChapter("3")])
+
+        XCTAssertEqual(manager.jobs.map(\.id), ["a", "b"], "Behind it, in the order asked")
+        XCTAssertEqual(manager.job(for: "a")?.remaining.map(\.id), ["1", "2"])
+        XCTAssertEqual(manager.activeBookId, "a", "The book in front goes first")
+        XCTAssertEqual(manager.remainingCount, 3, "A background window counts every book")
+        manager.cancel()
+    }
+
+    /// Asking again for a queued book adds to its share rather than queuing it twice
+    /// or forgetting the first selection.
+    func testAskingAgainForAQueuedBookAddsItsChapters() throws {
+        let manager = try makeManager()
+        manager.restore([job(makeBook(id: "a"), ["1"]), job(makeBook(id: "b"), ["2"])])
+        manager.start(
+            book: makeBook(id: "b"), rule: makeRule(), chapters: [makeChapter("2"), makeChapter("3")]
+        )
+
+        XCTAssertEqual(manager.jobs.map(\.id), ["a", "b"])
+        XCTAssertEqual(manager.job(for: "b")?.remaining.map(\.id), ["2", "3"])
+        XCTAssertEqual(manager.job(for: "b")?.total, 2)
+        manager.cancel()
+    }
+
+    /// Cancelling one book is not cancelling the queue — and a queue that was stopped
+    /// stays stopped, because a book leaving it is not the reader saying go.
+    func testCancellingOneBookLeavesTheRestQueued() throws {
+        let manager = try makeManager()
+        manager.restore([job(makeBook(id: "a"), ["1"]), job(makeBook(id: "b"), ["2"])])
+
+        manager.cancel(bookId: "a")
+
+        XCTAssertEqual(manager.jobs.map(\.id), ["b"])
+        XCTAssertEqual(manager.status, .paused)
+        XCTAssertTrue(manager.canResume)
+        manager.cancel()
+    }
+
+    /// The point of holding a book rather than stopping the queue: the books behind it
+    /// go first, and the held one keeps its place for when it is let go.
+    func testAPausedBookIsSteppedOver() throws {
+        let manager = try makeManager()
+        manager.restore([job(makeBook(id: "a"), ["1"]), job(makeBook(id: "b"), ["2"])])
+        manager.pause(bookId: "a")
+
+        manager.resume()
+
+        XCTAssertTrue(manager.isBusy)
+        XCTAssertEqual(manager.activeBookId, "b")
+        XCTAssertEqual(manager.job(for: "a")?.hold, .paused)
+        XCTAssertEqual(manager.jobs.map(\.id), ["a", "b"], "Held, not moved")
+        manager.cancel()
+    }
+
+    /// Every book held is a queue with nothing it can do: it must come to rest, not
+    /// claim to be running, and not offer a resume that would start nothing.
+    func testAQueueWhoseBooksAreAllPausedComesToRest() throws {
+        let manager = try makeManager()
+        manager.restore([job(makeBook(id: "a"), ["1"])])
+        manager.pause(bookId: "a")
+
+        manager.resume()
+
+        XCTAssertFalse(manager.isBusy)
+        XCTAssertFalse(manager.canResume)
+        manager.resume(bookId: "a")
+        XCTAssertTrue(manager.isBusy, "Letting the book go is what sets it going")
+        manager.cancel()
+    }
+
+    /// The point of the queue: one book running out hands straight on to the next,
+    /// inside the same run. A feed throws on download without touching the network,
+    /// so its only chapter is dropped and the book empties — the hand-over moment.
+    func testABookRunningOutHandsOnToTheNext() throws {
+        let manager = try makeManager()
+        let feed = makeBook(id: "a", kind: .feed)
+        manager.start(book: feed, rule: makeRule(), chapters: [makeChapter("1")])
+        manager.start(book: makeBook(id: "b"), rule: makeRule(), chapters: [makeChapter("2")])
+
+        waitUntil { manager.activeBookId == "b" }
+
+        XCTAssertEqual(manager.activeBookId, "b", "The next book must start by itself")
+        XCTAssertTrue(manager.isBusy, "…as part of the run, not left paused")
+        XCTAssertNil(manager.job(for: "a"), "A finished book leaves the queue")
+        manager.cancel()
+    }
+
+    /// A book whose chapters keep failing is held, with the reason on its row, and the
+    /// books behind it go on — one broken book used to stop every download behind it.
+    func testAStreakHoldsTheBookAndTheQueueGoesOn() throws {
+        let manager = try makeManager()
+        let feed = makeBook(id: "a", kind: .feed)
+        manager.start(
+            book: feed, rule: makeRule(),
+            chapters: [makeChapter("1"), makeChapter("2"), makeChapter("3")]
+        )
+        manager.start(book: makeBook(id: "b"), rule: makeRule(), chapters: [makeChapter("4")])
+
+        waitUntil(seconds: 20) { manager.activeBookId == "b" }
+
+        let held = manager.job(for: "a")
+        XCTAssertEqual(held?.hold, .paused)
+        XCTAssertEqual(held?.remaining.map(\.id), ["3"], "The third failure keeps its place")
+        XCTAssertNotNil(held?.note, "…and says why")
+        XCTAssertEqual(manager.activeBookId, "b")
+        manager.cancel()
+    }
+
+    /// Spins the run loop, which is what lets the run task make progress.
+    private func waitUntil(seconds: Double = 8, _ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition(), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
     }
 
     /// Backgrounding buys about thirty seconds to finish the chapter in flight,
@@ -155,9 +281,9 @@ final class DownloadManagerTests: XCTestCase {
 
     /// A cancelled run still executes its own teardown: the task body is already
     /// scheduled, so it runs once and reaches its `defer`. That teardown must not
-    /// release a hold taken out by the run that replaced it — a background window
-    /// told "the queue is at rest" before its first chapter had even been requested
-    /// would hand the system's time straight back, having fetched nothing.
+    /// release a hold taken out by the run that replaced it — a background assertion
+    /// told "the queue is at rest" before the chapter in flight had landed would hand
+    /// the system's time straight back, and the chapter would be fetched again.
     func testTheTeardownOfAReplacedRunDoesNotReleaseTheNewOne() async throws {
         let manager = try makeManager()
         manager.start(
@@ -166,7 +292,8 @@ final class DownloadManagerTests: XCTestCase {
         manager.pause()
         var released = false
 
-        manager.resume { released = true }
+        manager.resume()
+        manager.stopAfterCurrentChapter(reason: "background") { released = true }
         // Let the cancelled run's body get as far as its defer.
         for _ in 0..<5 { await Task.yield() }
 
@@ -201,7 +328,7 @@ final class DownloadManagerTests: XCTestCase {
             "three in a row is no longer a claim about chapters"
         )
         XCTAssertEqual(
-            manager.remaining.map(\.id), ["3", "4", "5"],
+            manager.current?.remaining.map(\.id), ["3", "4", "5"],
             "and the chapter that hit the limit keeps its place, never having had a fair go"
         )
         manager.cancel()
@@ -254,7 +381,7 @@ final class DownloadManagerTests: XCTestCase {
         let book = makeBook()
         manager.start(book: book, rule: rule, chapters: [makeChapter("2"), makeChapter("3")])
         XCTAssertFalse(manager.completeIfStillQueued(makeChapter("1")))
-        XCTAssertEqual(manager.progress?.completed, 0, "A rejected chapter must not count as progress")
+        XCTAssertEqual(manager.current?.completed, 0, "A rejected chapter must not count as progress")
         manager.cancel()
     }
 

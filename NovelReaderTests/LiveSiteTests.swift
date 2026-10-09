@@ -155,7 +155,7 @@ final class LiveSiteTests: XCTestCase {
         try await Task.sleep(for: .seconds(6))
 
         XCTAssertEqual(manager.status, .idle, "A cancelled run must settle as idle")
-        XCTAssertNil(manager.progress)
+        XCTAssertTrue(manager.jobs.isEmpty)
         print("\n=== cancel-mid-download: survived, status=\(manager.status) ===\n")
     }
 

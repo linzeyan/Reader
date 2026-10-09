@@ -898,38 +898,21 @@ private struct BookDownloadSection: View {
     @Environment(AppEnvironment.self) private var env
 
     var body: some View {
-        // Only while there is a run to show. A finished run clears its
-        // progress, so this section cannot outlive the download.
-        if let progress = env.downloader.progress, progress.bookId == bookId,
-           env.downloader.status == .running || env.downloader.status == .paused {
+        // Only while the book is queued. A finished book leaves the queue, so this
+        // section cannot outlive its download.
+        if let job = env.downloader.job(for: bookId) {
             Section("book.downloading") {
-                VStack(alignment: .leading, spacing: 8) {
-                    ProgressView(value: progress.fraction) {
-                        Text("book.download.progress \(progress.completed) \(progress.total)")
+                DownloadJobRow(job: job, showsTitle: false, onCancel: onCancel)
+                // From the one book to the whole queue, once there is more than this
+                // book in it — the question "what else is it doing first?" starts here.
+                if env.downloader.jobs.count > 1 {
+                    NavigationLink {
+                        DownloadQueueView()
+                    } label: {
+                        Text("downloads.queue.link \(env.downloader.jobs.count)")
                             .font(.footnote)
                     }
-                    if let error = env.downloader.lastError {
-                        Text(error).font(.caption).foregroundStyle(.orange)
-                    }
-                    HStack {
-                        if env.downloader.isBusy {
-                            Button("book.download.pause") { env.downloader.pause() }
-                        } else if env.downloader.canResume {
-                            Button("book.download.resume") { env.requestResume() }
-                        }
-                        Spacer()
-                        Button("common.cancel", role: .destructive) {
-                            env.downloader.cancel()
-                            onCancel()
-                        }
-                    }
-                    .font(.footnote)
-                    // Not decoration. A `List` row is one tappable control, so two
-                    // buttons sharing a row both fire on any tap in it: "pause" ran
-                    // `pause()` and then `cancel()`, and the download queue the reader
-                    // meant to keep was gone — with the row that would have explained it.
-                    // `.borderless` is what gives each button its own hit area back.
-                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("downloads.queue.link")
                 }
             }
         }

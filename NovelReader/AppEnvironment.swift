@@ -51,7 +51,6 @@ final class AppEnvironment {
     let retentionSettings: FeedRetentionSettings
     let localImporter: LocalBookImporter
     let comicImporter: ComicArchiveImporter
-    let backgroundDownloads: BackgroundDownloads
     /// The voice, and the sentences waiting for it.
     ///
     /// Here rather than on the reader's model for the reason the download queue is here:
@@ -67,23 +66,19 @@ final class AppEnvironment {
     /// thing this app does that cannot be watched while it happens, so `SpeechReader`
     /// holds it, and a stored-property initialiser cannot reach another stored property.
     let trace: TraceLog
+    /// Here rather than on the queue screen because the black it draws has to cover the
+    /// tab bar too, and going to the background has to end it.
+    let downloadFocus: DownloadFocus
     /// Owned but not exposed: nothing on screen asks about a queue read back from
     /// disk, it simply appears as the paused download it was when the app died.
     private let queueRestorer: DownloadQueueRestorer
 
-    /// The environment the running app is using, for the one caller that cannot be
-    /// handed it: `BGTaskScheduler`'s launch handler is registered before any view
-    /// exists and can fire without one ever existing.
-    ///
-    /// Also *the* environment, and the reason `makeShared` hands it back rather than
+    /// *The* environment, and the reason `makeShared` hands it back rather than
     /// building a second: SwiftUI evaluates a `WindowGroup`'s content closure more
     /// than once per launch, so a `@State` initialiser that constructs the graph
     /// constructs it once per evaluation — two databases, two web views, two
     /// download-queue restorers reading the same file — of which SwiftUI keeps one
     /// and silently drops the rest. Measured at two full builds per cold launch.
-    ///
-    /// Nil until a scene asks for one, which is what a background launch reads: no
-    /// scene means no window, and the fetcher's web view cannot work without one.
     private(set) static var live: AppEnvironment?
 
     /// The library, kept here so every screen sees the same list without each one
@@ -155,6 +150,7 @@ final class AppEnvironment {
         trace: TraceLog = .makeShared()
     ) {
         self.trace = trace
+        self.downloadFocus = DownloadFocus(trace: trace)
         self.speech = SpeechReader(trace: trace)
         self.database = database
         self.files = files
@@ -205,19 +201,11 @@ final class AppEnvironment {
         self.librarySettings = librarySettings
         self.retentionSettings = FeedRetentionSettings()
         self.mediaMode = librarySettings.defaultMediaMode
-        let backgroundDownloads = BackgroundDownloads(
-            downloader: downloader,
-            settings: downloadSettings,
-            connection: { monitor.connection },
-            trace: trace
-        )
-        self.backgroundDownloads = backgroundDownloads
         self.queueRestorer = DownloadQueueRestorer(
             store: queueStore,
             downloader: downloader,
             repo: repo,
             settings: downloadSettings,
-            record: backgroundDownloads,
             rule: { sites.rule(id: $0) },
             connection: { monitor.connection }
         )
@@ -968,7 +956,7 @@ final class AppEnvironment {
         // page's settings are a singleton the whole app reads, and what a deleted book was
         // read with is the only thing in them that belongs to one book.
         ReaderSettings.shared.forgetOverrides(forBook: book.id)
-        if downloader.progress?.bookId == book.id { downloader.cancel() }
+        downloader.cancel(bookId: book.id)
         reloadLibrary()
     }
 
@@ -1027,15 +1015,19 @@ final class AppEnvironment {
     /// the Wi-Fi-only policy a metered connection asks before it does.
     func requestDownload(book: Book, rule: SiteRule, chapters: [Chapter]) {
         // A new run gets a new decision — consent for the previous one says
-        // nothing about this one.
-        meteredConsent = false
+        // nothing about this one. A book added to a run already going joins that
+        // run, and resetting here would leave it on cellular with consent revoked,
+        // for the next path change to pause.
+        if !downloader.isBusy { meteredConsent = false }
         request(.start(book: book, rule: rule, chapters: chapters))
     }
 
     /// Resuming is a start as far as the data plan is concerned: the run may have
     /// been paused precisely because the connection changed.
-    func requestResume() {
-        request(.resume)
+    ///
+    /// - Parameter bookId: one book to let go again; nil for the whole queue.
+    func requestResume(bookId: String? = nil) {
+        request(.resume(bookId: bookId))
     }
 
     func confirmMeteredDownload() {
@@ -1064,7 +1056,9 @@ final class AppEnvironment {
         switch work {
         case .start(let book, let rule, let chapters):
             downloader.start(book: book, rule: rule, chapters: chapters)
-        case .resume:
+        case .resume(let bookId?):
+            downloader.resume(bookId: bookId)
+        case .resume(nil):
             downloader.resume()
         }
     }
@@ -1079,19 +1073,18 @@ final class AppEnvironment {
     /// chapter already on the wire, nowhere near enough for the queue. So the
     /// queue finishes that one chapter, then pauses with a reason, and the
     /// assertion is released the moment it comes to rest rather than being held
-    /// for the full grace period.
-    ///
-    /// What is left over is handed to `BGTaskScheduler`, which is the only way the
-    /// rest of a long book can arrive without the app being on screen.
+    /// for the full grace period. What is left over waits on disk for the app to
+    /// come back — see `DownloadQueueStore`.
     func enterBackground() {
         // Before the guard, not after it: the line is the dividing every other trace event
         // is read against, and it must not depend on whether a download happened to be
         // running.
         trace.notePhase(false)
-        // Before the guard as well, because this guard is the whole reason a background
-        // window may never have been asked for: `scheduleIfNeeded` is reached only
-        // through the drain below, so leaving with the queue merely *paused* rather than
-        // running arms nothing at all. A trace that only recorded the armed case could
+        // Focus exists to keep the app on screen; once it is not, the screen it dimmed
+        // has to come back to the reader's own brightness.
+        downloadFocus.stop()
+        // Before the guard as well: leaving with the queue merely *paused* rather than
+        // running drains nothing, and a trace that only recorded the draining case could
         // never show that.
         trace.note("bg enter busy=\(downloader.isBusy ? 1 : 0) left=\(downloader.remainingCount)")
         guard downloader.isBusy else { return }
@@ -1114,14 +1107,7 @@ final class AppEnvironment {
             }
         }
         downloader.stopAfterCurrentChapter(reason: reason) { [weak self] in
-            guard let self else { return }
-            self.endBackgroundAssertion()
-            // Asked for here, and only here, because this is the first moment the
-            // answer is known: the chapter that was on the wire may have been the
-            // last one. It is also the only place that knows the queue was stopped
-            // *by the app leaving* — a queue the user paused themselves must not be
-            // restarted behind their back.
-            self.backgroundDownloads.scheduleIfNeeded()
+            self?.endBackgroundAssertion()
         }
     }
 
@@ -1132,9 +1118,6 @@ final class AppEnvironment {
     /// Wi-Fi-only check earns its keep.
     func becomeActive() {
         trace.notePhase(true)
-        // Unconditionally, not only when this process left a queue running: a request can
-        // outlive the process that made it, and a launch finds it standing just the same.
-        backgroundDownloads.withdrawRequest()
         // Coming back to the app is opening it, as far as a subscription is concerned —
         // an app left in the background for a day and returned to is the commonest way
         // this one is "opened" at all. Gated on staleness like the launch sweep, so
@@ -1211,7 +1194,7 @@ final class AppEnvironment {
 struct MeteredDownloadRequest: Identifiable {
     enum Work {
         case start(book: Book, rule: SiteRule, chapters: [Chapter])
-        case resume
+        case resume(bookId: String?)
     }
 
     let id = UUID()

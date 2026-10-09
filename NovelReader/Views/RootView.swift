@@ -64,20 +64,20 @@ struct RootView: View {
                 // in the reader tripped over.
                 let stoppedTheQueue = env.downloader.pendingChallenge != nil
                 env.challenge = nil
-                env.downloader.pendingChallenge = nil
                 // Reclaim the web view from the sheet.
                 hostToken += 1
                 // Closing the sheet is the user saying the challenge is dealt with,
                 // and resuming is why they dealt with it — making them go find the
                 // paused row afterwards turned every verification into two chores.
-                // Dismissed without solving, the resumed queue meets the challenge
-                // again and this sheet comes straight back, which is the honest
-                // answer to that too.
-                if stoppedTheQueue { env.downloader.resume() }
+                // Dismissed without solving, the queue meets the wall again and pauses
+                // that site's books rather than putting this sheet straight back.
+                if stoppedTheQueue { env.downloader.retryAfterWall() }
             }
         }
         .onChange(of: env.downloader.pendingChallenge) { _, new in
-            if let new { env.challenge = new }
+            guard let new else { return }
+            if new.reload { env.fetcher.webView.load(URLRequest(url: new.url)) }
+            env.challenge = new
         }
         // The history's half of opening a book: it posts the target, this switches
         // tabs, and the library — the tab that owns books — builds the route. The
@@ -112,6 +112,25 @@ struct RootView: View {
                 importBanner
             }
         }
+        // Over the tabs and the banners, so focus download's black is the whole screen.
+        // The verification sheet still comes up over it: a sheet is a presentation of
+        // its own, above anything drawn here.
+        .overlay {
+            if env.downloadFocus.phase == .dark {
+                Color.black
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { env.downloadFocus.wake() }
+                    .statusBarHidden(true)
+                    .persistentSystemOverlays(.hidden)
+                    .accessibilityElement()
+                    .accessibilityLabel("downloads.focus.wake")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("downloads.focus.dark")
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.4), value: env.downloadFocus.phase == .dark)
         .animation(.snappy, value: env.banner)
         .animation(.snappy, value: importProgress == nil)
         // "Open with 書房" from Files, Mail or a browser (the document types are
@@ -304,4 +323,8 @@ struct ChallengeRequest: Identifiable, Equatable {
     let url: URL
     var reason: Reason = .verification
     var doing: Doing?
+    /// Set when the web view has gone elsewhere since the wall came down — the download
+    /// queue moved on to other books before putting the sheet up — so the sheet has to
+    /// load the page again rather than show whatever the web view is on now.
+    var reload = false
 }

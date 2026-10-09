@@ -28,6 +28,13 @@ enum ScreenWake {
         }
     }
 
+    /// Holds the screen awake for focus download. Never alongside a reader's reason: it is
+    /// held from the queue screen and ends when that screen goes, and no reader is ever
+    /// open over the queue screen.
+    static func holdForDownload(trace: TraceLog) {
+        apply("download", trace: trace)
+    }
+
     /// Lets the screen sleep again. The reader has been left, whatever it was holding it.
     static func release(trace: TraceLog) {
         apply(nil, trace: trace)

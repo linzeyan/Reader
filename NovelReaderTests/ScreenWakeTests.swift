@@ -81,6 +81,29 @@ final class ScreenWakeTests: XCTestCase {
         )
     }
 
+    /// Focus download is for a phone left on a table: a lock would stop the queue, so the
+    /// screen is held for as long as focus lasts and given back the moment it ends. A tap
+    /// on the black brings the queue back with a fresh countdown, not straight back to dark.
+    func testFocusDownloadHoldsTheScreenUntilItEnds() async throws {
+        let focus = DownloadFocus(trace: recording(), seconds: 1)
+
+        focus.start()
+        XCTAssertEqual(focus.phase, .counting(1))
+        XCTAssertTrue(UIApplication.shared.isIdleTimerDisabled)
+
+        let deadline = Date().addingTimeInterval(5)
+        while focus.phase != .dark, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(focus.phase, .dark)
+        focus.wake()
+        XCTAssertEqual(focus.phase, .counting(1))
+
+        focus.stop()
+        XCTAssertEqual(focus.phase, .off)
+        XCTAssertFalse(UIApplication.shared.isIdleTimerDisabled)
+    }
+
     // MARK: - Helpers
 
     /// A trace already recording, and a screen already let go — so that what the test

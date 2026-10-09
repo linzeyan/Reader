@@ -6,7 +6,7 @@ import Foundation
 /// 1. The fetcher owns a single WKWebView, so concurrency is impossible anyway.
 /// 2. These hosts sit behind Cloudflare. Hammering a challenged host is exactly
 ///    what gets an IP blocked, so fetches go through the shared `RequestPacer`
-///    and the queue *stops* on a challenge rather than retrying.
+///    and a challenged host is *stepped away from* rather than retried.
 /// 3. A paused queue must keep its remaining work, because the user resolving a
 ///    challenge and tapping resume is the normal path, not an error path.
 /// 4. That work has to outlive the process. An 800-chapter book takes far longer
@@ -20,30 +20,75 @@ import Foundation
 /// one costs nothing, because the restore drops what has since arrived. Writing
 /// per chapter would put a synchronous file write inside the fetch loop to record
 /// something the restore recomputes anyway.
+///
+/// Several books queue in the order they were asked for, each with a state of its own,
+/// and the queue works on the first one that is free to go. A book the reader paused,
+/// or one stuck behind a wall, keeps its place and is stepped over: one book that
+/// cannot move must not hold up every book behind it. Still one book at a time, for
+/// constraint 1 — a second book does not make the single web view any faster.
+///
+/// Walls follow from the same web view. The verification sheet hands it to the reader,
+/// so while the sheet is up nothing else can be fetched; it is therefore put up only
+/// once nothing else in the queue can go. Until then, every book on the challenged
+/// host waits — the next one would only meet the same wall — and the rest carry on.
 @MainActor
 @Observable
 final class DownloadManager {
     enum Status: Equatable {
         case idle
         case running
-        /// Stopped by the user, or by a challenge that needs a human.
+        /// Nothing being fetched, with books still queued: stopped from outside, or
+        /// every book left is held.
         case paused
         case finished
     }
 
-    struct Progress: Equatable {
-        var bookId: String
-        var bookTitle: String
-        var completed: Int
-        var total: Int
+    /// One book's share of the queue.
+    struct Job: Identifiable {
+        enum Hold: Equatable {
+            /// Waits for a tap: the reader paused it, or the queue gave up on it for now.
+            case paused
+            /// Waits for the verification sheet, which comes once nothing else can go.
+            case wall
+        }
 
+        var book: Book
+        var rule: SiteRule
+        /// Not yet fetched, in order.
+        var remaining: [Chapter]
+        var completed = 0
+        var total: Int
+        var hold: Hold?
+        /// What the reader needs to know about this book: pages a chapter came down
+        /// without, the wall it is waiting on, why the queue gave up on it.
+        var note: String?
+        /// Set when the reader closed a verification sheet for this book's host. A
+        /// wall again straight after means the check did not take.
+        var retryingWall = false
+
+        var id: String { book.id }
         var fraction: Double { total > 0 ? Double(completed) / Double(total) : 0 }
+
+        init(book: Book, rule: SiteRule, chapters: [Chapter], hold: Hold? = nil) {
+            self.book = book
+            self.rule = rule
+            remaining = chapters
+            total = chapters.count
+            self.hold = hold
+        }
     }
 
     private(set) var status: Status = .idle
-    private(set) var progress: Progress?
-    /// Last failure, kept for display; cleared when a new run starts.
+    /// Every queued book, in the order they were asked for. A finished book leaves.
+    private(set) var jobs: [Job] = []
+    /// The book the run is on.
+    private(set) var activeBookId: String?
+    /// Why the whole queue stopped, when something other than a book stopped it — the
+    /// app leaving the screen, a metered connection. A book's own reasons are its `note`.
     private(set) var lastError: String?
+    /// Counts chapters as they come off the queue, for screens that redraw their
+    /// chapter list when one lands.
+    private(set) var landed = 0
     /// Set when a host escalated to an interactive challenge, or turned a
     /// signed-out reader away. The root view presents the fetcher's web view so
     /// the user can deal with it.
@@ -52,6 +97,8 @@ final class DownloadManager {
     /// words on the sheet and only the moment they are caught knows which one this
     /// is — by the time the root view sees it, an address is just an address.
     var pendingChallenge: ChallengeRequest?
+    /// The wall held books are waiting on, kept back until nothing else can go.
+    private var wall: ChallengeRequest?
 
     private let service: BookService
     private let downloads: DownloadStore
@@ -67,33 +114,27 @@ final class DownloadManager {
     /// Held because downloading is the one thing this app does that nobody is watching:
     /// it runs with the phone in a pocket, and once the moment has passed there is no
     /// other way to answer whether a queue started, what stopped it, or how much of it
-    /// was left. `BackgroundDownloads` records the *outcome* of a window; this records
-    /// the queue's own movements, which is what says why that outcome was the one.
+    /// was left.
     private let trace: TraceLog
     private var task: Task<Void, Never>?
 
-    /// Work not yet done, in order. Survives a pause so `resume()` picks up where
-    /// it left off, and a process death so the next launch can.
-    private(set) var remaining: [Chapter] = []
-    private var context: (book: Book, rule: SiteRule)?
     /// Chapters that have failed since the last one that landed.
     ///
-    /// Reset by every success and by every fresh `run`, so it counts a *streak* rather
-    /// than a total: three bad chapters spread through an 800-chapter book is a site
-    /// with three bad chapters, and the queue is right to walk past them.
+    /// Reset by every success, every fresh `run` and every change of book, so it counts
+    /// a *streak* rather than a total: three bad chapters spread through an 800-chapter
+    /// book is a site with three bad chapters, and the queue is right to walk past them.
     private var failureStreak = 0
     /// Set while the queue is meant to stop after the chapter on the wire.
     private(set) var isDraining = false
     private var drainReason: String?
-    /// Whatever is being held open until the queue comes to rest — a background
-    /// assertion, or a `BGTask` waiting to hand the system's time back.
+    /// The background assertion being held open until the queue comes to rest.
     private var onStopped: (() -> Void)?
     /// Which run the queue is on.
     ///
     /// A cancelled run still executes: the task body is scheduled, runs once, and
     /// reaches its `defer`. Without this it would release a hold taken out by the
-    /// run that *replaced* it — telling a background window its queue had come to
-    /// rest before the first chapter had even been requested.
+    /// run that *replaced* it — ending the background assertion of a drain asked of
+    /// the new run before that run had fetched anything.
     private var runToken = 0
     /// Chapters left before the run takes a longer rest. See `restIsDue`.
     private var chaptersUntilRest = 0
@@ -124,34 +165,68 @@ final class DownloadManager {
     static let failureLimit = 3
 
     var isBusy: Bool { status == .running }
-    var canResume: Bool { status == .paused && !remaining.isEmpty }
-    /// How many chapters the queue still owes. Read by the background task, which
-    /// has to be able to report how much a wake-up actually achieved — and whose
-    /// whole purpose is to answer whether it achieved anything at all.
-    var remainingCount: Int { remaining.count }
+    /// Whether the queue is stopped with a book free to go — what a resume would start.
+    var canResume: Bool { status == .paused && jobs.contains { $0.hold == nil } }
+    /// How many chapters the queue still owes, every book's.
+    var remainingCount: Int { jobs.reduce(0) { $0 + $1.remaining.count } }
+
+    /// The book at the front: the one being fetched, or the first in line.
+    var current: Job? { activeJob ?? jobs.first }
+
+    func job(for bookId: String) -> Job? {
+        jobs.first { $0.id == bookId }
+    }
+
+    private var activeIndex: Int? { activeBookId.flatMap(index(of:)) }
+    private var activeJob: Job? { activeIndex.map { jobs[$0] } }
+
+    private func index(of bookId: String) -> Int? {
+        jobs.firstIndex { $0.id == bookId }
+    }
 
     // MARK: - Control
 
-    /// Queues every chapter that is not already on disk.
+    /// Queues every chapter that is not already on disk, and sets the queue going.
+    ///
+    /// Behind whatever is already queued, never in place of it: a paused book is
+    /// still the reader's download. Asking again for a book already queued adds the
+    /// new chapters to its share and lifts whatever held it — the tap is the reader
+    /// asking for this book now.
     func start(book: Book, rule: SiteRule, chapters: [Chapter]) {
-        cancel()
         let pending = chapters.filter { !$0.isDownloaded }
         // Both numbers, because "nothing happened" has two different causes here and the
         // reader reports them identically: a tap that queued nothing because every chapter
         // was already on disk, and a tap that queued work which then stopped somewhere.
-        trace.note("dl start n=\(pending.count) of=\(chapters.count)")
-        guard !pending.isEmpty else {
-            finish()
-            return
+        trace.note("dl start n=\(pending.count) of=\(chapters.count) books=\(jobs.count)")
+        if let i = index(of: book.id) {
+            if book.id == activeBookId, status == .running {
+                // Appended only: the head is the chapter on the wire, and taking it
+                // out from under its fetch would end the run without a word.
+                let before = jobs[i].remaining.count
+                jobs[i].remaining = Self.merge(pending, into: jobs[i].remaining)
+                jobs[i].total += jobs[i].remaining.count - before
+            } else {
+                // Against the catalog it was tapped with, so chapters that have landed
+                // since drop out, and a book with nothing left leaves the queue.
+                let landedIds = Set(chapters.filter(\.isDownloaded).map(\.id))
+                jobs[i].remaining = Self.merge(
+                    pending, into: jobs[i].remaining.filter { !landedIds.contains($0.id) }
+                )
+                jobs[i].total = jobs[i].completed + jobs[i].remaining.count
+                jobs[i].hold = nil
+                jobs[i].note = nil
+                jobs[i].retryingWall = false
+                if jobs[i].remaining.isEmpty { jobs.remove(at: i) }
+            }
+        } else if !pending.isEmpty {
+            jobs.append(Job(book: book, rule: rule, chapters: pending))
         }
-        context = (book, rule)
-        remaining = pending
-        lastError = nil
-        progress = Progress(
-            bookId: book.id, bookTitle: book.shownName, completed: 0, total: pending.count
-        )
-        persistQueue()
-        run()
+        if status == .running {
+            persistQueue()
+        } else {
+            lastError = nil
+            run()
+        }
     }
 
     /// Installs a queue read back from disk, paused.
@@ -164,19 +239,18 @@ final class DownloadManager {
     /// Only ever called at launch, on an idle queue — which is why it does not
     /// tear down a running one first, and must not start doing so: `cancel()`
     /// would erase the very file this was read from.
-    func restore(book: Book, rule: SiteRule, chapters: [Chapter]) {
-        guard !chapters.isEmpty, status == .idle else { return }
-        context = (book, rule)
-        remaining = chapters
-        progress = Progress(
-            bookId: book.id, bookTitle: book.shownName, completed: 0, total: chapters.count
-        )
+    func restore(_ restored: [Job]) {
+        guard status == .idle, jobs.isEmpty else { return }
+        jobs = restored.filter { !$0.remaining.isEmpty }
+        guard !jobs.isEmpty else { return }
         status = .paused
         // Not written back. What is on disk is already a superset of this — the
         // restore only ever drops entries — and the next time the queue comes to
         // rest it writes the pruned version anyway.
     }
 
+    /// Stops the whole queue, every book keeping its place and its chapters.
+    ///
     /// - Parameter reason: shown where download failures are shown. Set when
     ///   something other than the user stopped the queue — a switch to cellular
     ///   under a Wi-Fi-only policy — because a queue that stops by itself with no
@@ -185,13 +259,44 @@ final class DownloadManager {
         // `auto` separates the two callers that matter: a reason means something other
         // than the user stopped this — backgrounding, a metered connection, a window
         // expiring — which is the case nobody can see happen.
-        trace.note("dl pause left=\(remaining.count) auto=\(reason == nil ? 0 : 1)")
+        trace.note("dl pause left=\(remainingCount) auto=\(reason == nil ? 0 : 1)")
         task?.cancel()
         task = nil
-        if !remaining.isEmpty { status = .paused }
+        activeBookId = nil
+        if !jobs.isEmpty { status = .paused }
         if let reason { lastError = reason }
         clearDrain()
         persistQueue()
+    }
+
+    /// Holds one book where it is; the books behind it go first.
+    func pause(bookId: String) {
+        guard let i = index(of: bookId) else { return }
+        trace.note("dl pause book left=\(jobs[i].remaining.count)")
+        jobs[i].hold = .paused
+        jobs[i].note = nil
+        if bookId == activeBookId, status == .running {
+            stopRun()
+            run()
+        } else {
+            persistQueue()
+        }
+    }
+
+    /// Lets a held book go again, at its own place in the queue. Sets the queue
+    /// going if it was stopped, because that is what the tap is for.
+    func resume(bookId: String) {
+        guard let i = index(of: bookId) else { return }
+        trace.note("dl resume book left=\(jobs[i].remaining.count)")
+        jobs[i].hold = nil
+        jobs[i].note = nil
+        jobs[i].retryingWall = false
+        if status == .running {
+            persistQueue()
+        } else {
+            lastError = nil
+            run()
+        }
     }
 
     /// Stops the queue after the chapter already on the wire, rather than
@@ -208,7 +313,7 @@ final class DownloadManager {
     ///   running, because an assertion held for a queue that already stopped is
     ///   time taken from the user for nothing.
     func stopAfterCurrentChapter(reason: String?, onStopped: @escaping () -> Void) {
-        trace.note("dl drain running=\(status == .running ? 1 : 0) left=\(remaining.count)")
+        trace.note("dl drain running=\(status == .running ? 1 : 0) left=\(remainingCount)")
         guard status == .running else {
             onStopped()
             return
@@ -221,59 +326,89 @@ final class DownloadManager {
         self.onStopped = onStopped
     }
 
-    /// - Parameter onStopped: called once the queue comes back to rest, however it
-    ///   ends — emptied, stuck on a challenge, or paused from outside. Set after
-    ///   `run`, which clears any hold a previous drain request left behind.
-    ///   `stopAfterCurrentChapter` uses the same slot: a background window wants
-    ///   the whole queue rather than one chapter, but wants telling at the same
-    ///   moment, because that is when it can hand the system's time back.
-    func resume(onStopped: (() -> Void)? = nil) {
+    /// Sets a stopped queue going again, at the first book free to go.
+    func resume() {
         // Before the guard: a resume that refuses is exactly the shape of "I pressed it
         // and nothing happened", and after the guard it would leave no line at all.
-        trace.note("dl resume can=\(canResume ? 1 : 0) left=\(remaining.count)")
+        trace.note("dl resume can=\(canResume ? 1 : 0) left=\(remainingCount)")
         guard canResume else { return }
-        pendingChallenge = nil
         lastError = nil
         run()
-        if let onStopped { self.onStopped = onStopped }
     }
 
-    func cancel() {
-        // Only when there was something to lose. `start` calls this first, so an
-        // unconditional line would put a "cancel" in front of every download ever begun.
-        if !remaining.isEmpty { trace.note("dl cancel left=\(remaining.count)") }
-        task?.cancel()
-        task = nil
-        remaining = []
-        context = nil
-        progress = nil
+    /// The reader closed the verification sheet: the books it held go again, the
+    /// one that hit the wall first.
+    ///
+    /// Closing the sheet is the user saying the challenge is dealt with. Dismissed
+    /// without solving, the retry meets the wall again — and that second wall is the
+    /// queue's cue to give up on the host for now rather than put the sheet straight
+    /// back. See `hitWall`.
+    func retryAfterWall() {
+        trace.note("dl wall retry")
         pendingChallenge = nil
+        wall = nil
+        for i in jobs.indices where jobs[i].hold == .wall {
+            jobs[i].hold = nil
+            jobs[i].note = nil
+            jobs[i].retryingWall = true
+        }
+        if status == .running {
+            persistQueue()
+        } else {
+            lastError = nil
+            run()
+        }
+    }
+
+    /// Empties the whole queue, every book in it.
+    func cancel() {
+        // Only when there was something to lose. A line per call would put a "cancel"
+        // in every test teardown and every launch with nothing queued.
+        if remainingCount > 0 { trace.note("dl cancel left=\(remainingCount)") }
+        stopRun()
+        jobs = []
+        pendingChallenge = nil
+        wall = nil
         status = .idle
         pacer.reset()
         clearDrain()
         persistQueue()
     }
 
-    /// Parks the queue on something only the user can clear.
-    ///
-    /// The chapter is deliberately left at the head of `remaining`: whatever the
-    /// user does in the sheet, the retry after it has to be the chapter that hit
-    /// the wall, not the one after it.
-    private func hold(_ request: ChallengeRequest, because error: WebFetcher.FetchError) {
-        // The wall's kind, not its address: a queue parked on a sign-in and one parked on
-        // a verification look the same from outside and need opposite things from the user.
-        trace.note("dl held signIn=\(request.reason == .signIn ? 1 : 0) left=\(remaining.count)")
-        pendingChallenge = request
-        lastError = error.localizedDescription
-        status = .paused
-        persistQueue()
+    /// Takes one book out of the queue. When it was the one downloading, the next
+    /// book free to go carries on in its place.
+    func cancel(bookId: String) {
+        guard let i = index(of: bookId) else { return }
+        trace.note("dl cancel book left=\(jobs[i].remaining.count)")
+        jobs.remove(at: i)
+        if !jobs.contains(where: { $0.hold == .wall }) { wall = nil }
+        if bookId == activeBookId, status == .running {
+            stopRun()
+            run()
+        } else if jobs.isEmpty {
+            stopRun()
+            status = .idle
+            persistQueue()
+        } else {
+            persistQueue()
+        }
+    }
+
+    private func stopRun() {
+        task?.cancel()
+        task = nil
+        activeBookId = nil
+    }
+
+    /// `extra`'s chapters appended to `queued`, minus any already there.
+    private static func merge(_ extra: [Chapter], into queued: [Chapter]) -> [Chapter] {
+        let ids = Set(queued.map(\.id))
+        return queued + extra.filter { !ids.contains($0.id) }
     }
 
     // MARK: - Queue
 
     private func run() {
-        guard let context else { return }
-        status = .running
         // A drain request belongs to the run it was made for. Carried into the
         // next one it would stop that run after a single chapter, with nothing
         // on screen to explain why.
@@ -283,58 +418,66 @@ final class DownloadManager {
         // new run has to be allowed to find that out for itself.
         failureStreak = 0
         chaptersUntilRest = Self.sampleRestBlock()
+        // Not while the sheet is up: it has the web view, and a fetch would navigate
+        // it out from under the reader. Closing the sheet runs the queue again.
+        guard pendingChallenge == nil, pickNext() else {
+            settle()
+            return
+        }
+        status = .running
+        persistQueue()
         runToken += 1
         let token = runToken
         task = Task { [weak self] in
             guard let self else { return }
-            // Released on every exit — normal end, cancellation, challenge,
+            // Released on every exit — normal end, cancellation, every book held,
             // drain. A background assertion held past the point where the queue
             // stopped is time iOS took from the user for nothing. Only for this
             // run, though: see `runToken`.
             defer { if self.runToken == token { self.notifyStopped() } }
-            while !Task.isCancelled, let chapter = self.remaining.first {
+            // The book read afresh each chapter: it changes under this loop when one
+            // finishes, is paused, or hits a wall.
+            while !Task.isCancelled, let job = self.activeJob, let chapter = job.remaining.first {
                 do {
-                    let missing = try await self.download(
-                        chapter, of: context.book, from: context.rule
-                    )
+                    let missing = try await self.download(chapter, of: job.book, from: job.rule)
                     self.noteChapterSucceeded()
+                    guard self.completeIfStillQueued(chapter) else { return }
+                    self.wallCleared(on: job.rule.host)
                     // Said out loud, because this is the one thing a chapter on the
                     // device can now be that it could not be before: there, readable,
                     // and short a page. Silence would make the gap a surprise found
                     // offline, which is the whole reason the all-or-nothing rule was
                     // there in the first place.
                     if missing > 0 {
-                        self.lastError = String(
-                            localized: "downloads.chapter.missingPages \(chapter.title) \(missing)"
+                        self.setNote(
+                            String(localized: "downloads.chapter.missingPages \(chapter.title) \(missing)"),
+                            on: job.id
                         )
                     }
-                    guard self.completeIfStillQueued(chapter) else { return }
                     // After the removal, so the count is what is genuinely left. One line
                     // per chapter is the rate of the queue itself — paced, seconds apart —
                     // not a hot loop, and it is the only record of how far a window got.
-                    self.trace.note("dl ok left=\(self.remaining.count) missing=\(missing)")
+                    self.trace.note("dl ok left=\(self.remainingCount) missing=\(missing)")
                 } catch is CancellationError {
                     return
                 } catch WebFetcher.FetchError.challengePresented(let url) {
-                    // Stop dead. The chapter stays at the head of the queue, so
-                    // resuming after the user clears the challenge retries it.
-                    self.hold(
-                        ChallengeRequest(url: url, doing: .download(context.book.shownName)),
+                    // The chapter stays at the head of its book, so the retry after
+                    // the sheet is the chapter that hit the wall.
+                    self.hitWall(
+                        ChallengeRequest(url: url, doing: .download(job.book.shownName)),
                         because: WebFetcher.FetchError.challengePresented(url)
                     )
-                    return
                 } catch WebFetcher.FetchError.signInRequired(let url) {
-                    // The same stop for the same reason: nothing the queue can do
-                    // by itself will get the next chapter, and grinding through the
-                    // rest of the book collecting identical failures would only
+                    // The same hold for the same reason: nothing the queue can do by
+                    // itself will get this host's next chapter, and grinding through
+                    // the rest of the book collecting identical failures would only
                     // bury the one message that matters.
-                    self.hold(
+                    self.hitWall(
                         ChallengeRequest(
-                            url: url, reason: .signIn, doing: .download(context.book.shownName)
+                            url: url, reason: .signIn, doing: .download(job.book.shownName)
                         ),
                         because: WebFetcher.FetchError.signInRequired(url)
                     )
-                    return
                 } catch {
                     // A single unreadable chapter must not strand the rest of the
                     // book, so it is dropped from the queue and reported.
@@ -348,29 +491,30 @@ final class DownloadManager {
                     // resume, and my download queue vanished" is: the queue was not
                     // lost, it was eaten, one failing chapter at a time.
                     //
-                    // So a streak stops the run instead, with the queue intact and the
-                    // reason on screen. The chapter that hit the limit keeps its place
-                    // at the head — it was never given a fair attempt.
+                    // So a streak holds the book instead, with its chapters intact and
+                    // the reason on its row, and the books behind it carry on. The
+                    // chapter that hit the limit keeps its place at the head — it was
+                    // never given a fair attempt.
                     if self.noteChapterFailed() {
-                        // The queue stopping with work still in it, which is the outcome
-                        // `BackgroundDownloads` reports as `stalled` — this says why.
-                        self.trace.note("dl streak left=\(self.remaining.count)")
-                        self.lastError = String(
-                            localized: "downloads.paused.repeatedFailures \(error.localizedDescription)"
+                        self.trace.note("dl streak left=\(job.remaining.count)")
+                        self.holdActive(
+                            note: String(
+                                localized: "downloads.paused.repeatedFailures \(error.localizedDescription)"
+                            )
                         )
-                        self.status = .paused
-                        self.persistQueue()
-                        return
+                    } else {
+                        guard self.completeIfStillQueued(chapter) else { return }
+                        self.setNote(error.localizedDescription, on: job.id)
+                        self.trace.note("dl fail left=\(self.remainingCount)")
                     }
-                    self.lastError = error.localizedDescription
-                    guard self.completeIfStillQueued(chapter) else { return }
-                    self.trace.note("dl fail left=\(self.remaining.count)")
                 }
-                // Checked after both outcomes: a chapter that failed is still a
+                // Checked after every outcome: a chapter that failed is still a
                 // chapter this run is done with.
                 if self.haltIfDraining() { return }
-                if self.remaining.isEmpty { break }
-                await self.pacer.pace(host: context.rule.host)
+                // The next book in the same loop rather than through `run()`, which
+                // would clear the run's drain and failure state at every hand-over.
+                guard self.pickNext() else { break }
+                await self.pacer.pace(host: self.activeJob?.rule.host ?? job.rule.host)
                 if self.restIsDue() {
                     try? await Task.sleep(for: .seconds(Double.random(in: 15...45)))
                     // A drain asked for during the rest must not wait through one
@@ -379,10 +523,110 @@ final class DownloadManager {
                     if self.haltIfDraining() { return }
                 }
             }
-            if !Task.isCancelled && self.remaining.isEmpty {
-                self.finish()
+            if !Task.isCancelled { self.settle() }
+        }
+    }
+
+    /// Settles which book the run is on: the current one while it has work and
+    /// nothing holds it, otherwise the first book free to go. Returns false when no
+    /// book is.
+    private func pickNext() -> Bool {
+        if let i = activeIndex, jobs[i].remaining.isEmpty {
+            jobs.remove(at: i)
+            activeBookId = nil
+        }
+        if let job = activeJob, job.hold == nil { return true }
+        guard let next = jobs.first(where: { $0.hold == nil }) else {
+            activeBookId = nil
+            return false
+        }
+        activeBookId = next.id
+        // A streak of the last book's failures says nothing about this one.
+        failureStreak = 0
+        // Another book means another page in the web view, so the one that put up the
+        // wall will not be there by the time the sheet is.
+        wall?.reload = true
+        trace.note("dl next n=\(next.remaining.count) books=\(jobs.count)")
+        persistQueue()
+        return true
+    }
+
+    /// Holds every book on the host that put up a wall, and keeps the wall for later.
+    ///
+    /// Every book on the host, not just this one: the next would only meet the same
+    /// wall, and each attempt is one more request at a host already suspicious of us.
+    ///
+    /// A wall straight after the reader closed the sheet means the check did not
+    /// take — dismissed unsolved, or a clearance the host would not honour. Putting the
+    /// sheet straight back would make the reader fight the same wall again before any
+    /// other book could move, so the host's books are paused with the reason instead,
+    /// and a tap on resume tries them again.
+    private func hitWall(_ request: ChallengeRequest, because error: WebFetcher.FetchError) {
+        guard let job = activeJob else { return }
+        let host = job.rule.host
+        let gaveUp = job.retryingWall
+        // The wall's kind, not its address: a queue parked on a sign-in and one parked on
+        // a verification look the same from outside and need opposite things from the user.
+        trace.note(
+            "dl held signIn=\(request.reason == .signIn ? 1 : 0) gaveUp=\(gaveUp ? 1 : 0) "
+                + "left=\(job.remaining.count)"
+        )
+        for i in jobs.indices where jobs[i].rule.host == host && jobs[i].hold != .paused {
+            if gaveUp {
+                jobs[i].hold = .paused
+                jobs[i].note = String(localized: "downloads.wall.gaveUp")
+                jobs[i].retryingWall = false
+            } else {
+                jobs[i].hold = .wall
+                jobs[i].note = error.localizedDescription
             }
         }
+        if !gaveUp { wall = request }
+        persistQueue()
+    }
+
+    /// A chapter from `host` landed, so whatever check its books were retrying after
+    /// has taken.
+    private func wallCleared(on host: String) {
+        for i in jobs.indices where jobs[i].rule.host == host && jobs[i].retryingWall {
+            jobs[i].retryingWall = false
+        }
+    }
+
+    private func holdActive(note: String) {
+        guard let i = activeIndex else { return }
+        jobs[i].hold = .paused
+        jobs[i].note = note
+        persistQueue()
+    }
+
+    private func setNote(_ note: String, on bookId: String) {
+        guard let i = index(of: bookId) else { return }
+        jobs[i].note = note
+    }
+
+    /// Brings the queue to rest: finished when no book is left, paused otherwise.
+    ///
+    /// This is also where a kept-back wall is finally put to the reader — once no
+    /// book is free to go, the sheet can have the web view without taking it from
+    /// anything.
+    private func settle(reason: String? = nil) {
+        task = nil
+        activeBookId = nil
+        pacer.reset()
+        guard !jobs.isEmpty else {
+            finish()
+            return
+        }
+        status = .paused
+        if let reason { lastError = reason }
+        if pendingChallenge == nil, let wall,
+           !jobs.contains(where: { $0.hold == nil }),
+           jobs.contains(where: { $0.hold == .wall }) {
+            pendingChallenge = wall
+        }
+        trace.note("dl rest books=\(jobs.count) held=\(jobs.filter { $0.hold != nil }.count)")
+        persistQueue()
     }
 
     /// Fetches one chapter and puts it on the device.
@@ -439,15 +683,16 @@ final class DownloadManager {
 
     /// A completed run leaves nothing behind.
     ///
-    /// Keeping the last `progress` around left a full bar and a "cancel" button
-    /// sitting on the book screen after the download had finished — and it stayed
-    /// there through deleting the downloads, offering to cancel a run that had
-    /// been over for minutes. The chapter list already shows what is on disk;
-    /// the progress row exists only while there is progress.
+    /// Keeping the last book around left a full bar and a "cancel" button sitting
+    /// on the book screen after the download had finished — and it stayed there
+    /// through deleting the downloads, offering to cancel a run that had been over
+    /// for minutes. The chapter list already shows what is on disk; the progress
+    /// row exists only while there is progress.
     private func finish() {
         trace.note("dl done")
         status = .finished
-        progress = nil
+        activeBookId = nil
+        wall = nil
         pacer.reset()
         persistQueue()
     }
@@ -459,18 +704,10 @@ final class DownloadManager {
     /// the book screen would offer to continue a download that is over.
     private func haltIfDraining() -> Bool {
         guard isDraining else { return false }
-        // The count here is what a background window is worth knowing: it is the queue
-        // the next wake-up will be asked to finish.
-        trace.note("dl drained left=\(remaining.count)")
-        task = nil
-        if remaining.isEmpty {
-            finish()
-        } else {
-            status = .paused
-            lastError = drainReason
-            pacer.reset()
-            persistQueue()
-        }
+        // The count here is the queue the app will come back to.
+        trace.note("dl drained left=\(remainingCount)")
+        if let i = activeIndex, jobs[i].remaining.isEmpty { jobs.remove(at: i) }
+        settle(reason: drainReason)
         clearDrain()
         return true
     }
@@ -482,12 +719,17 @@ final class DownloadManager {
     /// never per chapter; see the type comment for why that is enough. An
     /// 800-chapter queue is a few kilobytes of short strings, so doing it on the
     /// main actor costs less than the layout pass that follows the status change.
+    ///
+    /// Only the reader's own pause is written down. A wall or a failure streak is a
+    /// judgement about this moment, and the next launch deserves a fresh attempt.
     private func persistQueue() {
-        guard let context, !remaining.isEmpty else {
-            queueStore.clear()
-            return
+        let books = jobs.filter { !$0.remaining.isEmpty }.map {
+            PersistedDownloadQueue.Entry(
+                bookId: $0.id, siteChapterIds: $0.remaining.map(\.siteChapterId),
+                paused: $0.hold == .paused && $0.note == nil
+            )
         }
-        queueStore.save(bookId: context.book.id, siteChapterIds: remaining.map(\.siteChapterId))
+        if books.isEmpty { queueStore.clear() } else { queueStore.save(books) }
     }
 
     private func clearDrain() {
@@ -547,8 +789,8 @@ final class DownloadManager {
         Int.random(in: 10...15)
     }
 
-    /// Takes `chapter` off the head of the queue. Returns false when it is no
-    /// longer there, and the caller must then stop.
+    /// Takes `chapter` off the head of the book being fetched. Returns false when it
+    /// is no longer there, and the caller must then stop.
     ///
     /// A fetch takes seconds, and `cancel()` empties the queue the moment the
     /// user taps — so by the time a fetch returns, the chapter it was for may be
@@ -556,9 +798,10 @@ final class DownloadManager {
     /// array and took the whole app down, which is what "download all, then
     /// cancel" did every time.
     func completeIfStillQueued(_ chapter: Chapter) -> Bool {
-        guard remaining.first?.id == chapter.id else { return false }
-        remaining.removeFirst()
-        progress?.completed += 1
+        guard let i = activeIndex, jobs[i].remaining.first?.id == chapter.id else { return false }
+        jobs[i].remaining.removeFirst()
+        jobs[i].completed += 1
+        landed += 1
         return true
     }
 }

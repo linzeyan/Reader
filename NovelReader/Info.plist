@@ -2,12 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Continues a chapter download that backgrounding had to pause. Must match
-	     BackgroundDownloads.identifier; iOS traps at registration otherwise. -->
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.zeyanlin.novelreader.downloads</string>
-	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
@@ -55,9 +49,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.7.3</string>
+	<string>1.8.0</string>
 	<key>CFBundleVersion</key>
-	<string>18</string>
+	<string>19</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -88,18 +82,12 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<!-- "processing" rather than an app-refresh window: a paced download of a long
-	     book is minutes of work, not seconds, and it is not a background URLSession
-	     either — the chapters come through the one WKWebView that holds the site's
-	     Cloudflare clearance cookie.
-
-	     "audio" is what lets a book go on being read aloud with the screen locked.
-	     It does not lift the limit above: the text a locked phone can read is the
-	     text already on disk, because fetching the next chapter still needs that web
-	     view and a window to run it in. See `SpeechReader`. -->
+	<!-- "audio" is what lets a book go on being read aloud with the screen locked.
+	     It does not let a locked phone fetch anything: the text it can read is the
+	     text already on disk, because fetching the next chapter needs the fetcher's
+	     web view and a window to run it in. See `SpeechReader`. -->
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>processing</string>
 		<string>audio</string>
 	</array>
 	<key>UILaunchScreen</key>

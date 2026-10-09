@@ -14,5 +14,11 @@
     <true/>
     <key>destination</key>
     <string>export</string>
+    <!-- Off, so the IPA carries the build number in Info.plist. On (Xcode's default),
+         the export asks App Store Connect and silently renumbers a taken build: a
+         1.7.3 (18) archive came out as a 1.7.3 (19) IPA, matching neither git nor
+         the tag. A taken number should fail at upload, where it can be seen. -->
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
 </dict>
 </plist>
