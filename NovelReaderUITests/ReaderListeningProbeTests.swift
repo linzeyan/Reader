@@ -38,9 +38,11 @@ final class ReaderListeningProbeTests: XCTestCase {
         )
         continueAfterFailure = false
         app = XCUIApplication()
+        // The trace on as well: the utterance rate and the size of each are written there
+        // (`SpeechReader.speechFields`), and they are the measure of the audio restarts.
         app.launchArguments = [
             "-NovelReaderDemoSeed", "-reader.mode", "scroll",
-            "-reader.speechPace", "0.8", "-reader.probe", "1"
+            "-reader.speechPace", "0.8", "-reader.probe", "1", "-trace.isOn", "YES"
         ]
         app.launch()
 

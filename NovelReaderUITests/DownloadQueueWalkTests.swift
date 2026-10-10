@@ -130,6 +130,49 @@ final class DownloadQueueWalkTests: XCTestCase {
         attach("focus-finished")
     }
 
+    /// What a running download says outside the queue: on its shelf row, and on its own
+    /// screen the way to the queue with the word that leaving the app pauses it — the
+    /// moment someone starts a download is the moment they are about to put the phone
+    /// down. One book, the case the queue link used to be missing for.
+    ///
+    /// Takes the first of the named books, a comic so it is still running when looked at,
+    /// and ends by cancelling it: a walk must not leave a download queued on a phone.
+    func testARunningDownloadShowsOnItsShelfRowAndItsBookScreen() throws {
+        let book = try XCTUnwrap(queuedBooks().first)
+        queue(book)
+
+        // Back to the shelf by a fresh launch, for the reason `launch(onto:)` gives — so
+        // the row can only say anything if the queue came back with the process.
+        launch(onto: book.kind)
+        app.openLibraryTab()
+        let row = app.descendants(matching: .any).matching(identifier: "library.book")
+            .containing(.staticText, identifier: book.title).firstMatch
+        app.reveal(row)
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "\(book.title) should be on the shelf")
+        // The icon, because it is the one part of the state that stands on its own: the row
+        // is a single button whose label merges every text in it (on the XR it read
+        // "結界師、田辺伊衛郎、0 / 4"). And it is drawn only while this is the book
+        // downloading — not waiting, not paused — whatever language the phone is in.
+        let running = row.images["library.book.download"]
+        XCTAssertTrue(running.waitForExistence(timeout: 60), "the row should show it downloading")
+        attach("shelf-row-running")
+
+        row.tap()
+        let hint = app.descendants(matching: .any)["downloads.focus.hint"].firstMatch
+        app.reveal(hint)
+        XCTAssertTrue(hint.waitForExistence(timeout: 30), "a running download says leaving pauses it")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["downloads.queue.link"].firstMatch.exists,
+            "and links to the queue, where focus download is, with only this book in it"
+        )
+        attach("book-screen-running")
+
+        let job = app.descendants(matching: .any).matching(identifier: "downloads.job").firstMatch
+        job.buttons.element(boundBy: 1).tap()
+        XCTAssertTrue(hint.waitForNonExistence(timeout: 10), "cancelled, the section goes")
+        attach("book-screen-cancelled")
+    }
+
     // MARK: - Steps
 
     private struct QueuedBook {
