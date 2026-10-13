@@ -13,10 +13,10 @@ android {
         applicationId = "com.zeyanlin.novelreader"
         minSdk = 26
         targetSdk = 37
-        // Versioned on its own, not from the iOS Info.plist: until the Android app reaches
-        // parity, calling it 1.8.x would promise features it does not have.
-        versionCode = 1
-        versionName = "0.1.0"
+        // Kept by hand in step with the iOS Info.plist now that the two apps match: the same
+        // marketing version, and the iOS build number as the code, so one number names a release.
+        versionCode = 20
+        versionName = "1.8.1"
     }
 
     buildFeatures {
