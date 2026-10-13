@@ -1,0 +1,71 @@
+name: Release
+
+# A version tag builds both apps from the same commit and publishes them together.
+# The IPA is unsigned on purpose: whoever installs it re-signs it with their own Apple ID
+# (Sideloadly, AltStore). The APK cannot be unsigned — Android refuses to install one — so
+# it carries the GitHub release key from the repository secrets.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    # Xcode 27, the one the App Store build comes from. Still a preview label on GitHub.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install xcodegen && xcodegen generate
+      - run: |
+          xcodebuild -project NovelReader.xcodeproj -scheme NovelReader \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/NovelReader.xcarchive \
+            CODE_SIGNING_ALLOWED=NO archive
+      # -exportArchive insists on signing, so the IPA is zipped by hand.
+      - run: |
+          mkdir build/Payload
+          cp -R build/NovelReader.xcarchive/Products/Applications/NovelReader.app build/Payload/
+          cd build && zip -qry "NovelReader-$GITHUB_REF_NAME-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ipa
+          path: build/*.ipa
+
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: base64 -d <<<"$KEYSTORE" > "$RUNNER_TEMP/release.p12"
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      - run: ./gradlew assembleRelease
+        env:
+          ANDROID_KEYSTORE: ${{ runner.temp }}/release.p12
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      - run: mv app/build/outputs/apk/release/app-release.apk "NovelReader-$GITHUB_REF_NAME.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: apk
+          path: android/*.apk
+
+  release:
+    needs: [ios, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" *.ipa *.apk --repo "$GITHUB_REPOSITORY" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
