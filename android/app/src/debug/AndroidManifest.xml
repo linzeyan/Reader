@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Exported so `adb shell am start` can reach it; debug builds only. -->
+        <activity
+            android:name=".ProbeActivity"
+            android:exported="true" />
+    </application>
+
+</manifest>

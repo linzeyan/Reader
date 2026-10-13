@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only directories a share can hand out: never the library or the downloads beside them. -->
+<paths>
+    <!-- Installed rules, shared as stored: what lands on disk is what this build reads back. -->
+    <files-path name="sites" path="sites/" />
+    <!-- Files written on their way out of the app. -->
+    <cache-path name="exports" path="Exports/" />
+</paths>

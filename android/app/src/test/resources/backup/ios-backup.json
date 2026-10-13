@@ -1,0 +1,232 @@
+{
+  "books" : [
+    {
+      "addedAt" : "2023-11-14T22:13:20Z",
+      "author" : "佚名",
+      "bookmarks" : [
+        {
+          "bookId" : "czbooks|100",
+          "characterOffset" : 0,
+          "createdAt" : "2025-06-15T15:06:40Z",
+          "excerpt" : "停在這裡。",
+          "id" : "czbooks|100|c3|2|0",
+          "paragraph" : 2,
+          "siteChapterId" : "c3"
+        }
+      ],
+      "coverURL" : "https://example.test/c.jpg",
+      "displayName" : "我的山海",
+      "fraction" : 0.5,
+      "highlights" : [
+        {
+          "bookId" : "czbooks|100",
+          "createdAt" : "2025-08-12T12:00:00Z",
+          "endCharacterOffset" : 5,
+          "endParagraph" : 1,
+          "excerpt" : "劃下的字",
+          "id" : "czbooks|100|c5|1|0|1|5",
+          "siteChapterId" : "c5",
+          "startCharacterOffset" : 0,
+          "startParagraph" : 1
+        }
+      ],
+      "kind" : "novel",
+      "lastReadAt" : "2025-10-09T08:53:20Z",
+      "position" : {
+        "anchor" : {
+          "characterOffset" : 12,
+          "paragraph" : 4
+        },
+        "siteChapterId" : "c7"
+      },
+      "siteBookId" : "100",
+      "siteId" : "czbooks",
+      "title" : "山海經",
+      "updatedAt" : "2025-10-09T08:53:20Z"
+    },
+    {
+      "addedAt" : "2023-11-14T22:15:00Z",
+      "bookmarks" : [
+
+      ],
+      "highlights" : [
+
+      ],
+      "kind" : "novel",
+      "siteBookId" : "200",
+      "siteId" : "czbooks",
+      "title" : "第二本",
+      "updatedAt" : "2023-11-14T22:15:00Z"
+    },
+    {
+      "addedAt" : "2023-11-14T22:16:40Z",
+      "bookmarks" : [
+        {
+          "bookId" : "local|deadbeef",
+          "characterOffset" : 0,
+          "createdAt" : "2023-11-14T22:18:20Z",
+          "id" : "local|deadbeef|00001|0|0",
+          "paragraph" : 0,
+          "siteChapterId" : "00001"
+        }
+      ],
+      "fraction" : 0.1,
+      "highlights" : [
+
+      ],
+      "kind" : "novel",
+      "lastReadAt" : "2023-11-14T22:16:40Z",
+      "position" : {
+        "anchor" : {
+          "characterOffset" : 0,
+          "paragraph" : 0
+        },
+        "siteChapterId" : "00001"
+      },
+      "siteBookId" : "deadbeef",
+      "siteId" : "local",
+      "title" : "匯入的書",
+      "updatedAt" : "2023-11-14T22:16:40Z"
+    }
+  ],
+  "createdAt" : "2025-10-10T12:40:00Z",
+  "rules" : [
+    {
+      "book" : {
+        "author" : {
+          "selector" : ".novel-detail .info .author a"
+        },
+        "category" : {
+          "selector" : "#novel-category"
+        },
+        "cover" : {
+          "attribute" : "src",
+          "selector" : ".novel-detail .thumbnail img"
+        },
+        "intro" : {
+          "selector" : ".novel-detail .description"
+        },
+        "status" : {
+          "selector" : ".novel-detail .state tr:first-child td:last-child"
+        },
+        "title" : {
+          "selector" : ".novel-detail .info .title"
+        }
+      },
+      "catalog" : {
+        "container" : "#chapter-list",
+        "linkSelector" : "li a",
+        "order" : "ascending"
+      },
+      "chapter" : {
+        "contentSelectors" : [
+          "div.content"
+        ],
+        "dropParagraphPatterns" : [
+          "^\\(本章完\\)$"
+        ],
+        "nextSelector" : "a.next-chapter",
+        "prevSelector" : "a.prev-chapter",
+        "stripSelectors" : [
+          "script",
+          "style",
+          "ins",
+          "iframe"
+        ],
+        "titleSelectors" : [
+          ".chapter-detail .name",
+          ".name"
+        ]
+      },
+      "host" : "czbooks.net",
+      "id" : "czbooks",
+      "idPatterns" : {
+        "bookId" : "/n/([0-9a-zA-Z]+)",
+        "chapterId" : "/n/[0-9a-zA-Z]+/([0-9a-zA-Z]+)"
+      },
+      "kind" : "novel",
+      "name" : "小說狂人",
+      "notes" : [
+        "CONFIRMED 2026-08-03 in a real Chrome: https://czbooks.net/ loads with no Cloudflare interstitial (Cloudflare Rocket Loader is active — inline handlers are rewritten — but the HTML is served normally). document.characterSet = UTF-8 on home, book, chapter and search pages.",
+        "CONFIRMED with book 《青山》 https://czbooks.net/n/s6ojkc : bookId regex '/n/([0-9a-zA-Z]+)' captures 's6ojkc' from both the book URL and the chapter URL, and does not match author URLs (/a/...) or search URLs (/s/...). chapterId regex does not match the book URL (no second path segment) and captures 's6675fe9' from https://czbooks.net/n/s6ojkc/s6675fe9. Catalog hrefs carry a '?chapterNumber=N' query which the chapterId regex correctly stops before.",
+        "CONFIRMED book fields on /n/s6ojkc: title '《青山》', author '會說話的肘子', cover 'https://czbooks.net/images/default_no_thumbnail.jpg' (this book has no real cover art; the selector points at div.novel-detail .thumbnail img which is the only cover node), category '玄幻奇幻', status '連載中', intro '洛城夜幕下的駿馬與少年郎…'.",
+        "KNOWN COSMETIC ISSUE: the title node literally contains the 《》 brackets ('《青山》'). There is no cleaner node on the page — og:title is '【免費小說】《青山》2026最新連載、線上看 | 小說狂人', which is worse. The site publishes no og:novel:* meta at all, so every book field is a selector.",
+        "CONFIRMED catalog lives on the book page itself (book URL == catalog URL). ul#chapter-list > li > a yielded 771 links for 青山, first '錯誤章' / last '第764章 不過如此武襄侯', in ascending reading order. The li.volume entries ('正文卷') carry no <a> so they are naturally skipped, and no navigation or other-book links are inside #chapter-list.",
+        "CONFIRMED chapter body is div.content. On https://czbooks.net/n/s6ojkc/s6675fe9 it returned 3521 chars starting '第1章 歸零 洛城，秋。空洞的辦公室裡，慘白的白熾燈下，中年醫生推了推鼻梁上的眼鏡。 “陳跡你好，我現在需要問你一些問題。你回答後，我會根據我的判斷，按照…'. Exactly one div.content exists on a chapter page. Paragraphs are separated by <br> (250 of them, no <p> and no child <div>).",
+        "CONFIRMED the largest-text-block heuristic would also land on div.content here (3521 chars, 0 links, beats div.main 3847 chars/17 links after the link penalty), but the selector is declared explicitly so a future ad block inside div.main cannot flip it.",
+        "CONFIRMED boilerplate: some chapters end with a literal '(本章完)' line (half-width parentheses) — seen on chapter s6675fe9, absent on z51cc7l. That is the only in-body boilerplate found across the two chapters sampled; there is no '請記住本站域名' style footer.",
+        "UNVERIFIED / KNOWN LIMITATION: the chapter title node is div.name and reads '《青山》第1章 歸零' — book title glued in front. Because of that prefix the extractor's title-echo dedupe does NOT strip the body's own repeated first line ('第1章 歸零') on chapters that carry one. No cleaner per-chapter title node exists on the page.",
+        "CONFIRMED search: the homepage has no <form>; search is JS-driven. czbooks.net/js/assets.js contains `searchUrl=\"//\"+window.searchUrl+\"/\"+encodeURIComponent(e)+\"?q=\"+encodeURIComponent(e)` with window.searchUrl = '//czbooks.net/s', i.e. GET https://czbooks.net/s/<q>?q=<q>. Navigating to https://czbooks.net/s/%E5%8A%8D?q=%E5%8A%8D returned a real result page (title '搜尋 劍 | 小說狂人') with 40 rows in the single ul.novel-list on the page.",
+        "CONFIRMED search rows: link 'li > div.novel-item > div.novel-item-cover-wrapper > a' -> https://czbooks.net/n/uefad, title '.novel-item-title' -> '劍來', cover 'img'. resultAuthorSelector is deliberately null: the extractor scopes row lookups via a.closest('li, tr, .item, .result, div'), which stops at div.novel-item-cover-wrapper — the author node (.novel-item-author) sits outside it, so any author selector would fall through to scope.querySelector and return the FIRST row's author for every row. Better to have no author than a wrong one.",
+        "UNVERIFIED: only one book (青山, 玄幻奇幻, 連載中) and two of its chapters were inspected. Completed books, 短篇, and 工口 categories were not checked for different markup."
+      ],
+      "search" : {
+        "method" : "GET",
+        "queryField" : "q",
+        "resultContainer" : "ul.novel-list",
+        "resultCoverSelector" : "img",
+        "resultLinkSelector" : "li > div.novel-item > div.novel-item-cover-wrapper > a",
+        "resultTitleSelector" : ".novel-item-title",
+        "url" : "https://czbooks.net/s/{query}?q={query}"
+      },
+      "urls" : {
+        "book" : "https://czbooks.net/n/{bookId}",
+        "catalog" : "https://czbooks.net/n/{bookId}",
+        "chapter" : "https://czbooks.net/n/{bookId}/{chapterId}"
+      }
+    }
+  ],
+  "settings" : {
+    "customPalette" : {
+      "background" : {
+        "colors" : {
+          "_0" : [
+            {
+              "alpha" : 1,
+              "blue" : 0.3,
+              "green" : 0.2,
+              "red" : 0.1
+            },
+            {
+              "alpha" : 1,
+              "blue" : 0.6,
+              "green" : 0.5,
+              "red" : 0.4
+            }
+          ]
+        }
+      },
+      "foreground" : {
+        "alpha" : 1,
+        "blue" : 0.9,
+        "green" : 0.9,
+        "red" : 0.9
+      }
+    },
+    "defaultMediaMode" : "text",
+    "downloadNetwork" : "wifiAndCellular",
+    "feedGrace" : 7,
+    "feedKeep" : 50,
+    "feedUnread" : 0,
+    "fontName" : "STSongti-TC-Regular",
+    "fontSize" : 22,
+    "home" : "library",
+    "keepScreenOn" : false,
+    "libraryGrouping" : "source",
+    "librarySort" : "recent",
+    "lineSpacing" : 8,
+    "onlyWithNewChapters" : false,
+    "pageTurn" : "both",
+    "paragraphSpacing" : 12,
+    "readerMode" : "paginated",
+    "readerOverridesByKind" : {
+      "feed" : {
+        "modeRaw" : "scroll"
+      }
+    },
+    "recentReadingCount" : 20,
+    "swipeToGoBack" : true,
+    "theme" : "custom"
+  },
+  "version" : 1
+}

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Downloads ask before spending cellular data, which needs to know the network is metered. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Reading aloud with the screen off: the process and its headphone buttons are kept by a
+         media-playback foreground service. Its notification is a media session's, which
+         Android 13 shows without asking for the notification permission. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!-- Without it, Android 11 hides the installed text-to-speech engines from this app. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
+    <!-- Cleartext allowed: iOS allows arbitrary loads in web content, and a source derived
+         from a pasted address may well be a plain-http site. Android cannot scope it to the
+         web view alone. -->
+    <application
+        android:name=".App"
+        android:usesCleartextTraffic="true"
+        android:label="@string/app_name"
+        android:theme="@style/App">
+        <!-- Handles its own configuration changes: recreating the activity would drop the
+             navigation stacks and detach the fetcher's web view mid-load. Compose relayouts.
+             singleTask: a file opened from another app reaches this one activity, instead of
+             starting a second in that app's task that would take the web view from this one. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:windowSoftInputMode="adjustResize"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- "Open with 書房" for the two types iOS declares. Content only: since Android 7 a
+                 file:// address cannot cross from one app to another. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/epub+zip" />
+            </intent-filter>
+            <!-- A share, for EPUB only: a share of text/plain is also every link and note shared
+                 from anywhere, and the app would sit in all those share sheets with nothing to
+                 import. A TXT arrives through "Open with". -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/epub+zip" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".services.SpeechService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+        <!-- Hands files to the share sheet, as iOS hands a ShareLink a file URL. Not exported:
+             a receiver reads only what one share granted it, and only from shared_files. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/shared_files" />
+        </provider>
+    </application>
+
+</manifest>
