@@ -266,7 +266,9 @@ enum ExtractorScript {
     ///     lost. Every address here is resolved against this instead.
     ///   - title: what the feed called the article, so a body that opens by repeating its
     ///     own headline — which most publishing platforms emit — does not print it twice.
-    static func article(baseURL: String, title: String?) throws -> String {
+    ///   - wholePage: the markup is the publisher's whole page (`fetchFullText`), not a
+    ///     feed's body, so the site's header and menus are around the piece.
+    static func article(baseURL: String, title: String?, wholePage: Bool) throws -> String {
         let base = try json(baseURL)
         let heading = try json(title ?? "")
         return """
@@ -274,6 +276,7 @@ enum ExtractorScript {
           \(helpers)
           var BASE = \(base);
           var TITLE = \(heading);
+          var WHOLE_PAGE = \(wholePage);
           var SKIP = {
             script: 1, style: 1, noscript: 1, iframe: 1, svg: 1, form: 1, button: 1,
             nav: 1, aside: 1, video: 1, audio: 1, canvas: 1, object: 1, embed: 1
@@ -334,19 +337,26 @@ enum ExtractorScript {
                 out.push({ text: '\\u2028' });
                 continue;
               }
-              var next = {
-                href: tag === 'a' ? (absolute(child.getAttribute('href')) || inherited.href) : inherited.href,
-                bold: inherited.bold || tag === 'strong' || tag === 'b',
-                italic: inherited.italic || tag === 'em' || tag === 'i',
-                code: inherited.code || tag === 'code' || tag === 'kbd' || tag === 'samp'
-              };
-              runs(child, next, out);
+              runs(child, styled(child, inherited), out);
             }
             return out;
           }
 
+          function styled(el, inherited) {
+            var tag = el.tagName.toLowerCase();
+            return {
+              href: tag === 'a' ? (absolute(el.getAttribute('href')) || inherited.href) : inherited.href,
+              bold: inherited.bold || tag === 'strong' || tag === 'b',
+              italic: inherited.italic || tag === 'em' || tag === 'i',
+              code: inherited.code || tag === 'code' || tag === 'kbd' || tag === 'samp'
+            };
+          }
+
+          // Starting from the node's own style, not a blank one: a bare `<a>` sitting
+          // in a container is emitted as a paragraph of its own, and walking only its
+          // children dropped its link (少數派's closing 「查看全文」 came out as text).
           function trimmedRuns(node) {
-            var out = runs(node, { href: null, bold: false, italic: false, code: false }, []);
+            var out = runs(node, styled(node, { href: null, bold: false, italic: false, code: false }), []);
             // Leading and trailing whitespace belongs to the markup's indentation, not
             // to the sentence.
             while (out.length && !out[0].text.trim()) out.shift();
@@ -495,7 +505,12 @@ enum ExtractorScript {
             }
           }
 
-          walk(document.body, 0);
+          // A page's menus are not always in `<nav>` (少數派's sit in a `<header>`), so a
+          // whole page is read from its one `<article>`; several are a listing, and none
+          // leaves the body. A feed's own body is never narrowed: an `<article>` in it is
+          // an embed, and taking it would drop the rest of the piece.
+          var articles = WHOLE_PAGE ? document.querySelectorAll('article') : [];
+          walk(articles.length === 1 ? articles[0] : document.body, 0);
 
           // Publishers repeat the headline as the first line of the body constantly. Drop
           // that echo, but only at the very top and only where it is barely longer than
@@ -714,8 +729,11 @@ enum ExtractorScript {
               matched = s.type + ':' + (s.arrayPath || s.selector || '');
             }
           }
+          // A heading only, never `document.title`: that carries the site's name
+          // after the chapter's ("Episode 9: The Remedy - Pepper&Carrot"), which
+          // passes `Chapter.fullerTitle`'s prefix guard and was stored as the name.
           var heading = document.querySelector('h1');
-          var title = clean(heading ? heading.textContent : document.title);
+          var title = heading ? clean(heading.textContent) : '';
           return { imageURLs: urls, title: title || null, matchedStrategy: matched };
         })()
         """

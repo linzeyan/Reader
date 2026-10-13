@@ -137,6 +137,18 @@ final class ComicArchiveTests: XCTestCase {
     /// The point of splitting at all: the parts go back together. Imported in the
     /// wrong order, because that is the one a person will do by accident, and the
     /// order of the chapters is not allowed to depend on it.
+    /// Only the number an archive put in front to order its folders comes off. A
+    /// title that starts with a Han numeral, or with a number that is part of it,
+    /// is the chapter's name and must reach the reader whole.
+    func testOnlyAnOrderingNumberIsTakenOffAChapterName() {
+        XCTAssertEqual(ComicArchiveImporter.chapterTitle(of: "書/001 第01話"), "第01話")
+        XCTAssertEqual(ComicArchiveImporter.chapterTitle(of: "02_番外"), "番外")
+        XCTAssertEqual(ComicArchiveImporter.chapterTitle(of: "一騎當千"), "一騎當千")
+        XCTAssertEqual(ComicArchiveImporter.chapterTitle(of: "3月のライオン"), "3月のライオン")
+        XCTAssertEqual(ComicArchiveImporter.chapterTitle(of: "1話"), "1話")
+        XCTAssertEqual(ComicArchiveImporter.chapterTitle(of: "007"), "007")
+    }
+
     func testThePartsGoBackTogetherWhicheverOrderTheyAreImportedIn() async throws {
         let book = try makeComic(
             title: "長篇",

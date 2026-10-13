@@ -128,9 +128,14 @@ final class SearchDeriver {
     }
 
     /// Turns the URL a GET search landed on back into a `{query}` template.
+    ///
+    /// A submitted form writes a space as `+`, so a probe title with one (「ONE PIECE」)
+    /// is looked for that way too, or the landing never matches and the site is
+    /// reported as having no search.
     nonisolated static func template(from href: String, query: String) -> String? {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        for needle in [encoded, query] where !needle.isEmpty && href.contains(needle) {
+        let form = encoded.replacingOccurrences(of: "%20", with: "+")
+        for needle in [form, encoded, query] where !needle.isEmpty && href.contains(needle) {
             return href.replacingOccurrences(of: needle, with: "{query}")
         }
         return nil

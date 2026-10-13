@@ -200,6 +200,33 @@ final class ComicRuleTests: XCTestCase {
 
     // MARK: - Reading the pages off a chapter
 
+    /// The chapter name a page offers lengthens a truncated catalog name, so it must
+    /// be the chapter's alone. A page title is not: Pepper&Carrot's reads
+    /// "Episode 9: The Remedy - Pepper&Carrot", which starts with the catalog name
+    /// and so was stored over it, site and all.
+    @MainActor
+    func testAChapterIsNamedByItsHeadingNotThePageTitle() async throws {
+        let untitled = try await extractImages(
+            from: Self.comicJSON(),
+            html: """
+            <html><head><title>Episode 9: The Remedy - Pepper&amp;Carrot</title></head><body>
+              <div id="pics"><img s="https://img1.comic.test/1.jpg"></div>
+            </body></html>
+            """
+        )
+        XCTAssertNil(untitled.title)
+
+        let headed = try await extractImages(
+            from: Self.comicJSON(),
+            html: """
+            <html><head><title>第9話 - 某站</title></head><body>
+              <h1>第9話</h1><div id="pics"><img s="https://img1.comic.test/1.jpg"></div>
+            </body></html>
+            """
+        )
+        XCTAssertEqual(headed.title, "第9話")
+    }
+
     /// The site whose `<img>` tags are all in the DOM from the start, the real
     /// address parked in an attribute as `escape()` output, and `src` filled in
     /// later by the page's own lazy loader. Two traps live here, and both were

@@ -179,16 +179,18 @@ struct ComicArchiveImporter {
     /// A folder name without the number that ordered it.
     ///
     /// `001 第01話` → `第01話`; `第1話` is untouched, because its number is part of
-    /// what the chapter is called. A folder that is *only* a number keeps it —
+    /// what the chapter is called. Only decimal digits set off by a separator are
+    /// ordering: `isNumber` also takes Han numerals, which made `一騎當千` `騎當千`,
+    /// and `3月のライオン` is a name. A folder that is *only* a number keeps it —
     /// stripping would leave nothing to show.
     static func chapterTitle(of folder: String) -> String {
         let name = folder.split(separator: "/").last.map(String.init) ?? folder
-        let digits = name.prefix(while: \.isNumber)
-        guard !digits.isEmpty else { return name }
+        let separators: Set<Character> = [" ", ".", "-", "_"]
+        let digits = name.prefix { $0.unicodeScalars.first?.properties.numericType == .decimal }
         let rest = name.dropFirst(digits.count)
-            .drop { $0 == " " || $0 == "." || $0 == "-" || $0 == "_" }
-            .trimmingCharacters(in: .whitespaces)
-        return rest.isEmpty ? name : rest
+        guard !digits.isEmpty, let next = rest.first, separators.contains(next) else { return name }
+        let title = rest.drop { separators.contains($0) }.trimmingCharacters(in: .whitespaces)
+        return title.isEmpty ? name : title
     }
 
     // MARK: - Storing

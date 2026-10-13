@@ -59,6 +59,19 @@ final class SearchTests: XCTestCase {
         XCTAssertFalse(url.absoluteString.contains(" "), "raw space would make an invalid URL")
     }
 
+    /// A form submit writes a title's space as `+`; missing that left a comic site
+    /// probed with 「ONE PIECE」 looking as if it had no search at all.
+    func testTemplateRecognisesAFormEncodedSpace() {
+        XCTAssertEqual(
+            SearchDeriver.template(from: "https://demo.test/search?q=ONE+PIECE&t=1", query: "ONE PIECE"),
+            "https://demo.test/search?q={query}&t=1"
+        )
+        XCTAssertEqual(
+            SearchDeriver.template(from: "https://demo.test/search?q=ONE%20PIECE", query: "ONE PIECE"),
+            "https://demo.test/search?q={query}"
+        )
+    }
+
     /// A site whose rule has no search block must be reported as unsupported,
     /// not silently treated as "found nothing" — an all-sites search has to tell
     /// the user which sources it could not query.

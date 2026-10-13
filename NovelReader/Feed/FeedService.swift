@@ -192,7 +192,7 @@ final class FeedService {
         // resolves — the import view reads markup with a base of `about:blank`, and a
         // redirect to a canonical URL is what most of these links are.
         let script = try ExtractorScript.article(
-            baseURL: landed.absoluteString, title: chapter.title
+            baseURL: landed.absoluteString, title: chapter.title, wholePage: true
         )
         fetcher.holdImportView()
         defer { fetcher.releaseImportView() }
@@ -460,7 +460,7 @@ final class FeedService {
             // feed's address stands in where an item published none — same host, usually,
             // which is the whole of what a base is being asked for.
             let script = try ExtractorScript.article(
-                baseURL: item.url?.nonBlank ?? book.siteBookId, title: item.title
+                baseURL: item.url?.nonBlank ?? book.siteBookId, title: item.title, wholePage: false
             )
             // One article that will not read must not cost the refresh the other
             // forty-nine. It simply stays without text, which the reader reports as an

@@ -17,9 +17,10 @@ final class ArticleExtractionTests: XCTestCase {
     private func blocks(
         _ html: String,
         base: String = "https://example.com/posts/one/",
-        title: String? = nil
+        title: String? = nil,
+        wholePage: Bool = false
     ) async throws -> [ArticleBlock] {
-        let script = try ExtractorScript.article(baseURL: base, title: title)
+        let script = try ExtractorScript.article(baseURL: base, title: title, wholePage: wholePage)
         let payload = try await WebFetcher().extract(
             html: Data(html.utf8), extracting: script,
             as: ExtractorScript.ArticlePayload.self
@@ -127,6 +128,17 @@ final class ArticleExtractionTests: XCTestCase {
         )
         XCTAssertNil(blocks[0].runs[0].href)
         XCTAssertEqual(blocks[0].plainText, "See the other post for more.")
+    }
+
+    /// A link standing loose in a container is a paragraph of its own, and it is still
+    /// a link: 少數派's summaries end on a bare 「查看全文」 that came out as plain text.
+    func testALinkStandingOnItsOwnKeepsItsAddress() async throws {
+        let blocks = try await blocks("""
+        <html><body><div><p>The summary.</p><a href="/full/">查看全文</a></div></body></html>
+        """)
+
+        XCTAssertEqual(blocks.map(\.plainText), ["The summary.", "查看全文"])
+        XCTAssertEqual(blocks[1].runs.first?.href, "https://example.com/full/")
     }
 
     func testEmphasisIsCarriedByTheRunAndNotTheBlock() async throws {
@@ -244,6 +256,26 @@ final class ArticleExtractionTests: XCTestCase {
         """)
 
         XCTAssertEqual(blocks.map(\.plainText), ["The article."])
+    }
+
+    /// A publisher's whole page puts its menus around the piece, and not always in a
+    /// `<nav>`: 少數派's sit in a `<header>` and came out ahead of the article. Its one
+    /// `<article>` is the piece. A feed's own body is not narrowed that way — an
+    /// `<article>` inside it is an embed, not the post.
+    func testAWholePageIsReadFromItsArticle() async throws {
+        let page = """
+        <html><body>
+          <header><a href="/">共創</a><a href="/prime">PRIME</a><a href="/matrix">Matrix</a></header>
+          <article><p>The piece.</p></article>
+          <div><p>Related reading.</p></div>
+        </body></html>
+        """
+
+        let whole = try await blocks(page, wholePage: true)
+        XCTAssertEqual(whole.map(\.plainText), ["The piece."])
+
+        let fed = try await blocks(page)
+        XCTAssertEqual(fed.count, 3, "a feed's body keeps what is around an embedded article")
     }
 
     /// The shape a hand-written post arrives in: text and `<div>`s with no `<p>` at all,

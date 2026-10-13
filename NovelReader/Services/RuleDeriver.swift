@@ -130,17 +130,8 @@ final class RuleDeriver {
         let (group, inferred, catalogURL, chapters) = (best.group, best.inferred, best.catalogURL, best.chapters)
 
         let order = Self.order(texts: chapters.map(\.text))
-        guard let firstChapter = (order == .descending ? chapters.last : chapters.first),
-              let firstChapterURL = URL(string: firstChapter.href)
-        else { throw DeriveError.noChapterLinks }
-
-        // Probe the chapter page for a content selector before writing the rule,
-        // using the same heuristic the rule would fall back to. A named selector
-        // is preferred where the page offers one, because the heuristic can drift
-        // when a site adds a large sidebar.
-        let chapterProbe = try await fetcher.fetch(
-            firstChapterURL, extracting: Self.chapterProbe, as: ChapterProbe.self
-        )
+        let reading = order == .descending ? Array(chapters.reversed()) : chapters
+        guard let firstChapter = reading.first else { throw DeriveError.noChapterLinks }
 
         guard let title = Self.title(from: bookPage) else { throw DeriveError.noTitle }
         let catalogTemplate = URLPatternInference.template(
@@ -148,23 +139,65 @@ final class RuleDeriver {
         )
         let catalogContainer = group.container ?? "body"
 
-        // Comics are decided first, and the order is the decision. A comic chapter
-        // page is not silent — it carries credits, navigation and a footer — so
-        // "is there text here?" answers yes on both kinds of page. "Is there a
-        // named run of page images?" only answers yes on one.
-        //
-        // The first version of this also required the page's largest text block to
-        // be short, on the theory that a comic page has little text. Measured, that
-        // was wrong in a way worth recording: a comic page is *prose*-poor, not
-        // text-poor, and `largestTextBlock` on one settles for the biggest thing
-        // going — an options bar, a contributors list — which on both comic sites
-        // tested ran past a thousand characters and sent them down the novel path.
-        // What separates the two kinds is the run of images, so that is the whole
-        // test, and the six novel sites in `testDerivesWorkingRulesFromScratch` are
-        // the evidence it is enough: none of them has three images a single
-        // selector can name exactly.
-        if let images = chapterProbe.images, images.count >= Self.comicPageFloor {
-            let rule = Self.assemble(
+        // A catalog can open on a notice with no text (czbooks put a 「錯誤章」 first
+        // in 2026-10), so the next chapters get their turn before the site is given
+        // up on. The preview still names the catalog's first chapter.
+        for sample in reading.prefix(Self.sampleChapters) {
+            guard let sampleURL = URL(string: sample.href) else { continue }
+
+            // Probe the chapter page for a content selector before writing the rule,
+            // using the same heuristic the rule would fall back to. A named selector
+            // is preferred where the page offers one, because the heuristic can drift
+            // when a site adds a large sidebar.
+            let chapterProbe = try await fetcher.fetch(
+                sampleURL, extracting: Self.chapterProbe, as: ChapterProbe.self
+            )
+
+            // Comics are decided first, and the order is the decision. A comic chapter
+            // page is not silent — it carries credits, navigation and a footer — so
+            // "is there text here?" answers yes on both kinds of page. "Is there a
+            // named run of page images?" only answers yes on one.
+            //
+            // The first version of this also required the page's largest text block to
+            // be short, on the theory that a comic page has little text. Measured, that
+            // was wrong in a way worth recording: a comic page is *prose*-poor, not
+            // text-poor, and `largestTextBlock` on one settles for the biggest thing
+            // going — an options bar, a contributors list — which on both comic sites
+            // tested ran past a thousand characters and sent them down the novel path.
+            // What separates the two kinds is the run of images, so that is the whole
+            // test, and the six novel sites in `testDerivesWorkingRulesFromScratch` are
+            // the evidence it is enough: none of them has three images a single
+            // selector can name exactly.
+            if let images = chapterProbe.images, images.count >= Self.comicPageFloor {
+                let rule = Self.assemble(
+                    host: host,
+                    inferred: inferred,
+                    catalogTemplate: catalogTemplate,
+                    catalogContainer: catalogContainer,
+                    order: order,
+                    bookPage: bookPage,
+                    titleSelector: title.selector,
+                    content: .comic(images)
+                )
+                // The same confirmation the novel path gets, and for the same reason:
+                // the probe agreeing with itself proves nothing. This runs the rule
+                // that will be saved.
+                let pages = try await extractImages(with: rule, at: sampleURL)
+                guard pages.count >= Self.comicPageFloor else { continue }
+                return Draft(
+                    rule: rule,
+                    preview: Preview(
+                        bookTitle: title.text,
+                        author: bookPage.metas["og:novel:author"],
+                        chapterCount: chapters.count,
+                        firstChapterTitle: firstChapter.text.isEmpty ? nil : firstChapter.text,
+                        evidence: .pages(count: pages.count, first: pages.first ?? ""),
+                        warnings: [String(localized: "derive.warning.noSearch")]
+                    )
+                )
+            }
+
+            var rule = Self.assemble(
                 host: host,
                 inferred: inferred,
                 catalogTemplate: catalogTemplate,
@@ -172,13 +205,27 @@ final class RuleDeriver {
                 order: order,
                 bookPage: bookPage,
                 titleSelector: title.selector,
-                content: .comic(images)
+                content: .novel(chapterProbe)
             )
-            // The same confirmation the novel path gets, and for the same reason:
-            // the probe agreeing with itself proves nothing. This runs the rule
-            // that will be saved.
-            let pages = try await extractImages(with: rule, at: firstChapterURL)
-            guard pages.count >= Self.comicPageFloor else { throw DeriveError.emptyChapter }
+
+            // Confirmation: run the rule that will be saved against a real chapter.
+            // Anything short of this only proves the probes agreed with themselves.
+            var paragraphs = try await extractChapter(with: rule, at: sampleURL)
+            if Self.joined(paragraphs).count < 100, rule.chapter?.contentSelectors.first != nil {
+                // The named selector matched an empty or near-empty node. The
+                // heuristic is the better bet at that point — it is what found the
+                // text during the probe.
+                rule = Self.replacingContentSelectors(in: rule, with: [])
+                paragraphs = try await extractChapter(with: rule, at: sampleURL)
+            }
+            guard Self.joined(paragraphs).count >= 100 else { continue }
+
+            var warnings: [String] = []
+            if rule.chapter?.contentSelectors.first == nil {
+                warnings.append(String(localized: "derive.warning.heuristicContent"))
+            }
+            warnings.append(String(localized: "derive.warning.noSearch"))
+
             return Draft(
                 rule: rule,
                 preview: Preview(
@@ -186,58 +233,22 @@ final class RuleDeriver {
                     author: bookPage.metas["og:novel:author"],
                     chapterCount: chapters.count,
                     firstChapterTitle: firstChapter.text.isEmpty ? nil : firstChapter.text,
-                    evidence: .pages(count: pages.count, first: pages.first ?? ""),
-                    warnings: [String(localized: "derive.warning.noSearch")]
+                    evidence: .text(String(Self.joined(paragraphs).prefix(160))),
+                    warnings: warnings
                 )
             )
         }
-
-        var rule = Self.assemble(
-            host: host,
-            inferred: inferred,
-            catalogTemplate: catalogTemplate,
-            catalogContainer: catalogContainer,
-            order: order,
-            bookPage: bookPage,
-            titleSelector: title.selector,
-            content: .novel(chapterProbe)
-        )
-
-        // Confirmation: run the rule that will be saved against a real chapter.
-        // Anything short of this only proves the probes agreed with themselves.
-        var paragraphs = try await extractChapter(with: rule, at: firstChapterURL)
-        if Self.joined(paragraphs).count < 100, rule.chapter?.contentSelectors.first != nil {
-            // The named selector matched an empty or near-empty node. The
-            // heuristic is the better bet at that point — it is what found the
-            // text during the probe.
-            rule = Self.replacingContentSelectors(in: rule, with: [])
-            paragraphs = try await extractChapter(with: rule, at: firstChapterURL)
-        }
-        guard Self.joined(paragraphs).count >= 100 else { throw DeriveError.emptyChapter }
-
-        var warnings: [String] = []
-        if rule.chapter?.contentSelectors.first == nil {
-            warnings.append(String(localized: "derive.warning.heuristicContent"))
-        }
-        warnings.append(String(localized: "derive.warning.noSearch"))
-
-        return Draft(
-            rule: rule,
-            preview: Preview(
-                bookTitle: title.text,
-                author: bookPage.metas["og:novel:author"],
-                chapterCount: chapters.count,
-                firstChapterTitle: firstChapter.text.isEmpty ? nil : firstChapter.text,
-                evidence: .text(String(Self.joined(paragraphs).prefix(160))),
-                warnings: warnings
-            )
-        )
+        throw DeriveError.emptyChapter
     }
 
     /// How many page images make a comic. Three, because two is a chapter header
     /// and its first panel on a novel site's illustrated page, and because every
     /// comic chapter worth reading has more.
     private static let comicPageFloor = 3
+
+    /// Chapters tried for text, in reading order: enough to step past a notice or
+    /// two, not so many that a site with no text costs a dozen requests.
+    private static let sampleChapters = 3
 
     private func extractChapter(with rule: SiteRule, at url: URL) async throws -> [String] {
         let payload = try await fetcher.fetch(
