@@ -3784,25 +3784,25 @@
       }
     },
     "library.add" : {
-      "comment" : "Add a bookmark by pasting a link.",
+      "comment" : "Title of the add sheet and the shelf's add button, the same on every shelf: novels, comics and feeds are all pasted there and told apart by themselves.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add Book"
+            "value" : "Add to Library"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "添加书籍"
+            "value" : "添加到书架"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "加入書籍"
+            "value" : "加入書櫃"
           }
         }
       }
@@ -3851,6 +3851,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入"
+          }
+        }
+      }
+    },
+    "library.add.copiedFailures" : {
+      "comment" : "The add sheet's copy button once pressed: the addresses that were not added are on the pasteboard.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copied"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已复制"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已複製"
+          }
+        }
+      }
+    },
+    "library.add.copyFailures" : {
+      "comment" : "Button under a finished batch with failures: copies every address that was not added, one per line.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Addresses Not Added"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制没有添加的网址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製沒有加入的網址"
           }
         }
       }
@@ -4009,19 +4057,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "One URL per line. Novels and comics can be mixed. For a site with no source yet, the app tries to create one."
+            "value" : "One URL per line. Novels, comics and feeds can be mixed. For a site with no source yet, the app tries to create one."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一行一个网址，小说与漫画可以混贴。还没有来源的网站，App 会尝试自动创建来源。"
+            "value" : "一行一个网址，小说、漫画与订阅源可以混贴。还没有来源的网站，App 会尝试自动创建来源。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一行一個網址，小說與漫畫可以混貼。還沒有來源的網站，App 會試著自動建立來源。"
+            "value" : "一行一個網址，小說、漫畫與訂閱源可以混貼。還沒有來源的網站，App 會試著自動建立來源。"
           }
         }
       }
@@ -4142,6 +4190,30 @@
         }
       }
     },
+    "library.add.subscribed %@" : {
+      "comment" : "A pasted or shared address that no source claims and that turned out to be a feed: the subscription's name. Said on the row because it lands on the subscriptions shelf, which may not be the shelf the reader is looking at.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · added to subscriptions"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 已加入订阅"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 已加入訂閱"
+          }
+        }
+      }
+    },
     "library.add.url" : {
       "comment" : "Text field placeholder.",
       "extractionState" : "manual",
@@ -4191,7 +4263,7 @@
       }
     },
     "library.copyLink" : {
-      "comment" : "Shelf row context menu: copy the URL the book came from.",
+      "comment" : "Shelf row swipe action (leading edge): copy the URL the book came from.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -5460,30 +5532,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "書名"
-          }
-        }
-      }
-    },
-    "library.subscribe" : {
-      "comment" : "Title of the sheet that adds feeds.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Subscribe"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新增订阅"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新增訂閱"
           }
         }
       }

@@ -15,8 +15,8 @@ android {
         targetSdk = 37
         // Kept by hand in step with the iOS Info.plist now that the two apps match: the same
         // marketing version, and the iOS build number as the code, so one number names a release.
-        versionCode = 20
-        versionName = "1.8.1"
+        versionCode = 22
+        versionName = "1.9.0"
     }
 
     buildFeatures {

@@ -46,6 +46,31 @@ class ChineseTextTest {
         assertEquals("鼠标", ChineseText.rendered("滑鼠", ChineseScript(Depth.PHRASES, Target.SIMPLIFIED)))
     }
 
+    /**
+     * OpenCC's character table alone is mainland traditional, and the character tier is the
+     * default: every 「為什麼」 and 「看著」 in a book came out 「爲什麼」 and 「看着」.
+     */
+    @Test
+    fun characterConversionWritesTaiwansFormsBothWays() {
+        val served = "为什么看着他吃饭，这里"
+        val shown = "為什麼看著他吃飯，這裡"
+        assertEquals(shown, ChineseText.rendered(served, ChineseScript(Depth.CHARACTERS, Target.TRADITIONAL)))
+        assertEquals(served, ChineseText.rendered(shown, ChineseScript(Depth.CHARACTERS, Target.SIMPLIFIED)))
+    }
+
+    /** The iOS case of the same name: ICU swapped these for variants Taiwan does not write. */
+    @Test
+    fun keepsCharactersThatAreAlreadyTraditional() {
+        val served = "破釜沉舟，彷徨，力挽狂澜，大汗淋漓，气势磅礴，坂本，喂！"
+        for (depth in listOf(Depth.CHARACTERS, Depth.PHRASES)) {
+            assertEquals(
+                "$depth",
+                "破釜沉舟，彷徨，力挽狂瀾，大汗淋漓，氣勢磅礴，坂本，喂！",
+                ChineseText.rendered(served, ChineseScript(depth, Target.TRADITIONAL)),
+            )
+        }
+    }
+
     @Test
     fun leavesTextWithNoChineseInItUntouched() {
         val english = "Chapter 17 — The Crossing"

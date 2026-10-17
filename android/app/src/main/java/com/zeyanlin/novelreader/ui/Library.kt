@@ -112,6 +112,14 @@ fun LibraryScreen() {
     val additions by app.additions.collectAsState()
     val importing by app.importProgress.collectAsState()
     var adding by rememberSaveable { mutableStateOf(false) }
+    // A page shared from another app, already being added: the sheet is where it is watched. Taken when the
+    // shelf comes up, so a share that launched the app is not missed for arriving before the shelf did.
+    val showAdditions by app.showAdditions.collectAsState()
+    LaunchedEffect(showAdditions) {
+        if (!showAdditions) return@LaunchedEffect
+        adding = true
+        app.showAdditions.value = false
+    }
     var feedMenu by remember { mutableStateOf(false) }
     var confirmingMarkAllRead by remember { mutableStateOf(false) }
     // Only the types this app reads. Opening a file from another app is a separate feature,
@@ -161,8 +169,6 @@ fun LibraryScreen() {
         app.prefs.edit().putBoolean(ONLY_WITH_NEW_CHAPTERS, on).apply()
     }
     var arranging by remember { mutableStateOf(false) }
-    // A book's name and the address the long press offers to copy.
-    var copying by remember { mutableStateOf<Pair<String, String>?>(null) }
     var renaming by remember { mutableStateOf<Book?>(null) }
     // The row a swipe left open. One at a time, shut by the next touch anywhere on the shelf — and that
     // touch does nothing else, as on iOS — so it is held here, where every row can see it.
@@ -215,7 +221,7 @@ fun LibraryScreen() {
                 MediaModePicker(mode) { app.mediaMode.value = it }
             },
             actions = {
-                BarButton(Symbols.Plus, if (feeds) "新增訂閱" else "加入書籍", enabled = importing == null) { adding = true }
+                BarButton(Symbols.Plus, "加入書櫃", enabled = importing == null) { adding = true }
                 if (feeds) {
                     // One menu, because a subscription list goes both ways: OPML is how forty feeds
                     // arrive from another reader, and a way out is what makes putting them in safe.
@@ -270,13 +276,13 @@ fun LibraryScreen() {
                         // is where one gets worked out. iOS also says "用搜尋"; not ported yet.
                         when (mode) {
                             SiteRule.Kind.FEED -> EmptyState(Symbols.Newspaper, "還沒有訂閱", "貼上訂閱源的網址就能加入，一次可以貼很多個。") {
-                                ProminentButton("新增訂閱") { adding = true }
+                                ProminentButton("加入書櫃") { adding = true }
                             }
                             SiteRule.Kind.COMIC -> EmptyState(Symbols.PhotoStack, "漫畫櫃是空的", "貼上網址加入第一本漫畫。") {
-                                ProminentButton("加入書籍") { adding = true }
+                                ProminentButton("加入書櫃") { adding = true }
                             }
                             SiteRule.Kind.NOVEL -> EmptyState(Symbols.BookClosed, "書櫃是空的", "貼上網址加入第一本書。") {
-                                ProminentButton("加入書籍") { adding = true }
+                                ProminentButton("加入書櫃") { adding = true }
                                 Spacer(Modifier.height(10.dp))
                                 BorderedButton("匯入檔案", onClick = pick)
                             }
@@ -320,21 +326,27 @@ fun LibraryScreen() {
                         Cell(
                             edge,
                             onClick = { unlessSwiped { nav.push(Route.BookDetail(row.book.id)) } },
-                            // A press rather than a third swipe: the two there change the shelf. Only where
-                            // there is an address — an imported file, or a removed source, has none to give.
-                            onLongClick = sourceUrl(row.book, rules)?.let { url -> { copying = row.book.shownName to url } },
                             separatorStart = RowPadding + 44.dp + 12.dp,
                             swipe = { content ->
                                 ShelfSwipe(
                                     open = swiped == row.book.id,
                                     onOpen = { swiped = if (it) row.book.id else null },
-                                    // A subscription's badge is a list of things waiting, and clearing it is part of
-                                    // reading rather than an edit — so no confirmation, as per article.
-                                    leading = if (feeds && row.unread > 0) {
-                                        SwipeAction("標為已讀", Symbols.EnvelopeOpen, p.blue) { scope.launch { app.library.markAllRead(row.book.id) } }
-                                    } else {
-                                        null
-                                    },
+                                    leading = listOfNotNull(
+                                        // A subscription's badge is a list of things waiting, and clearing it is part
+                                        // of reading rather than an edit — so no confirmation, as per article. First,
+                                        // so a full swipe clears it as it always has.
+                                        if (feeds && row.unread > 0) {
+                                            SwipeAction("標為已讀", Symbols.EnvelopeOpen, p.blue) { scope.launch { app.library.markAllRead(row.book.id) } }
+                                        } else {
+                                            null
+                                        },
+                                        // As plain text, for an address bar or a message; no confirmation, since pasting
+                                        // shows it worked. Only where there is an address — an imported file, or a
+                                        // removed source, has none to give. systemGray, iOS's untinted swipe action.
+                                        sourceUrl(row.book, rules)?.let { url ->
+                                            SwipeAction("複製原始網址", Symbols.Link, Color(0xFF8E8E93)) { clipboard.setText(AnnotatedString(url)) }
+                                        },
+                                    ),
                                     // A bookmark can be added again; an imported file cannot, so only it asks.
                                     confirmation = if (row.book.isLocal) LOCAL_DELETE else null,
                                     onDelete = { app.deleteBook(row.book.id) },
@@ -384,13 +396,6 @@ fun LibraryScreen() {
         }
     }
     if (adding) AddBookSheet { adding = false }
-    // As plain text, for an address bar or a message; no confirmation, since pasting shows it worked.
-    copying?.let { (name, url) ->
-        ActionSheet(name, "複製原始網址", destructive = false, onAction = {
-            clipboard.setText(AnnotatedString(url))
-            copying = null
-        }, onDismiss = { copying = null })
-    }
     if (confirmingMarkAllRead) {
         ActionSheet("將所有訂閱裡的文章全部標為已讀？", "全部標為已讀", destructive = false, onAction = {
             confirmingMarkAllRead = false
@@ -406,18 +411,25 @@ fun LibraryScreen() {
     }
 }
 
-/** Where a shelf row comes to rest when let go. */
-internal enum class SwipeRest { CLOSED, OPEN, DELETE, LEAD }
+/** Where a shelf row comes to rest when let go: [OPEN] on its trailing buttons, [LEAD_OPEN] on its leading ones. */
+internal enum class SwipeRest { CLOSED, OPEN, DELETE, LEAD_OPEN, LEAD }
 
 /**
- * The decision iOS's trailing swipe makes on release. [offset] is how far the row was dragged, left
- * negative; [reveal] is how wide its buttons are. Past half the buttons they stay out, and a flick opens
- * or shuts them whatever the distance. Past the midpoint between the buttons and the row's far edge it
- * deletes, as iOS's full swipe does — by distance alone, so speed never deletes by accident. Dragged the
- * other way past [lead], or flicked, it is the leading action; null when the row has none.
+ * The decision iOS's swipe actions make on release. [offset] is how far the row was dragged, left
+ * negative; [reveal] is how wide its trailing buttons are, [lead] its leading ones — null when it has
+ * none. Past half the buttons they stay out, and a flick opens or shuts them whatever the distance. Past
+ * the midpoint between the buttons and the row's far edge it does that edge's first action — deletes, or
+ * the first leading one — as iOS's full swipe does: by distance alone, so speed never deletes by accident.
  */
 internal fun swipeRest(offset: Float, velocity: Float, reveal: Float, width: Float, lead: Float?, fling: Float) = when {
-    offset > 0f -> if (lead != null && (offset >= lead || velocity > fling)) SwipeRest.LEAD else SwipeRest.CLOSED
+    offset > 0f -> when {
+        lead == null -> SwipeRest.CLOSED
+        offset > (lead + width) / 2 -> SwipeRest.LEAD
+        velocity > fling -> SwipeRest.LEAD_OPEN
+        velocity < -fling -> SwipeRest.CLOSED
+        offset > lead / 2 -> SwipeRest.LEAD_OPEN
+        else -> SwipeRest.CLOSED
+    }
     -offset > (reveal + width) / 2 -> SwipeRest.DELETE
     velocity < -fling -> SwipeRest.OPEN
     velocity > fling -> SwipeRest.CLOSED
@@ -426,13 +438,14 @@ internal fun swipeRest(offset: Float, velocity: Float, reveal: Float, width: Flo
 }
 
 /**
- * The shelf row's swipes, as iOS lays them out: left opens on 自訂書名 and 刪除 and stays open, or deletes
- * outright when dragged most of the way across; right is the one leading action, done and sprung back.
- * Its own rather than the shared swipe, which commits a single action per edge.
+ * The shelf row's swipes, as iOS lays them out: left opens on 自訂書名 and 刪除, right on the [leading]
+ * actions — 標為已讀 and 複製原始網址 — and either stays open, or does its edge's first action outright when
+ * dragged most of the way across. Its own rather than the shared swipe, which commits a single action
+ * per edge.
  */
 @Composable
 private fun ShelfSwipe(
-    open: Boolean, onOpen: (Boolean) -> Unit, leading: SwipeAction?, confirmation: String?,
+    open: Boolean, onOpen: (Boolean) -> Unit, leading: List<SwipeAction>, confirmation: String?,
     onDelete: () -> Unit, onRename: () -> Unit, content: @Composable () -> Unit,
 ) {
     val p = LocalPalette.current
@@ -444,8 +457,9 @@ private fun ShelfSwipe(
     var width by remember { mutableFloatStateOf(0f) }
     var asking by remember { mutableStateOf(false) }
     val reveal = with(density) { 160.dp.toPx() }
-    // SwipeToDismissBox's own thresholds, so 標為已讀 answers the drag it always did.
-    val lead = with(density) { 56.dp.toPx() }
+    // Wider than each of the trailing pair's 80: 複製原始網址 is six characters to their four, and clipped at
+    // 80 once the system font is a step larger.
+    val lead = if (leading.isEmpty()) null else with(density) { 96.dp.toPx() } * leading.size
     val fling = with(density) { 125.dp.toPx() }
 
     fun close() {
@@ -464,9 +478,14 @@ private fun ShelfSwipe(
         onRename()
         close()
     }
+    // Done and shut, as iOS shuts a row once one of its buttons has been pressed.
+    fun act(action: SwipeAction) {
+        action.act()
+        close()
+    }
     // Another row opened, or the shelf was touched elsewhere. Only a row resting open shuts: one on its
     // way off the edge is being deleted.
-    LaunchedEffect(open) { if (!open && offset.targetValue == -reveal) offset.animateTo(0f) }
+    LaunchedEffect(open) { if (!open && (offset.targetValue == -reveal || offset.targetValue == lead)) offset.animateTo(0f) }
     if (asking) {
         ActionSheet(confirmation, "刪除", onAction = {
             asking = false
@@ -478,19 +497,21 @@ private fun ShelfSwipe(
     }
     Box(
         Modifier.fillMaxWidth().onSizeChanged { width = it.width.toFloat() }.semantics {
-            // A swipe nobody using TalkBack can make: the same two, as actions on the row.
-            customActions = listOf(
+            // A swipe nobody using TalkBack can make: the same buttons, as actions on the row.
+            customActions = leading.map { CustomAccessibilityAction(it.label) { act(it); true } } + listOf(
                 CustomAccessibilityAction("自訂書名") { rename(); true },
                 CustomAccessibilityAction("刪除") { delete(); true },
             )
         },
     ) {
         val x = offset.value
-        if (x > 0f && leading != null) Row(
-            Modifier.matchParentSize().background(leading.color).padding(horizontal = 24.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(leading.icon, leading.label, tint = Color.White)
+        if (x > 0f && lead != null) Row(Modifier.matchParentSize()) {
+            Row(Modifier.fillMaxHeight().width(with(density) { x.toDp() })) {
+                // Past the line, the first takes the whole strip, as 刪除 does on the other edge.
+                for (action in if (x <= (lead + width) / 2) leading else leading.take(1)) {
+                    SwipeButton(action.label, action.icon, action.color) { act(action) }
+                }
+            }
         }
         if (x < 0f) Row(Modifier.matchParentSize(), horizontalArrangement = Arrangement.End) {
             Row(Modifier.fillMaxHeight().width(with(density) { (-x).toDp() })) {
@@ -502,21 +523,22 @@ private fun ShelfSwipe(
         Box(
             Modifier.offset { IntOffset(x.roundToInt(), 0) }.draggable(
                 rememberDraggableState { delta ->
-                    scope.launch { offset.snapTo((offset.value + delta).coerceIn(-width, if (leading != null) width else 0f)) }
+                    scope.launch { offset.snapTo((offset.value + delta).coerceIn(-width, if (lead != null) width else 0f)) }
                 },
                 Orientation.Horizontal,
                 onDragStopped = { velocity ->
-                    when (swipeRest(offset.value, velocity, reveal, width, if (leading != null) lead else null, fling)) {
+                    when (swipeRest(offset.value, velocity, reveal, width, lead, fling)) {
                         SwipeRest.OPEN -> {
                             onOpen(true)
                             offset.animateTo(-reveal)
                         }
+                        SwipeRest.LEAD_OPEN -> {
+                            onOpen(true)
+                            offset.animateTo(lead!!)
+                        }
                         SwipeRest.CLOSED -> close()
                         SwipeRest.DELETE -> delete()
-                        SwipeRest.LEAD -> {
-                            leading?.act()
-                            offset.animateTo(0f)
-                        }
+                        SwipeRest.LEAD -> act(leading.first())
                     }
                 },
             ),
@@ -708,12 +730,18 @@ private fun AddBookSheet(onDismiss: () -> Unit) {
     val additions by app.additions.collectAsState()
     val rules by app.sites.rules.collectAsState()
     val feeds = app.mediaMode.collectAsState().value == SiteRule.Kind.FEED
-    val title = if (feeds) "新增訂閱" else "加入書籍"
+    // One name on every shelf, as on iOS: novels, comics and feeds all go in here and are told apart by
+    // themselves, and a share runs here whichever shelf is up.
+    val title = "加入書櫃"
+    val clipboard = LocalClipboardManager.current
+    var copiedFailures by remember { mutableStateOf(false) }
     var text by rememberSaveable { mutableStateOf("") }
     // The same address twice is one: two more trips through a WAF for the same shelf.
     val urls = text.lines().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     val running = additions.any { it.state == App.Addition.State.WAITING || it.state == App.Addition.State.RUNNING }
     val failed = additions.count { it.state == App.Addition.State.FAILED }
+    // A share can start a new batch under a report left open; its failures have not been copied yet.
+    LaunchedEffect(running) { if (running) copiedFailures = false }
     LaunchedEffect(additions) {
         // Everything went in: nothing left to read here.
         if (additions.isNotEmpty() && !running && failed == 0) {
@@ -728,7 +756,7 @@ private fun AddBookSheet(onDismiss: () -> Unit) {
                 leading = { BarTextButton("取消", onClick = onDismiss) },
                 trailing = {
                     BarTextButton("加入", enabled = urls.isNotEmpty(), bold = true) {
-                        app.add(urls, if (feeds) App.AddKind.SUBSCRIPTION else App.AddKind.BOOK)
+                        app.add(urls, App.AddKind.pasted(app.mediaMode.value))
                     }
                 },
             )
@@ -755,7 +783,7 @@ private fun AddBookSheet(onDismiss: () -> Unit) {
                 if (feeds) {
                     footer("一行一個網址：訂閱源，或網站首頁（會自動找出它的訂閱源）。支援 RSS、Atom 與 JSON Feed。")
                 } else {
-                    footer("一行一個網址，小說與漫畫可以混貼。還沒有來源的網站，App 會試著自動建立來源。")
+                    footer("一行一個網址，小說、漫畫與訂閱源可以混貼。還沒有來源的網站，App 會試著自動建立來源。")
                 }
                 // A feed describes itself: no installed rule has anything to do with subscribing.
                 if (rules.isNotEmpty() && !feeds) {
@@ -775,7 +803,20 @@ private fun AddBookSheet(onDismiss: () -> Unit) {
                 group(additions) { addition, edge ->
                     Cell(edge, separatorStart = RowPadding + 28.dp) { AdditionRow(addition) }
                 }
-                if (!running && failed > 0) footer("$failed 個網址沒有加入", alarming = true)
+                if (!running && failed > 0) {
+                    footer("$failed 個網址沒有加入", alarming = true)
+                    // Every address that did not go in, one a line — the form the field takes them back in, so a
+                    // retry is a paste. Only the failures: what went in is on the shelf already.
+                    item {
+                        Cell(Edge.ONLY, onClick = {
+                            val failures = additions.filter { it.state == App.Addition.State.FAILED }.map { it.url }
+                            clipboard.setText(AnnotatedString(failures.joinToString("\n")))
+                            copiedFailures = true
+                        }, chevron = false) {
+                            Text(if (copiedFailures) "已複製" else "複製沒有加入的網址", style = Type.body, color = p.accent)
+                        }
+                    }
+                }
             }
         }
     }

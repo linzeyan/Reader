@@ -18,15 +18,17 @@ class MainActivity : ComponentActivity() {
         open(intent, restored = savedInstanceState != null)
     }
 
-    // A file handed over while the app is already running (singleTask, see the manifest).
+    // A file or a page handed over while the app is already running (singleTask, see the manifest).
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         open(intent, restored = false)
     }
 
     private fun open(intent: Intent, restored: Boolean) {
+        val app = application as App
         val stream = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-        handedFile(intent.action, intent.data, stream, intent.flags, restored)?.let { (application as App).open(it) }
+        val file = handedFile(intent.action, intent.data, stream, intent.flags, restored)
+        if (file != null) app.open(file) else handedText(intent.action, intent.getStringExtra(Intent.EXTRA_TEXT), intent.flags, restored)?.let(app::share)
     }
 
     override fun onStart() {
@@ -48,8 +50,14 @@ class MainActivity : ComponentActivity() {
  * Generic over the address only so a JVM test can drive it without an Android `Uri`.
  */
 internal fun <T : Any> handedFile(action: String?, data: T?, stream: T?, flags: Int, restored: Boolean): T? = when {
-    restored || flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0 -> null
+    replayed(flags, restored) -> null
     action == Intent.ACTION_VIEW -> data
     action == Intent.ACTION_SEND -> stream
     else -> null
 }
+
+/** The text a share carries — a page's address, from a browser. Null for anything else, and for a replay, as [handedFile]. */
+internal fun handedText(action: String?, text: String?, flags: Int, restored: Boolean): String? =
+    if (replayed(flags, restored) || action != Intent.ACTION_SEND) null else text?.takeIf { it.isNotBlank() }
+
+private fun replayed(flags: Int, restored: Boolean) = restored || flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0

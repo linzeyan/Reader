@@ -24,12 +24,20 @@ final class FeedService {
         /// article that never had text, and the only moment it matters is when someone
         /// opens it.
         case emptyArticle
+        /// The address led to no feed: it would not answer a plain request, or answered
+        /// with a page that is neither a feed nor names one. Its own case, wrapping why,
+        /// because a caller with another use for the address — a novel's page, read in the
+        /// web view — must be able to tell this from a feed that was found and then failed,
+        /// which is not a page to try anything else on. The reader is told the reason
+        /// alone.
+        case noFeed(any Error)
 
         var errorDescription: String? {
             switch self {
             case .badAddress: return String(localized: "feed.error.badAddress")
             case .http(let code): return String(localized: "feed.error.http \(code)")
             case .emptyArticle: return String(localized: "feed.error.emptyArticle")
+            case .noFeed(let reason): return reason.localizedDescription
             }
         }
     }
@@ -90,12 +98,24 @@ final class FeedService {
     ///   window is read here, article by article through the web view and picture by
     ///   picture off the network, and without it a busy feed is a spinner that looks
     ///   stuck for a minute.
+    ///
+    /// - Throws: `FeedError.noFeed` when the first request settles that the address is
+    ///   not a feed; anything after that is a feed failing, and is thrown as it is.
     @discardableResult
     func subscribe(
         to address: String, progress: @escaping ProgressHandler = { _ in }
     ) async throws -> Book {
-        guard let url = Self.url(from: address) else { throw FeedError.badAddress }
-        var response = try await read(url, validators: nil)
+        guard let url = Self.url(from: address) else {
+            throw FeedError.noFeed(FeedError.badAddress)
+        }
+        var response: Response
+        do {
+            response = try await read(url, validators: nil)
+        } catch {
+            // A refusal counts as no feed: the hosts that turn a plain request away with a
+            // 403 are the challenged novel sites, whose pages the web view can still read.
+            throw FeedError.noFeed(error)
+        }
         // "Nothing has changed" against a request that carried no validators. No correct
         // server does this, and there is nothing to fall back on — a subscription with no
         // document behind it would be a row on the shelf that opens onto nothing.
@@ -110,7 +130,7 @@ final class FeedService {
             // "no feed was declared" would be a sentence about a page they did not know
             // they had fetched.
             guard let declared = FeedDiscovery.feedURL(inHTML: body, at: response.landed) else {
-                throw error
+                throw FeedError.noFeed(error)
             }
             response = try await read(declared, validators: nil)
             guard let declaredBody = response.body else { throw FeedError.http(304) }

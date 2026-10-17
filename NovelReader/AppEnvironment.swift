@@ -117,6 +117,11 @@ final class AppEnvironment {
     /// the target over instead keeps one rule: books live in the library tab, and the
     /// history is a shortcut into them, not a second home for them.
     var readingHandoff: ReadingTarget?
+    /// Set when the app comes forward with pages waiting in the `SharedInbox`, for the
+    /// library tab to add — handed over like `readingHandoff`, and for its reason: the add
+    /// sheet belongs to the shelf, and the app can come forward on a launch where the
+    /// shelf has never been on screen.
+    var sharedLinksPending = false
     /// Surfaced as a banner rather than an alert — most failures here are "one
     /// site is unhappy", not "the app is broken".
     var banner: String?
@@ -429,12 +434,19 @@ final class AppEnvironment {
         return book
     }
 
-    /// One pasted address, turned into whatever book its host's rule says it is.
+    /// One pasted address, turned into whatever book its host's rule says it is — or into
+    /// a subscription, when it is a feed.
     ///
     /// Nothing here asks what shelf the reader is looking at: the rule an address matches
     /// is what decides, which is the same answer the book will give for the rest of its
     /// life. A novel address and a comic address can therefore be pasted together and each
     /// lands where it belongs.
+    ///
+    /// What an address is gets asked cheapest first. An installed rule is a lookup with no
+    /// request at all, so it goes first, and what it claims is a book. An address no rule
+    /// claims is tried as a feed next: one plain request, no web view. Only what that
+    /// settles is not a feed goes on to the derivation, which loads the page and its
+    /// chapters in the web view and is the dearest thing an addition ever does.
     ///
     /// An address no installed rule claims gets a rule worked out from its own page, and
     /// that rule is installed without the preview the settings screen asks the reader to
@@ -452,7 +464,16 @@ final class AppEnvironment {
         }
         let installed = sites.rule(matching: url)
         let rule: SiteRule
-        if let installed { rule = installed } else { rule = try await derivedRule(for: url) }
+        if let installed {
+            rule = installed
+        } else {
+            do {
+                let feed = try await subscribeToFeed(address)
+                return String(localized: "library.add.subscribed \(feed.shownName)")
+            } catch FeedService.FeedError.noFeed {
+                rule = try await derivedRule(for: url)
+            }
+        }
         guard let siteBookId = rule.bookId(from: url) else { throw AddBookError.noBookId }
         let info = try await bookService.info(rule: rule, siteBookId: siteBookId)
         guard installed == nil else {

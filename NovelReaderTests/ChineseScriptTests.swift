@@ -46,6 +46,30 @@ final class ChineseScriptTests: XCTestCase {
         XCTAssertEqual(ChineseText.rendered("滑鼠", in: script(.phrases, .simplified)), "鼠标")
     }
 
+    /// ICU swaps a few characters that are already traditional for a variant Taiwan does
+    /// not write — 「破釜沉舟」 read 「破釜沈舟」 on the default tier. Keeping them must not
+    /// cost the words around them, which is what the last case is for: 头发 is only
+    /// 「頭髮」 because ICU still reads it as a word.
+    func testKeepsCharactersThatAreAlreadyTraditional() {
+        let cases = [
+            "破釜沉舟": "破釜沉舟",
+            "彷徨": "彷徨",
+            "力挽狂澜": "力挽狂瀾",
+            "大汗淋漓，气势磅礴": "大汗淋漓，氣勢磅礴",
+            "坂本": "坂本",
+            "喂！你在哪里？": "喂！你在哪裡？",
+            "他沉默地看着她的头发": "他沉默地看著她的頭髮"
+        ]
+        for depth in [ChineseScript.Depth.characters, .phrases] {
+            for (served, expected) in cases {
+                XCTAssertEqual(
+                    ChineseText.rendered(served, in: script(depth, .traditional)), expected,
+                    "\(depth)"
+                )
+            }
+        }
+    }
+
     func testLeavesTextWithNoChineseInItUntouched() {
         let english = "Chapter 17 — The Crossing"
         XCTAssertEqual(ChineseText.rendered(english, in: script(.phrases, .traditional)), english)

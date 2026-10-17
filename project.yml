@@ -39,6 +39,8 @@ targets:
         product: GRDB
       - package: SwiftyOpenCC
         product: OpenCC
+      # Embedded in PlugIns, which is what puts 書房 in a browser's share sheet.
+      - target: ShareExtension
     # The shipping binary must contain no site rules at all (App Review 5.2 —
     # the app must not point at any particular content source). But the UI is
     # unusable in a simulator without sources, so Debug builds get the recon
@@ -74,12 +76,43 @@ targets:
         # already translated. Nothing reads them, and every one of them was a `git diff`
         # after an install to the phone.
         SWIFT_EMIT_LOC_STRINGS: NO
-        # iCloud KVS carries sources, the shelf and reading progress (metadata only).
+        # iCloud KVS carries sources, the shelf and reading progress (metadata only); the
+        # app group is where the share extension leaves the pages it is handed.
         CODE_SIGN_ENTITLEMENTS: NovelReader/NovelReader.entitlements
         # Simulator: ad-hoc signing, no Apple account needed.
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY[sdk=iphonesimulator*]: "-"
         # Device / TestFlight / App Store: standard automatic signing.
+        CODE_SIGN_STYLE[sdk=iphoneos*]: Automatic
+        CODE_SIGN_IDENTITY[sdk=iphoneos*]: Apple Development
+        DEVELOPMENT_TEAM[sdk=iphoneos*]: NKJSLB6HBR
+
+  # "Share → 書房" from a browser. Leaves the page's address for the app to add and
+  # nothing more — see `ShareViewController` — so it links nothing of the app's but the
+  # one file that says where the address is left.
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+        excludes:
+          - Info.plist
+          - ShareExtension.entitlements
+      - path: NovelReader/Intents/SharedInbox.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zeyanlin.novelreader.share
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        # Authored, as the app's catalog is — see the note on the app target.
+        SWIFT_EMIT_LOC_STRINGS: NO
+        # The app group the app reads the shared pages back out of.
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+        # Signed as the app is: ad hoc in the simulator, automatic on a device.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY[sdk=iphonesimulator*]: "-"
         CODE_SIGN_STYLE[sdk=iphoneos*]: Automatic
         CODE_SIGN_IDENTITY[sdk=iphoneos*]: Apple Development
         DEVELOPMENT_TEAM[sdk=iphoneos*]: NKJSLB6HBR

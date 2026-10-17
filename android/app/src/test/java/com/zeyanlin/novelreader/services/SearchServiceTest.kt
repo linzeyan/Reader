@@ -58,6 +58,7 @@ class SearchServiceTest {
         assertEquals(listOf("劍來", "剑来"), SearchService.forms(" 劍來 "))
         assertEquals(listOf("剑来", "劍來"), SearchService.forms("剑来"))
         assertEquals(listOf("一二三"), SearchService.forms("一二三"))
+        assertEquals(listOf("破釜沉舟"), SearchService.forms("破釜沉舟"))
         assertEquals(listOf("Harry Potter"), SearchService.forms("Harry Potter"))
         assertEquals(emptyList<String>(), SearchService.forms("  "))
     }

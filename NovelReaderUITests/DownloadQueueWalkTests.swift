@@ -138,7 +138,9 @@ final class DownloadQueueWalkTests: XCTestCase {
     /// Takes the first of the named books, a comic so it is still running when looked at,
     /// and ends by cancelling it: a walk must not leave a download queued on a phone.
     func testARunningDownloadShowsOnItsShelfRowAndItsBookScreen() throws {
-        let book = try XCTUnwrap(queuedBooks().first)
+        // Outside XCTUnwrap: thrown inside its autoclosure, the opt-in skip is recorded as a failure.
+        let books = try queuedBooks()
+        let book = try XCTUnwrap(books.first)
         queue(book)
 
         // Back to the shelf by a fresh launch, for the reason `launch(onto:)` gives — so

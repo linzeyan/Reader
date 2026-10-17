@@ -91,8 +91,12 @@ struct LibraryView: View {
                 case .comic: ComicReaderView(book: target.book, position: target.position)
                 }
             }
-            .onAppear { consumeHandoff() }
+            .onAppear {
+                consumeHandoff()
+                consumeSharedLinks()
+            }
             .onChange(of: env.readingHandoff) { _, _ in consumeHandoff() }
+            .onChange(of: env.sharedLinksPending) { _, _ in consumeSharedLinks() }
             .toolbar {
                 // Leading, away from the two buttons that add books: those are
                 // actions and this is a view control, and putting it on the same
@@ -293,6 +297,28 @@ struct LibraryView: View {
         var quiet = Transaction()
         quiet.disablesAnimations = true
         withTransaction(quiet) { path = route }
+    }
+
+    /// Adds the pages other apps' share sheets left in the `SharedInbox`, and opens the add
+    /// sheet on them: a clean sweep closes itself, as a pasted one does, and what failed
+    /// stays in front of the reader with its reason and a way to copy it.
+    ///
+    /// As a `book` whatever shelf is up: a share is a page picked in a browser, with
+    /// nothing to say which shelf it was meant for, and `book` is the kind that works out
+    /// for itself whether the page is a novel, a comic or a feed.
+    ///
+    /// Started rather than left in the field for a tap: sharing them to this app was the
+    /// asking. Left in the inbox while another batch runs — they are waiting there, not
+    /// lost — and the next time the app comes forward asks again.
+    private func consumeSharedLinks() {
+        guard env.sharedLinksPending else { return }
+        env.sharedLinksPending = false
+        guard !env.additions.isRunning else { return }
+        let addresses = SharedInbox.shared?.take() ?? []
+        guard env.additions.start(
+            AddBookLine.pasted(addresses.joined(separator: "\n")), as: .book
+        ) else { return }
+        adding = true
     }
 
     /// Sort, grouping and filter in one menu.
@@ -598,19 +624,8 @@ struct LibraryView: View {
         )
     }
 
-    @ViewBuilder
     private func rows(_ books: [Book]) -> some View {
-        ForEach(books) { book in
-            // The menu is attached only where it would have something in it. A
-            // `contextMenu` whose body evaluates to nothing still opens on a long
-            // press — as an empty grey card — and that is the answer an imported
-            // book, or one whose source has been removed, would give.
-            if let source = env.sites.sourceURL(of: book) {
-                row(book).contextMenu { copyLinkButton(source) }
-            } else {
-                row(book)
-            }
-        }
+        ForEach(books) { book in row(book) }
     }
 
     private func row(_ book: Book) -> some View {
@@ -643,11 +658,13 @@ struct LibraryView: View {
             }
             .tint(.indigo)
         }
-        // The leading edge, opposite the two that change what is on the shelf. A
-        // subscription only: it is the one kind of row whose badge is a list of things
-        // waiting, and the one where clearing it is a normal part of reading rather than
-        // an edit. No confirmation, matching the per-article swipe — what it clears is
-        // recoverable a row at a time, and the shelf-wide version, which is not, asks.
+        // The leading edge, opposite the two that change what is on the shelf: neither of
+        // these does. Marking read comes first, so a full swipe on a subscription still
+        // clears it as it always has — it is the one kind of row whose badge is a list
+        // of things waiting, and the one where clearing it is a normal part of reading
+        // rather than an edit. No confirmation, matching the per-article swipe — what it
+        // clears is recoverable a row at a time, and the shelf-wide version, which is
+        // not, asks.
         .swipeActions(edge: .leading) {
             if book.kind == .feed, (env.newChapterCounts[book.id] ?? 0) > 0 {
                 Button {
@@ -658,16 +675,15 @@ struct LibraryView: View {
                 .tint(.blue)
                 .accessibilityIdentifier("library.markRead")
             }
+            // Only where there is an address: an imported book, or one whose source has
+            // been removed, has none to give.
+            if let source = env.sites.sourceURL(of: book) { copyLinkButton(source) }
         }
     }
 
     /// Hands back the address the book came from, for pasting into a browser or
-    /// sending to someone.
-    ///
-    /// A long press rather than a third swipe action: the two already there are
-    /// the ones that change the shelf, and a row on a narrow phone has no room
-    /// for a button nobody presses in a hurry. Copied as a plain string, because
-    /// the places it is going — an address bar, a message — read text.
+    /// sending to someone. Copied as a plain string, because the places it is going —
+    /// an address bar, a message — read text.
     ///
     /// No confirmation is shown. The only banner this app has is the red error
     /// one, and copying is the system-wide gesture whose result the user can see

@@ -169,9 +169,17 @@ enum ChineseText {
 private extension ChineseScript.Target {
     /// The ICU transform that lands *in* this script — named for where it goes, so
     /// `.traditional` reads from simplified.
+    ///
+    /// The set in front keeps ICU off characters that are already the traditional form
+    /// and that it swaps for a variant anyway, in every common word they are in:
+    /// 「破釜沉舟」 came out 「破釜沈舟」, 「彷徨」 「徬徨」, 「力挽狂瀾」 「力輓狂瀾」,
+    /// 「大汗淋漓」 「大汗淋灕」. A filter in the transform's own syntax, so ICU's word
+    /// rules still run on everything around them: 「沉默地看著她的頭髮」 keeps its 髮.
+    /// 喂 is among them though ICU is right about 「餵奶」: in a novel it is a 「喂！」 in
+    /// dialogue far more often, and the phrase tier tells the two apart.
     var transform: String {
         switch self {
-        case .traditional: return "Simplified-Traditional"
+        case .traditional: return "[^沉彷挽坂漓礴喂] Simplified-Traditional"
         case .simplified: return "Traditional-Simplified"
         }
     }

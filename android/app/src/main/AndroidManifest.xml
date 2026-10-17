@@ -48,13 +48,15 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/epub+zip" />
             </intent-filter>
-            <!-- A share, for EPUB only: a share of text/plain is also every link and note shared
-                 from anywhere, and the app would sit in all those share sheets with nothing to
-                 import. A TXT arrives through "Open with". -->
+            <!-- A share: an EPUB to import, or a page to add — a browser shares a page as text, its
+                 address. Text is also every note shared from anywhere, and no filter can tell an
+                 address from one, so the app sits in those share sheets too and answers a share
+                 with no address in it with a banner. A TXT file arrives through "Open with". -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
         <service

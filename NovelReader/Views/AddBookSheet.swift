@@ -21,6 +21,8 @@ struct AddBookSheet: View {
 
     @State private var text = ""
     @FocusState private var fieldFocused: Bool
+    /// Says the copy happened, which a pasteboard write otherwise does not.
+    @State private var copiedFailures = false
 
     private var additions: BookAdditions { env.additions }
 
@@ -41,9 +43,13 @@ struct AddBookSheet: View {
                     if env.mediaMode != .feed, !env.sites.rules.isEmpty { sourcesSection }
                 } else {
                     progressSection
+                    if additions.failures > 0, !additions.isRunning { copyFailuresSection }
                 }
             }
-            .navigationTitle(env.mediaMode == .feed ? "library.subscribe" : "library.add")
+            // One name on every shelf. What is pasted here is told apart by itself —
+            // novels, comics and feeds all go in — and a share runs here whichever shelf
+            // is up, so a title naming one of them was wrong as often as it was right.
+            .navigationTitle("library.add")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { leadingButton }
@@ -61,6 +67,9 @@ struct AddBookSheet: View {
             // *which* address failed is the only thing this screen knows that the shelf
             // does not.
             .onChange(of: additions.isRunning) { _, running in
+                // A share can start a new batch under a report left open; its failures
+                // have not been copied yet.
+                if running { copiedFailures = false }
                 guard !running, additions.failures == 0 else { return }
                 additions.clear()
                 dismiss()
@@ -79,6 +88,8 @@ struct AddBookSheet: View {
                 .focused($fieldFocused)
                 .accessibilityIdentifier("add.url")
         } footer: {
+            // The hint, unlike the title, stays the shelf's: on the feed shelf a paste
+            // only subscribes.
             Text(env.mediaMode == .feed ? "library.subscribe.hint" : "library.add.hint")
         }
     }
@@ -127,6 +138,25 @@ struct AddBookSheet: View {
             if additions.failures > 0, !additions.isRunning {
                 Text("library.add.failed \(additions.failures)").foregroundStyle(.red)
             }
+        }
+    }
+
+    /// Every address that did not go in, one per line, in one tap — the form the add
+    /// field takes them back in, so a retry is a paste, and the form a note or a message
+    /// keeps them in until then. Only the failures: what went in is on the shelf already.
+    private var copyFailuresSection: some View {
+        Section {
+            Button {
+                UIPasteboard.general.string = lines.filter(\.status.isFailure)
+                    .map(\.address).joined(separator: "\n")
+                copiedFailures = true
+            } label: {
+                Label(
+                    copiedFailures ? "library.add.copiedFailures" : "library.add.copyFailures",
+                    systemImage: copiedFailures ? "checkmark" : "doc.on.doc"
+                )
+            }
+            .accessibilityIdentifier("add.copyFailures")
         }
     }
 
@@ -183,14 +213,7 @@ struct AddBookSheet: View {
 
     // MARK: - Running
 
-    /// A subscription is added by address alone, so it does not go looking for a rule to
-    /// match — and the shelf's mode is what decides, unlike the two media below. Those are
-    /// told apart by the rule an address matches; a feed address matches nothing, and a
-    /// novel address pasted onto this shelf would silently become a subscription to a page
-    /// that is not one.
     private func run() {
-        additions.start(
-            AddBookLine.pasted(text), as: env.mediaMode == .feed ? .subscription : .book
-        )
+        additions.start(AddBookLine.pasted(text), as: .pasted(onto: env.mediaMode))
     }
 }

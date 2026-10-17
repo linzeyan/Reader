@@ -46,6 +46,13 @@ class FeedService(private val context: Context, private val library: LibraryDao)
     class EmptyArticle : Exception("這篇沒有內文——訂閱源只給了標題和連結。")
 
     /**
+     * The address led to no feed: a plain request was refused, or found a page that neither is a feed
+     * nor names one — the iOS `FeedError.noFeed`. Its own type so an addition can go on to read the page
+     * as a novel's, which a feed found and then failing must not; the reader is told [reason] alone.
+     */
+    class NoFeed(reason: Exception) : Exception(reason.message ?: reason.javaClass.simpleName, reason)
+
+    /**
      * How far the first read of a subscription has got, in articles stored — "3 / 27" says both how
      * long is left and that something is happening. [total] is zero for a headlines-only feed.
      */
@@ -62,16 +69,26 @@ class FeedService(private val context: Context, private val library: LibraryDao)
      * Subscribes and pulls the first batch of articles in the same breath: a subscription that
      * lands on the shelf as an empty screen is the one moment it has to feel like it worked.
      * What is pasted is usually the site, so a page is asked what feed it declares first.
+     *
+     * @throws NoFeed when the first request settles the address is not a feed; past that, a feed failing.
      */
     suspend fun subscribe(address: String, progress: (Progress) -> Unit = {}): Book {
-        val url = url(address) ?: throw badAddress()
-        var response = read(url, null, FEED_TYPES)
+        val url = url(address) ?: throw NoFeed(badAddress())
+        var response = try {
+            read(url, null, FEED_TYPES)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // A refusal counts as no feed: the hosts that turn a plain request away with a 403 are
+            // the challenged novel sites, whose pages the web view can still read.
+            throw NoFeed(e)
+        }
         val parsed = try {
             FeedParser.parse(response.body ?: throw http(304), response.landed)
         } catch (e: FeedParser.NotAFeed) {
             // The original error when the page names no feed: "none was declared" would be a
             // sentence about a page the reader did not know they had fetched.
-            val declared = FeedDiscovery.feedURL(response.body!!, response.landed) ?: throw e
+            val declared = FeedDiscovery.feedURL(response.body!!, response.landed) ?: throw NoFeed(e)
             response = read(declared, null, FEED_TYPES)
             FeedParser.parse(response.body ?: throw http(304), response.landed)
         }

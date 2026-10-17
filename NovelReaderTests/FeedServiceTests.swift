@@ -293,14 +293,54 @@ final class FeedServiceTests: XCTestCase {
 
     /// The commonest mistake anyone makes with a feed reader: pasting the site instead of
     /// its feed — where the page names no feed either, so there is nothing to follow. It
-    /// has to fail as "that is not a feed", not as an empty subscription.
+    /// has to fail as "that is not a feed", not as an empty subscription — and as `noFeed`,
+    /// which is what lets an addition carry on and read the page as a novel's.
     func testAWebPageIsNotSubscribedTo() async {
         StubProtocol.answer = .ok("<!DOCTYPE html><html><body><h1>A blog</h1></body></html>")
         do {
             _ = try await service.subscribe(to: address)
             XCTFail("an HTML page must not become a subscription")
+        } catch FeedService.FeedError.noFeed(let reason) {
+            XCTAssertTrue(reason is FeedParser.ParseError, "\(reason)")
         } catch {
-            XCTAssertTrue(error is FeedParser.ParseError, "\(error)")
+            XCTFail("\(error)")
+        }
+    }
+
+    /// A host that turns the plain request away settles nothing about the page, so it is
+    /// `noFeed` too: the novel sites behind a challenge answer exactly this way, and their
+    /// pages are still readable in the web view the addition goes on to.
+    func testARefusedRequestIsNoFeed() async {
+        StubProtocol.answer = .status(403)
+        do {
+            _ = try await service.subscribe(to: address)
+            XCTFail("a 403 must not become a subscription")
+        } catch FeedService.FeedError.noFeed {
+        } catch {
+            XCTFail("\(error)")
+        }
+    }
+
+    /// And the line `noFeed` must not cross. A page that names its feed is a blog; a feed
+    /// that then will not answer is a subscription that failed, and reporting it as one is
+    /// right — trying the blog's page as a novel would spend a web view load on it and
+    /// report a source that could not be made, about a page that was never a book.
+    func testADeclaredFeedThatWillNotAnswerIsAFeedFailing() async {
+        StubProtocol.answersByURL = [
+            "https://example.com": .ok("""
+            <!DOCTYPE html><html><head>
+            <link rel="alternate" type="application/rss+xml" href="/feed.xml">
+            </head><body><h1>A blog</h1></body></html>
+            """),
+            "https://example.com/feed.xml": .status(500),
+        ]
+        do {
+            _ = try await service.subscribe(to: "example.com")
+            XCTFail("a feed that answers 500 must not become a subscription")
+        } catch FeedService.FeedError.noFeed {
+            XCTFail("a declared feed failing is not the absence of one")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("500"), error.localizedDescription)
         }
     }
 

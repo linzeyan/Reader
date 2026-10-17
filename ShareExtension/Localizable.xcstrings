@@ -1,0 +1,102 @@
+{
+  "sourceLanguage" : "zh-Hant",
+  "strings" : {
+    "share.error.cannotSave" : {
+      "comment" : "Share extension: the page could not be left for the app to add; its address was copied instead.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The page couldn't be sent to 書房. Its address has been copied: open 書房, tap Add to Library and paste it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能交给书房。网址已经复制：打开书房，点「添加到书架」后粘贴即可添加。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒能交給書房。網址已經複製：打開書房，點「加入書櫃」後貼上即可加入。"
+          }
+        }
+      }
+    },
+    "share.error.noAddress" : {
+      "comment" : "Share extension: what was shared carried no web page address.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There's no web page address in what was shared."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享的内容里没有网页网址。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享的內容裡沒有網頁網址。"
+          }
+        }
+      }
+    },
+    "share.ok" : {
+      "comment" : "Share extension: dismisses an explanation.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
+          }
+        }
+      }
+    },
+    "share.saved" : {
+      "comment" : "Share extension: the moment's confirmation that the page is queued for the app to add.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added to Queue"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已加入队列"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已加入佇列"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

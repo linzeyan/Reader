@@ -226,7 +226,8 @@ fun Root() {
     }
     // A file from another app goes through the shelf's import, so the shelf is where the reader is
     // taken: its banner is the progress and the cancel, and the book lands there. Where iOS puts
-    // up a banner over any tab instead, Android has the shelf's own to reuse.
+    // up a banner over any tab instead, Android has the shelf's own to reuse. A shared page goes
+    // through the shelf's add sheet, which only the shelf itself can put up.
     val showShelf by app.showShelf.collectAsState()
     LaunchedEffect(navigator, showShelf) {
         val nav = navigator ?: return@LaunchedEffect

@@ -17,7 +17,9 @@ import Foundation
 final class BookAdditions {
     /// What a run is turning addresses into, which is also what decides how it is run.
     enum Kind {
-        /// Novels and comics, matched against the installed rules or given one.
+        /// Novels and comics, matched against the installed rules or given one — and any
+        /// address no rule claims that turns out to be a feed, subscribed to instead. See
+        /// `AppEnvironment.addPastedBook` for the order it is asked in.
         case book
         /// Subscriptions, pasted one per line.
         case subscription
@@ -31,6 +33,18 @@ final class BookAdditions {
 
         var isFeed: Bool { self != .book }
         var keepsUnreachable: Bool { self == .subscriptionList }
+
+        /// What a pasted address becomes on a shelf.
+        ///
+        /// `book` already tells a feed from a novel, so this is not about what the address
+        /// is. It is about how the run goes: on the feed shelf the reader has said they are
+        /// pasting subscriptions — often a list of them out of another reader — and
+        /// `subscription` reads those four at a time, counting articles as they land, where
+        /// `book` goes one by one through the web view. It also keeps a blog page that
+        /// names no feed from being made into a novel source behind the reader's back.
+        static func pasted(onto mode: MediaMode) -> Kind {
+            mode == .feed ? .subscription : .book
+        }
     }
 
     /// What this needs from the rest of the app.

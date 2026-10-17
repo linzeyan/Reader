@@ -3,15 +3,19 @@ import XCTest
 
 /// A pasted address whose site has no source, through the whole environment.
 ///
-/// Only the refusal is offline. Every path that ends in a new source goes through a real
-/// page in a real web view, which no stub reaches — that half is
+/// Only the refusal and the feed are offline. Every path that ends in a new source goes
+/// through a real page in a real web view, which no stub reaches — that half is
 /// `LiveSiteTests.testPastingABookFromASiteWithNoSourceInstallsOne`.
+///
+/// The network is stubbed globally, as `SubscriptionImportTests` explains: a feed is read
+/// through the app's own `URLSession.shared`.
 @MainActor
 final class PastedBookTests: XCTestCase {
     private var tempRoot: URL!
     private var env: AppEnvironment!
 
     override func setUpWithError() throws {
+        URLProtocol.registerClass(StubProtocol.self)
         tempRoot = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("PastedBookTests-\(UUID().uuidString)")
         env = AppEnvironment(
@@ -27,6 +31,8 @@ final class PastedBookTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        URLProtocol.unregisterClass(StubProtocol.self)
+        StubProtocol.reset()
         try? FileManager.default.removeItem(at: tempRoot)
     }
 
@@ -35,6 +41,9 @@ final class PastedBookTests: XCTestCase {
     /// reason, which is the part that tells the reader what to paste instead. And it must
     /// leave nothing behind: a source installed for a site that was never read would be
     /// listed in settings and match every later paste from that host.
+    ///
+    /// The feed tried first must not speak for it either: the reason is the derivation's,
+    /// because a book is what was being looked for once no feed answered.
     func testAnAddressNoSourceCanBeMadeForFailsOnItsRowAndInstallsNothing() async throws {
         XCTAssertTrue(env.sites.rules.isEmpty, "the premise: nothing installed")
 
@@ -48,5 +57,36 @@ final class PastedBookTests: XCTestCase {
         XCTAssertEqual(env.additions.lines.first?.status.note, reason)
         XCTAssertTrue(env.sites.rules.isEmpty, "nothing installed for a site that was never read")
         XCTAssertTrue(env.books.isEmpty)
+    }
+
+    /// A feed shared from a browser, or pasted on the novel shelf, used to be handed to the
+    /// derivation — a web view load that ended in "could not make a source". It is one
+    /// plain request away from being a subscription, so that request goes first, and what
+    /// it finds goes on the subscriptions shelf with the row saying so.
+    func testAFeedNoSourceClaimsBecomesASubscription() async throws {
+        StubProtocol.answer = .ok("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel>
+          <title>A Blog</title>
+          <item>
+            <title>An article</title>
+            <link>https://blog.example/1</link>
+            <guid>tag:blog.example,2026:1</guid>
+            <pubDate>Wed, 02 Oct 2002 08:00:00 GMT</pubDate>
+            <description><![CDATA[<p>Text.</p>]]></description>
+          </item>
+        </channel></rss>
+        """)
+
+        env.additions.start(AddBookLine.pasted("https://blog.example/feed"), as: .book)
+        await env.additions.settle()
+
+        XCTAssertEqual(env.additions.added, 1, "\(String(describing: env.additions.lines.first?.status.note))")
+        XCTAssertEqual(env.books.map(\.kind), [.feed])
+        XCTAssertEqual(
+            env.additions.lines.first?.status.note,
+            String(localized: "library.add.subscribed \("A Blog")")
+        )
+        XCTAssertTrue(env.sites.rules.isEmpty, "no source made for what was never a book")
     }
 }

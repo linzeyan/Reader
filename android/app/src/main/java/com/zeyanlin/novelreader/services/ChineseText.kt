@@ -59,8 +59,9 @@ data class ChineseScript(val depth: Depth, val target: Target) {
  * copied from the SwiftyOpenCC iOS ships (`scripts/opencc_dicts.py`), through OpenCC's own
  * algorithm: segment by longest match, then pass each segment down a chain of longest-match
  * conversions. iOS's character tier is ICU's transform instead, which Android only has from
- * API 29 and a JVM test never has; OpenCC's character table is the same one-for-one map,
- * built from the same Unihan data.
+ * API 29 and a JVM test never has. OpenCC's character table is the nearest one-for-one map,
+ * but on its own it writes mainland traditional — 「爲什麼」, 「看着」, 「喫飯」 — so it is
+ * followed by Taiwan's variants, as the phrase tier's chain is.
  */
 object ChineseText {
     /**
@@ -104,8 +105,10 @@ object ChineseText {
         converters.getOrPut(target to phrases) {
             // SwiftyOpenCC's chains for [.traditionalize/.simplify, .twStandard, .twIdiom].
             val (segmentedBy, chain) = when {
-                !phrases && target == ChineseScript.Target.TRADITIONAL -> "STCharacters" to listOf(listOf("STCharacters"))
-                !phrases -> "TSCharacters" to listOf(listOf("TSCharacters"))
+                !phrases && target == ChineseScript.Target.TRADITIONAL -> "STCharacters" to listOf(
+                    listOf("STCharacters"), listOf("TWVariants"),
+                )
+                !phrases -> "TSCharacters" to listOf(listOf("TWVariantsRev"), listOf("TSCharacters"))
                 target == ChineseScript.Target.TRADITIONAL -> "STPhrases" to listOf(
                     listOf("STPhrases", "STCharacters"), listOf("TWPhrases"), listOf("TWVariants"),
                 )

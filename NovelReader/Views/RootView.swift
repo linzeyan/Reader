@@ -149,6 +149,7 @@ struct RootView: View {
             // `ContinueReadingIntent`, which leaves the ask here when it arrives before
             // any scene has built an object graph to honour it.
             if ContinueReadingRequest.take() { env.continueReading(deferred: true) }
+            checkSharedInbox()
             env.cloud.startSyncing()
             // Subscriptions are checked when the app is opened and at no other time:
             // no timer, no background schedule. A feed reader that polls is a feed
@@ -170,10 +171,21 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: env.enterBackground()
-            case .active: env.becomeActive()
+            case .active:
+                env.becomeActive()
+                checkSharedInbox()
             default: break
             }
         }
+    }
+
+    /// Pages shared from another app's share sheet since this one was last in front. The
+    /// library adds them, as it opens the history's handoff, so this only takes the reader
+    /// there and says there is something to take.
+    private func checkSharedInbox() {
+        guard SharedInbox.shared?.isEmpty == false else { return }
+        tab = .library
+        env.sharedLinksPending = true
     }
 
     /// Determinate for the same reason the library's own import banner is: a

@@ -34,6 +34,13 @@ final class ChineseVariantsTests: XCTestCase {
         }
     }
 
+    /// A title written the same in both scripts has no other form. Converting
+    /// 「破釜沉舟」 once came back 「破釜沈舟」 — a second page load per site for
+    /// a title no site has.
+    func testATitleTheSameInBothScriptsIsSearchedOnce() {
+        XCTAssertEqual(ChineseVariants.forms(of: "破釜沉舟"), ["破釜沉舟"])
+    }
+
     /// Latin queries have no second script, and a site must not be asked the
     /// same question twice.
     func testNonChineseQueriesAreSearchedOnce() {

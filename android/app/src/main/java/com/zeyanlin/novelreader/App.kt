@@ -375,7 +375,19 @@ class App : Application() {
     }
 
     /** What a run turns addresses into, which also decides how it runs. */
-    enum class AddKind { BOOK, SUBSCRIPTION, SUBSCRIPTION_LIST }
+    enum class AddKind {
+        BOOK, SUBSCRIPTION, SUBSCRIPTION_LIST;
+
+        companion object {
+            /**
+             * What a pasted address becomes on [shelf] — the iOS `Kind.pasted(onto:)`. [BOOK] already tells a
+             * feed from a novel; the feed shelf picks [SUBSCRIPTION] for how it runs — several at once with
+             * articles counted, a list out of another reader — and so a blog page naming no feed is never
+             * made into a novel source behind the reader's back.
+             */
+            fun pasted(shelf: SiteRule.Kind) = if (shelf == SiteRule.Kind.FEED) SUBSCRIPTION else BOOK
+        }
+    }
 
     val additions = MutableStateFlow<List<Addition>>(emptyList())
     val addKind = MutableStateFlow(AddKind.BOOK)
@@ -566,10 +578,19 @@ class App : Application() {
      * also found this book's id and details: the book stands in for the settings screen's
      * preview, and the line names the source it made so the reader knows there is one.
      *
+     * Asked cheapest first, as on iOS: an installed rule is a lookup with no request, so what it claims
+     * is a book; an address none claims is tried as a feed, one plain request; only what that settles is
+     * no feed goes on to the derivation, page loads in the web view and the dearest step of all.
+     *
      * @return what the line says: the title the site published.
      */
     private suspend fun addBook(url: String): String {
         val installed = sites.ruleMatching(url)
+        if (installed == null) {
+            val feed = try { feeds.subscribe(url) } catch (e: FeedService.NoFeed) { null }
+            // Said on the line: it lands on the subscriptions shelf, which may not be the one up.
+            if (feed != null) return "${feed.shownName} · 已加入訂閱"
+        }
         val rule = installed ?: derivedRule(url)
         val siteBookId = rule.bookId(url) ?: throw Refusal("無法從這個網址辨識書籍，請改用書籍頁的網址。")
         val info = books.info(rule, siteBookId)
@@ -639,8 +660,33 @@ class App : Application() {
         importing?.cancel()
     }
 
-    /** Set when another app hands over a file; the shell takes the reader to the shelf it lands on. */
+    /** Set when another app hands over a file or a page; the shell takes the reader to the shelf it lands on. */
     val showShelf = MutableStateFlow(false)
+
+    /** Set when a page is shared from another app; the shelf opens its add sheet on the run. */
+    val showAdditions = MutableStateFlow(false)
+
+    /**
+     * A page another app shared — the iOS share extension and `LibraryView.consumeSharedAddress`: added,
+     * and the add sheet opened on it, so the reader sees it arrive or why it did not. As a [AddKind.BOOK]
+     * whatever shelf is up: a page picked in a browser says nothing of the shelf it was meant for, and
+     * that kind works out for itself whether it is a novel, a comic or a feed. Text with no address in it
+     * is answered, not ignored: the app sits in every text share sheet, and a share that did nothing would
+     * read as a broken one.
+     */
+    fun share(text: String) {
+        val address = webAddress(text)
+        if (address == null) {
+            banner.value = "分享的內容裡沒有網頁網址。"
+            return
+        }
+        if (!add(listOf(address), AddKind.BOOK)) {
+            banner.value = "已經有一批正在加入，請等它完成後再試。"
+            return
+        }
+        showShelf.value = true
+        showAdditions.value = true
+    }
 
     /**
      * A TXT or EPUB another app handed over — the iOS `RootView.open` — through the shelf's own
@@ -773,6 +819,17 @@ private suspend fun <T> byHost(items: List<T>, host: (T) -> String, work: suspen
     val lanes = Semaphore(4)
     for (queue in items.groupBy(host).values) launch { lanes.withPermit { queue.forEach { work(it) } } }
 }
+
+/**
+ * The first web address in shared text. A browser shares a page as its address, sometimes after its title;
+ * a chat app, inside a sentence. It ends at the first character an address cannot hold, so the 。 closing a
+ * Chinese sentence is not taken for part of the path — and a trailing English full stop or comma, which an
+ * address can hold but a book page's never ends on, is let go too.
+ */
+internal fun webAddress(text: String): String? =
+    WEB_ADDRESS.find(text)?.value?.trimEnd('.', ',', ';', ':', '!', '?')
+
+private val WEB_ADDRESS = Regex("""https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+""", RegexOption.IGNORE_CASE)
 
 /** A failure whose message is already written for the reader. */
 class Refusal(message: String) : Exception(message)
