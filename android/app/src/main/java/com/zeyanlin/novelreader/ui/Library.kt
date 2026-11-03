@@ -385,7 +385,7 @@ fun LibraryScreen() {
             exit = slideOutVertically { -it } + fadeOut(),
         ) {
             Banner {
-                val done = additions.count { it.state == App.Addition.State.ADDED || it.state == App.Addition.State.FAILED }
+                val done = additions.count { it.state == App.Addition.State.ADDED || it.state == App.Addition.State.PRESENT || it.state == App.Addition.State.FAILED }
                 Spinner(size = 16.dp)
                 Text("正在加入 — 已完成 $done / ${additions.size}", style = Type.footnote, color = p.label, modifier = Modifier.weight(1f))
                 Text(
@@ -740,11 +740,13 @@ private fun AddBookSheet(onDismiss: () -> Unit) {
     val urls = text.lines().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     val running = additions.any { it.state == App.Addition.State.WAITING || it.state == App.Addition.State.RUNNING }
     val failed = additions.count { it.state == App.Addition.State.FAILED }
+    val present = additions.count { it.state == App.Addition.State.PRESENT }
     // A share can start a new batch under a report left open; its failures have not been copied yet.
     LaunchedEffect(running) { if (running) copiedFailures = false }
     LaunchedEffect(additions) {
-        // Everything went in: nothing left to read here.
-        if (additions.isNotEmpty() && !running && failed == 0) {
+        // Everything went in: nothing left to read here. Books found already on the shelf keep it up —
+        // the shelf cannot tell them from the ones just added.
+        if (additions.isNotEmpty() && !running && failed == 0 && present == 0) {
             app.clearAdditions()
             onDismiss()
         }
@@ -798,7 +800,7 @@ private fun AddBookSheet(onDismiss: () -> Unit) {
                     }
                 }
             } else {
-                val done = additions.count { it.state == App.Addition.State.ADDED || it.state == App.Addition.State.FAILED }
+                val done = additions.count { it.state == App.Addition.State.ADDED || it.state == App.Addition.State.PRESENT || it.state == App.Addition.State.FAILED }
                 header("已完成 $done / ${additions.size}")
                 group(additions) { addition, edge ->
                     Cell(edge, separatorStart = RowPadding + 28.dp) { AdditionRow(addition) }
@@ -830,6 +832,8 @@ private fun RowScope.AdditionRow(addition: App.Addition) {
             App.Addition.State.WAITING -> Icon(Symbols.CircleDotted, null, Modifier.size(18.dp), tint = p.tertiary)
             App.Addition.State.RUNNING -> Spinner(size = 16.dp)
             App.Addition.State.ADDED -> Icon(Symbols.CheckmarkCircleFill, null, Modifier.size(18.dp), tint = p.green)
+            // A tick, since nothing is wrong, but not the green one: nothing was added.
+            App.Addition.State.PRESENT -> Icon(Symbols.CheckmarkCircleFill, null, Modifier.size(18.dp), tint = p.secondary)
             App.Addition.State.FAILED -> Icon(Symbols.ExclamationCircleFill, null, Modifier.size(18.dp), tint = p.red)
         }
     }

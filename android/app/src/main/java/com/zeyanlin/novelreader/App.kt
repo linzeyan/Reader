@@ -224,6 +224,8 @@ class App : Application() {
     fun closeChallenge() {
         challenge.value = null
         if (downloads.state.value.pendingChallenge != null) downloads.retryAfterWall()
+        // A batch of pasted addresses a wall stopped goes again the same way; a no-op for any other sheet.
+        retryAddingAfterWall()
     }
 
     // Downloads
@@ -371,7 +373,8 @@ class App : Application() {
 
     /** [title] is what a subscription list named the feed, kept under it if its own document will not answer. */
     data class Addition(val url: String, val state: State, val note: String? = null, val title: String? = null) {
-        enum class State { WAITING, RUNNING, ADDED, FAILED }
+        /** [PRESENT]: already on the shelf, so nothing was asked of the site — told apart from [ADDED] so a list pasted twice shows what was new. */
+        enum class State { WAITING, RUNNING, ADDED, PRESENT, FAILED }
     }
 
     /** What a run turns addresses into, which also decides how it runs. */
@@ -399,38 +402,65 @@ class App : Application() {
     val mediaMode by lazy { MutableStateFlow(prefs.defaultMediaMode()) }
     private var adding: Job? = null
 
+    /** The rows a wall stopped, first the one it stopped on, while its sheet is up: closing it is what [retryAfterWall] answers. */
+    private var heldByWall: List<Int>? = null
+
+    /** A wall met again on a retry's first row means its sheet was closed unsolved: not put straight back, or there is no way out of it. */
+    private var retryingWall = false
+
     /** @return false while another batch runs: two would race for the same hosts, reported in two places. */
     fun add(urls: List<String>, kind: AddKind = AddKind.BOOK, titles: List<String?> = emptyList()): Boolean {
         if (adding?.isActive == true) return false
         additions.value = urls.mapIndexed { i, url -> Addition(url, Addition.State.WAITING, title = titles.getOrNull(i)) }
         addKind.value = kind
-        adding = scope.launch { if (kind == AddKind.BOOK) addBooksInTurn(urls) else subscribeSiteBySite(kind) }
+        heldByWall = null
+        retryingWall = false
+        adding = scope.launch { if (kind == AddKind.BOOK) addBooksInTurn(urls.indices.toList()) else subscribeSiteBySite(kind) }
         return true
     }
 
-    private suspend fun addBooksInTurn(urls: List<String>) {
+    /**
+     * The reader closed the sheet a wall put up: the rows it stopped go again, the one it stopped on
+     * first — the iOS `retryAfterWall`. Closing is the reader saying the check is dealt with; dismissed
+     * unsolved, the retry meets the wall again and the batch comes to rest without the sheet.
+     */
+    private fun retryAddingAfterWall() {
+        val held = heldByWall ?: return
+        if (adding?.isActive == true) return
+        heldByWall = null
+        retryingWall = true
+        additions.update { list -> list.mapIndexed { i, a -> if (i in held) a.copy(state = Addition.State.WAITING, note = null) else a } }
+        adding = scope.launch { addBooksInTurn(held) }
+    }
+
+    private suspend fun addBooksInTurn(indices: List<Int>) {
         // More than one address is unattended work, paced like a download; a single one is
         // somebody waiting on a tap.
-        val paced = urls.size > 1
+        val paced = additions.value.size > 1
         try {
-            for (i in urls.indices) {
+            for (i in indices) {
+                val url = additions.value[i].url
                 setAddition(i) { it.copy(state = Addition.State.RUNNING) }
-                if (paced) pacer.pace(runCatching { URI(urls[i]).host?.lowercase() }.getOrNull() ?: urls[i])
+                if (paced) pacer.pace(runCatching { URI(url).host?.lowercase() }.getOrNull() ?: url)
                 val done = try {
-                    Addition(urls[i], Addition.State.ADDED, addBook(urls[i]))
+                    addBook(url)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: WebFetcher.FetchError.NeedsTheUser) {
                     // Answered by the reader; carrying on would spend the rest of the
                     // batch on a host that is going to refuse all of it.
                     setAddition(i) { it.copy(state = Addition.State.FAILED, note = describe(e)) }
-                    report(e, "App 正在加入書籍。")
+                    if (!retryingWall) {
+                        heldByWall = indices.dropWhile { it != i }
+                        report(e, "App 正在加入書籍。")
+                    }
                     markUnfinished("已停止")
                     return
                 } catch (e: Exception) {
-                    Addition(urls[i], Addition.State.FAILED, describe(e))
+                    Addition(url, Addition.State.FAILED, describe(e))
                 }
                 setAddition(i) { done }
+                retryingWall = false
             }
         } finally {
             if (paced) pacer.reset()
@@ -566,6 +596,7 @@ class App : Application() {
 
     fun clearAdditions() {
         additions.value = emptyList()
+        heldByWall = null
     }
 
     private fun setAddition(index: Int, change: (Addition) -> Addition) {
@@ -582,17 +613,25 @@ class App : Application() {
      * is a book; an address none claims is tried as a feed, one plain request; only what that settles is
      * no feed goes on to the derivation, page loads in the web view and the dearest step of all.
      *
-     * @return what the line says: the title the site published.
+     * A book already on the shelf is not asked for again, as on iOS: a list pasted twice is mostly
+     * those. Unless its rule now calls it another kind — re-adding is how a book is put right then.
+     *
+     * @return the line: the title the site published, or the shelf's name for a book already there.
      */
-    private suspend fun addBook(url: String): String {
+    private suspend fun addBook(url: String): Addition {
         val installed = sites.ruleMatching(url)
         if (installed == null) {
             val feed = try { feeds.subscribe(url) } catch (e: FeedService.NoFeed) { null }
             // Said on the line: it lands on the subscriptions shelf, which may not be the one up.
-            if (feed != null) return "${feed.shownName} · 已加入訂閱"
+            if (feed != null) return Addition(url, Addition.State.ADDED, "${feed.shownName} · 已加入訂閱")
         }
         val rule = installed ?: derivedRule(url)
         val siteBookId = rule.bookId(url) ?: throw Refusal("無法從這個網址辨識書籍，請改用書籍頁的網址。")
+        if (installed != null) {
+            library.bookNow(Book.makeId(rule.id, siteBookId))?.takeIf { it.kind == rule.kind }?.let {
+                return Addition(url, Addition.State.PRESENT, "${it.shownName} · 已在書櫃")
+            }
+        }
         val info = books.info(rule, siteBookId)
         val source = installed ?: sites.import(SiteRule.json.encodeToString(SiteRule.serializer(), rule))
         val book = library.bookmark(source.id, siteBookId, source.kind, info.title, info.author, info.cover)
@@ -604,7 +643,7 @@ class App : Application() {
         } catch (e: Exception) {
             if (e is WebFetcher.FetchError.NeedsTheUser) report(e, "App 正在加入書籍。")
         }
-        return if (installed == null) "${info.title} · 已自動建立來源「${source.name}」" else info.title
+        return Addition(url, Addition.State.ADDED, if (installed == null) "${info.title} · 已自動建立來源「${source.name}」" else info.title)
     }
 
     /**

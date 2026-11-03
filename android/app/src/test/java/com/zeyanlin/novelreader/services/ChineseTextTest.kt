@@ -71,6 +71,15 @@ class ChineseTextTest {
         }
     }
 
+    /** The iOS case of the same name: 69shuba turns its text traditional a character at a time, and wrong. */
+    @Test
+    fun wordConversionRepairsTextASiteTurnedTraditionalOneCharacterAtATime() {
+        val phrases = ChineseScript(Depth.PHRASES, Target.TRADITIONAL)
+        assertEquals("他乾笑了一聲，遠征軍，地板上，天花板", ChineseText.rendered("他幹笑了一聲，遠徵軍，地闆上，天花闆", phrases))
+        val correct = "在房間裡看著他，沈先生沉默了，乾隆皇帝，幹部們很乾淨，他的頭髮，後來皇后說，特徵，滑鼠"
+        assertEquals(correct, ChineseText.rendered(correct, phrases))
+    }
+
     @Test
     fun leavesTextWithNoChineseInItUntouched() {
         val english = "Chapter 17 — The Crossing"

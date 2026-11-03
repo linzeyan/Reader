@@ -243,7 +243,7 @@ final class LiveFeedTests: XCTestCase {
                         throw error
                     }
                 },
-                addBook: { _ in "" },
+                addBook: { _ in .added("") },
                 keep: { _, _ in nil },
                 settled: {},
                 report: { _ in }

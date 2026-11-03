@@ -56,9 +56,9 @@ final class BookAdditions {
         /// Subscribes to one address, and hands back the name it ended up under.
         var subscribe: (String, @escaping FeedService.ProgressHandler) async throws -> String
         /// Adds one address as a novel or a comic, by whatever installed rule it matches —
-        /// or by one worked out from the page and installed, if none does — and hands back
-        /// its title.
-        var addBook: (String) async throws -> String
+        /// or by one worked out from the page and installed, if none does — and says what
+        /// became of it: `added` or `present`, with the title.
+        var addBook: (String) async throws -> AddBookLine.Status
         /// Puts a subscription on the shelf without reading it, under `title` or whatever
         /// its own address suggests. Nil if the address is not one at all.
         var keep: (String, String?) -> String?
@@ -97,6 +97,12 @@ final class BookAdditions {
 
     private var task: Task<Void, Never>?
     private var work: Work?
+    /// The row a challenge or a sign-in wall stopped the run on, while that wall is in front
+    /// of the reader. Closing its sheet is what `retryAfterWall` answers.
+    private var wallLine: Int?
+    /// Set for the first row a retry tries. A wall met there again means the sheet was
+    /// closed unsolved, and putting it straight back would leave no way out of it.
+    private var retryingWall = false
     private let pacer: RequestPacer
 
     init(pacer: RequestPacer) {
@@ -111,7 +117,15 @@ final class BookAdditions {
 
     var finished: Int { lines.filter(\.status.isFinished).count }
     var added: Int { lines.filter(\.status.isAdded).count }
-    var failures: Int { lines.filter(\.status.isFailure).count }
+    var present: Int { lines.filter(\.status.isPresent).count }
+    var failures: Int { notAdded.count }
+
+    /// Every row that did not go in: the failures, and once a run has come to rest, the rows
+    /// it never reached — a wall or a stop leaves those untried, and they are as much not on
+    /// the shelf as a failure is.
+    var notAdded: [AddBookLine] {
+        lines.filter { $0.status.isFailure || (!isRunning && !$0.status.isFinished) }
+    }
 
     /// Starts a run, replacing whatever the last one left on screen.
     ///
@@ -124,9 +138,29 @@ final class BookAdditions {
         guard !isRunning, !requests.isEmpty, work != nil else { return false }
         lines = requests
         self.kind = kind
-        isRunning = true
-        task = Task { [weak self] in await self?.run(kind) }
+        wallLine = nil
+        retryingWall = false
+        launch()
         return true
+    }
+
+    /// The reader closed the sheet a wall put up: the row it stopped goes again, and the
+    /// rows behind it after it.
+    ///
+    /// Closing the sheet is the reader saying the check is dealt with, and carrying on is
+    /// why they dealt with it. Dismissed unsolved, the retry meets the wall again and the
+    /// run comes to rest without putting the sheet back — the download queue's answer too.
+    func retryAfterWall() {
+        guard !isRunning, let index = wallLine, lines.indices.contains(index) else { return }
+        wallLine = nil
+        retryingWall = true
+        lines[index].status = .waiting
+        launch()
+    }
+
+    private func launch() {
+        isRunning = true
+        task = Task { [weak self, kind = kind] in await self?.run(kind) }
     }
 
     /// Stops after whatever is in flight. Not an undo: the books already on the shelf were
@@ -139,6 +173,7 @@ final class BookAdditions {
     func clear() {
         guard !isRunning else { return }
         lines = []
+        wallLine = nil
     }
 
     /// Returns once the run in flight has come to rest.
@@ -181,19 +216,25 @@ final class BookAdditions {
         // what the pacer's own note says not to do.
         let paced = lines.count > 1
         defer { if paced { pacer.reset() } }
+        // Only the rows still waiting: a retry after a wall starts at the row it stopped.
         for index in lines.indices {
+            guard case .waiting = lines[index].status else { continue }
             if Task.isCancelled { return }
             lines[index].status = .working(nil)
             if paced { await pacer.pace(host: host(of: index)) }
             do {
-                lines[index].status = .added(try await work.addBook(lines[index].address))
+                lines[index].status = try await work.addBook(lines[index].address)
             } catch {
                 lines[index].status = .failed(error.localizedDescription)
                 if WebFetcher.needsTheUser(error) {
-                    work.report(error)
+                    if !retryingWall {
+                        wallLine = index
+                        work.report(error)
+                    }
                     return
                 }
             }
+            retryingWall = false
         }
     }
 
@@ -294,17 +335,26 @@ struct AddBookLine: Identifiable {
         /// The book's title, as the site published it — the confirmation that the
         /// address led where the reader thought it did.
         case added(String)
+        /// Already on the shelf, under this name, so nothing was asked of the site. Told
+        /// apart from `added` because a list pasted a second time is mostly these, and a
+        /// reader checking what was new cannot tell from a column of identical ticks.
+        case present(String)
         case failed(String)
 
         var isFinished: Bool {
             switch self {
-            case .added, .failed: return true
+            case .added, .present, .failed: return true
             case .waiting, .working: return false
             }
         }
 
         var isAdded: Bool {
             if case .added = self { return true }
+            return false
+        }
+
+        var isPresent: Bool {
+            if case .present = self { return true }
             return false
         }
 
@@ -316,6 +366,7 @@ struct AddBookLine: Identifiable {
         var note: String? {
             switch self {
             case .added(let title): return title
+            case .present(let title): return String(localized: "library.add.present \(title)")
             case .failed(let reason): return reason
             case .working(let progress): return progress
             case .waiting: return nil

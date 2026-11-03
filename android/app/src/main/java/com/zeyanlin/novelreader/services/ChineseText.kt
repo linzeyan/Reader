@@ -74,7 +74,7 @@ object ChineseText {
     fun rendered(text: String, script: ChineseScript): String {
         if (script.depth == ChineseScript.Depth.OFF || text.none { isHan(it) }) return text
         if (script.depth == ChineseScript.Depth.PHRASES) {
-            phrased(text, script.target)?.let { if (it.length == text.length) return it }
+            reread(text, script.target)?.let { if (it.length == text.length) return it }
         }
         val mapped = converter(script.target, phrases = false)?.convert(text) ?: return text
         return if (mapped.length == text.length) mapped else text
@@ -83,11 +83,23 @@ object ChineseText {
     /** Loads the phrase dictionaries off the main thread, if that is the tier in force. */
     fun prewarm(script: ChineseScript) {
         if (script.depth != ChineseScript.Depth.PHRASES) return
-        thread(isDaemon = true, name = "opencc") { converter(script.target, phrases = true) }
+        thread(isDaemon = true, name = "opencc") { reread("", script.target) }
     }
 
     /** OpenCC's own output, length and all — what its test cases are written against. */
     internal fun phrased(text: String, target: ChineseScript.Target) = converter(target, phrases = true)?.convert(text)
+
+    /**
+     * Traditional by way of simplified — the iOS `phrased(_:to:)`. 69shuba turns its text traditional
+     * a character at a time, so it can arrive 「幹笑」, 「遠徵」, 「地闆」, and converting to traditional
+     * leaves a character that already is alone. Simplified first folds each back onto the character it
+     * was guessed from, and the words around it pick again; correct traditional comes back as it was.
+     */
+    private fun reread(text: String, target: ChineseScript.Target): String? {
+        if (target == ChineseScript.Target.SIMPLIFIED) return phrased(text, target)
+        val simplified = phrased(text, ChineseScript.Target.SIMPLIFIED) ?: return null
+        return phrased(simplified, target)
+    }
 
     /** Worth asking first: most of what passes through has no Han character at all. */
     fun isHan(c: Char) = c in '\u3400'..'\u4DBF' || c in '\u4E00'..'\u9FFF' || c in '\uF900'..'\uFAFF'

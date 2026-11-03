@@ -65,12 +65,13 @@ struct AddBookSheet: View {
             // Nothing left to report and nothing to decide: the shelf behind the sheet is
             // already showing the books. A run with failures in it stays up, because
             // *which* address failed is the only thing this screen knows that the shelf
-            // does not.
+            // does not — and so does one that found books already there, which the shelf
+            // cannot tell from the ones just added.
             .onChange(of: additions.isRunning) { _, running in
                 // A share can start a new batch under a report left open; its failures
                 // have not been copied yet.
                 if running { copiedFailures = false }
-                guard !running, additions.failures == 0 else { return }
+                guard !running, additions.failures == 0, additions.present == 0 else { return }
                 additions.clear()
                 dismiss()
             }
@@ -143,11 +144,11 @@ struct AddBookSheet: View {
 
     /// Every address that did not go in, one per line, in one tap — the form the add
     /// field takes them back in, so a retry is a paste, and the form a note or a message
-    /// keeps them in until then. Only the failures: what went in is on the shelf already.
+    /// keeps them in until then. Only those: what went in is on the shelf already.
     private var copyFailuresSection: some View {
         Section {
             Button {
-                UIPasteboard.general.string = lines.filter(\.status.isFailure)
+                UIPasteboard.general.string = additions.notAdded
                     .map(\.address).joined(separator: "\n")
                 copiedFailures = true
             } label: {
@@ -169,6 +170,9 @@ struct AddBookSheet: View {
             ProgressView().controlSize(.mini)
         case .added:
             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .present:
+            // A tick, since nothing is wrong, but not the green one: nothing was added.
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
         case .failed:
             Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
         }

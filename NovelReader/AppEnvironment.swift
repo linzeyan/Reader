@@ -456,9 +456,14 @@ final class AppEnvironment {
     /// catch is a guess that fits this book and no other on the site — which is why the
     /// row names the source it made, so the reader knows there is one to remove.
     ///
+    /// A book already on the shelf is not asked for again: a list pasted a second time is
+    /// mostly those, and each would be two more trips through a WAF to write back what the
+    /// shelf already says. Unless its rule now calls it another kind — re-adding is how a
+    /// reader puts a book right after its rule was corrected, see `LibraryRepo.bookmark`.
+    ///
     /// - Returns: the title the site published, which is the confirmation that the address
-    ///   led where the reader thought it did.
-    private func addPastedBook(_ address: String) async throws -> String {
+    ///   led where the reader thought it did — or the shelf's name for a book already there.
+    private func addPastedBook(_ address: String) async throws -> AddBookLine.Status {
         guard let url = URL(string: address) else {
             throw AddBookError.derivationFailed(RuleDeriver.DeriveError.badURL.localizedDescription)
         }
@@ -469,22 +474,27 @@ final class AppEnvironment {
         } else {
             do {
                 let feed = try await subscribeToFeed(address)
-                return String(localized: "library.add.subscribed \(feed.shownName)")
+                return .added(String(localized: "library.add.subscribed \(feed.shownName)"))
             } catch FeedService.FeedError.noFeed {
                 rule = try await derivedRule(for: url)
             }
         }
         guard let siteBookId = rule.bookId(from: url) else { throw AddBookError.noBookId }
+        if installed != nil,
+           let shelved = try repo.book(id: Book.makeId(siteId: rule.id, siteBookId: siteBookId)),
+           shelved.kind == rule.kind {
+            return .present(shelved.shownName)
+        }
         let info = try await bookService.info(rule: rule, siteBookId: siteBookId)
         guard installed == nil else {
             try await addBook(rule: rule, siteBookId: siteBookId, info: info)
-            return info.title
+            return .added(info.title)
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let source = try sites.importRule(data: encoder.encode(rule))
         try await addBook(rule: source, siteBookId: siteBookId, info: info)
-        return String(localized: "library.add.derived \(info.title) \(source.name)")
+        return .added(String(localized: "library.add.derived \(info.title) \(source.name)"))
     }
 
     /// A rule for a site with none, or the reason there cannot be one.

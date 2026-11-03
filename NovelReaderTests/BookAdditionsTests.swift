@@ -35,17 +35,20 @@ final class BookAdditionsTests: XCTestCase {
 
     private var record: Record!
     private var settled = 0
+    private var reported = 0
 
     override func setUp() {
         record = Record()
         settled = 0
+        reported = 0
     }
 
     /// A queue whose subscriptions each take `delay`, and whose books do nothing at all.
     private func makeQueue(
         delay: Duration = .milliseconds(60),
         failing: Set<String> = [],
-        keeps: Bool = true
+        keeps: Bool = true,
+        walled: @escaping (String) -> Bool = { _ in false }
     ) -> BookAdditions {
         let queue = BookAdditions(pacer: RequestPacer(gap: 0...0))
         let record = record!
@@ -63,11 +66,14 @@ final class BookAdditionsTests: XCTestCase {
                     defer { record.end(address) }
                     try await Task.sleep(for: delay)
                     if failing.contains(address) { throw FeedService.FeedError.badAddress }
-                    return "Book at \(address)"
+                    if walled(address) {
+                        throw WebFetcher.FetchError.challengePresented(URL(string: address)!)
+                    }
+                    return .added("Book at \(address)")
                 },
                 keep: { address, title in keeps ? (title ?? address) : nil },
                 settled: { [weak self] in self?.settled += 1 },
-                report: { _ in }
+                report: { [weak self] _ in self?.reported += 1 }
             )
         )
         return queue
@@ -237,5 +243,65 @@ final class BookAdditionsTests: XCTestCase {
         await queue.settle()
 
         XCTAssertEqual(queue.failures, 1)
+    }
+
+    // MARK: - Walls
+
+    /// The reader solved the check the batch stopped on, closed the sheet — and nothing
+    /// happened, with seven addresses still waiting. Closing the sheet is the reader saying
+    /// it is dealt with, so the row it stopped goes again and the rest follow it.
+    func testClosingTheSheetAWallPutUpCarriesTheBatchOn() async {
+        var solved = false
+        let queue = makeQueue(delay: .zero, walled: { $0.hasSuffix("/2") && !solved })
+        let addresses = (1...4).map { "https://one.example/book/\($0)" }
+
+        queue.start(lines(addresses), as: .book)
+        await queue.settle()
+        XCTAssertEqual(reported, 1, "the wall is put in front of the reader")
+        XCTAssertEqual(queue.added, 1)
+        XCTAssertEqual(
+            queue.notAdded.map(\.address), Array(addresses.dropFirst()),
+            "the rows behind the wall did not go in either, and copying what did not must say so"
+        )
+
+        solved = true
+        queue.retryAfterWall()
+        await queue.settle()
+
+        XCTAssertEqual(queue.added, 4)
+        XCTAssertEqual(queue.failures, 0)
+        XCTAssertEqual(record.started.filter { $0 == addresses[0] }.count, 1, "nothing is added twice")
+    }
+
+    /// Closed without solving it, the retry meets the same wall. Putting the sheet straight
+    /// back would leave the reader no way out of it but to solve it.
+    func testAWallMetAgainOnTheRetryDoesNotPutTheSheetBack() async {
+        let queue = makeQueue(delay: .zero, walled: { $0.hasSuffix("/1") })
+
+        queue.start(lines(["https://one.example/book/1", "https://one.example/book/2"]), as: .book)
+        await queue.settle()
+        queue.retryAfterWall()
+        await queue.settle()
+
+        XCTAssertEqual(reported, 1)
+        XCTAssertFalse(queue.isRunning)
+        XCTAssertEqual(queue.failures, 2)
+
+        queue.retryAfterWall()
+        await queue.settle()
+        XCTAssertEqual(record.started.count, 2, "and a later sheet closing does not start it again")
+    }
+
+    /// A closed sheet that was some other screen's wall is not a reason to start a batch
+    /// that ended on its own.
+    func testClosingAnUnrelatedSheetLeavesAFinishedBatchAlone() async {
+        let queue = makeQueue(delay: .zero, failing: ["https://one.example/book/1"])
+
+        queue.start(lines(["https://one.example/book/1"]), as: .book)
+        await queue.settle()
+        queue.retryAfterWall()
+        await queue.settle()
+
+        XCTAssertEqual(record.started.count, 1)
     }
 }

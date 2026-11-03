@@ -4190,6 +4190,30 @@
         }
       }
     },
+    "library.add.present %@" : {
+      "comment" : "A pasted address whose book is already on the shelf: the book's name. Nothing was fetched for it; said apart from a fresh addition so a list pasted a second time shows what was new.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · already on the shelf"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 已在书架"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 已在書櫃"
+          }
+        }
+      }
+    },
     "library.add.subscribed %@" : {
       "comment" : "A pasted or shared address that no source claims and that turned out to be a feed: the subscription's name. Said on the row because it lands on the subscriptions shelf, which may not be the shelf the reader is looking at.",
       "extractionState" : "manual",

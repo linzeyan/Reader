@@ -70,6 +70,26 @@ final class ChineseScriptTests: XCTestCase {
         }
     }
 
+    /// 69shuba turns its simplified text traditional in the browser, one character at a
+    /// time, so a chapter can arrive traditional and wrong — and a conversion *to*
+    /// traditional has nothing to do to a character that already is. The word tier is the
+    /// one that can tell 乾 from 幹, so it is the one that reads such text again; and doing
+    /// so must not cost correct traditional anything a reader would call a change.
+    func testWordConversionRepairsTextASiteTurnedTraditionalOneCharacterAtATime() {
+        let repaired = [
+            "他幹笑了一聲": "他乾笑了一聲",
+            "遠徵軍": "遠征軍",
+            "地闆上": "地板上",
+            "天花闆": "天花板",
+        ]
+        for (served, expected) in repaired {
+            XCTAssertEqual(ChineseText.rendered(served, in: script(.phrases, .traditional)), expected)
+        }
+        for correct in ["在房間裡看著他", "沈先生沉默了", "乾隆皇帝", "幹部們很乾淨", "他的頭髮", "後來皇后說", "特徵", "滑鼠"] {
+            XCTAssertEqual(ChineseText.rendered(correct, in: script(.phrases, .traditional)), correct)
+        }
+    }
+
     func testLeavesTextWithNoChineseInItUntouched() {
         let english = "Chapter 17 — The Crossing"
         XCTAssertEqual(ChineseText.rendered(english, in: script(.phrases, .traditional)), english)

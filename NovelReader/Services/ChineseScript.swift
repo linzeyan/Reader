@@ -94,9 +94,9 @@ enum ChineseText {
     static func rendered(_ text: String, in script: ChineseScript) -> String {
         guard script.depth != .off, text.unicodeScalars.contains(where: isHan) else { return text }
 
-        if script.depth == .phrases, let converter = phraseConverter(for: script.target) {
-            let phrased = converter.convert(text)
-            if phrased.utf16.count == text.utf16.count { return phrased }
+        if script.depth == .phrases, let phrased = phrased(text, to: script.target),
+           phrased.utf16.count == text.utf16.count {
+            return phrased
         }
 
         guard let mapped = transformed(text, using: script.target.transform),
@@ -113,8 +113,27 @@ enum ChineseText {
     static func prewarm(_ script: ChineseScript) {
         guard script.depth == .phrases else { return }
         DispatchQueue.global(qos: .utility).async {
+            // Both directions for traditional, which reads by way of simplified — see `phrased`.
             _ = phraseConverter(for: script.target)
+            if script.target == .traditional { _ = phraseConverter(for: .simplified) }
         }
+    }
+
+    /// Traditional goes by way of simplified, so text that arrived traditional is read again.
+    ///
+    /// 69shuba flips its simplified text in the browser one character at a time, so a book
+    /// can arrive already traditional and wrong: 「幹笑」, 「遠徵」, 「地闆」. Converting
+    /// *to* traditional leaves a character that is already traditional alone, so those
+    /// stay. Simplified first folds each one back onto the character it was guessed from,
+    /// and the dictionaries then pick 「乾笑」, 「遠征」, 「地板」 from the word around it.
+    /// Correct traditional comes back as it was, with Taiwan's 「臺」 for 「台」 the visible
+    /// difference. Not done on the character tier: ICU makes that round trip lose 「裡」 to
+    /// 「里」 and the surname 「沈」 to 「沉」.
+    private static func phrased(_ text: String, to target: ChineseScript.Target) -> String? {
+        guard let converter = phraseConverter(for: target) else { return nil }
+        guard target == .traditional else { return converter.convert(text) }
+        guard let simplifier = phraseConverter(for: .simplified) else { return nil }
+        return converter.convert(simplifier.convert(text))
     }
 
     // MARK: - Converters

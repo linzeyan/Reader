@@ -72,6 +72,9 @@ struct RootView: View {
                 // Dismissed without solving, the queue meets the wall again and pauses
                 // that site's books rather than putting this sheet straight back.
                 if stoppedTheQueue { env.downloader.retryAfterWall() }
+                // The same for a batch of pasted addresses a wall stopped; a no-op for
+                // every sheet that was not that one.
+                env.additions.retryAfterWall()
             }
         }
         .onChange(of: env.downloader.pendingChallenge) { _, new in

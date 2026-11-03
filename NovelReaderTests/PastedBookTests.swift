@@ -89,4 +89,41 @@ final class PastedBookTests: XCTestCase {
         )
         XCTAssertTrue(env.sites.rules.isEmpty, "no source made for what was never a book")
     }
+
+    /// A list pasted a second time is mostly books already on the shelf. Each one asked for
+    /// again is two trips through a WAF to write back what the shelf already says, and a row
+    /// with the same green tick as a new book leaves the reader unable to see what was new.
+    func testABookAlreadyOnTheShelfIsNotFetchedAndSaysSo() async throws {
+        let rule = SiteRule(
+            id: "demo", name: "Demo", host: "demo.test",
+            urls: .init(
+                book: "https://demo.test/book/{bookId}",
+                catalog: "https://demo.test/book/{bookId}/",
+                chapter: "https://demo.test/txt/{bookId}/{chapterId}"
+            ),
+            idPatterns: .init(bookId: "/book/(\\d+)", chapterId: "/txt/\\d+/(\\d+)"),
+            search: nil,
+            book: .init(
+                title: .init(meta: nil, selector: "h1", attribute: nil),
+                author: nil, cover: nil, category: nil, status: nil, intro: nil, latestChapter: nil
+            ),
+            catalog: .init(container: "#catalog", linkSelector: "a", order: .ascending),
+            chapter: .init(
+                titleSelectors: ["h1"], contentSelectors: [".content"],
+                stripSelectors: [], dropParagraphPatterns: nil, prevSelector: nil, nextSelector: nil
+            ),
+            notes: nil
+        )
+        _ = try env.sites.importRule(data: JSONEncoder().encode(rule))
+        try env.repo.bookmark(siteId: "demo", siteBookId: "42", title: "諸界第一因")
+
+        // demo.test resolves nowhere: a fetch would fail the row rather than pass it.
+        env.additions.start(AddBookLine.pasted("https://demo.test/book/42"), as: .book)
+        await env.additions.settle()
+
+        let status = try XCTUnwrap(env.additions.lines.first?.status)
+        XCTAssertTrue(status.isPresent, status.note ?? "no note")
+        XCTAssertEqual(status.note, String(localized: "library.add.present \("諸界第一因")"))
+        XCTAssertEqual(env.additions.failures, 0)
+    }
 }
