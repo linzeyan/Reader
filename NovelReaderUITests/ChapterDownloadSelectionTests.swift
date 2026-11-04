@@ -46,6 +46,41 @@ final class ChapterDownloadSelectionTests: XCTestCase {
         )
     }
 
+    /// The same gesture clears an arc: untick one chapter, long-press another, and
+    /// everything between them is unticked. This is the way to clear more than a
+    /// screenful, because the system's drag across the ticks stops once the list starts
+    /// scrolling under it.
+    @MainActor
+    func testLongPressAfterAnUntickUnticksTheRange() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-NovelReaderDemoSeed"]
+        app.launch()
+
+        app.openLibraryTab()
+        let book = app.staticTexts["山海拾遺"].firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout: 10), "the demo library should list the seeded book")
+        book.tap()
+        let downloads = app.descendants(matching: .any)["book.downloads"].firstMatch
+        XCTAssertTrue(downloads.waitForExistence(timeout: 10))
+        app.reveal(downloads)
+        downloads.tap()
+
+        XCTAssertTrue(app.staticTexts["第1章　夜渡"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["downloads.selectAll"].tap()
+        let count = app.staticTexts["downloads.selectedCount"].firstMatch
+        XCTAssertTrue(count.waitForExistence(timeout: 3))
+        let total = try XCTUnwrap(Int(count.label.filter(\.isNumber)), "got: \(count.label)")
+
+        app.staticTexts["第5章　無名的燈"].firstMatch.tap()
+        XCTAssertTrue(waitForLabel(of: count, containing: "\(total - 1)"), "a tap unticks one; got: \(count.label)")
+
+        app.staticTexts["第1章　夜渡"].firstMatch.press(forDuration: 0.9)
+        XCTAssertTrue(
+            waitForLabel(of: count, containing: "\(total - 5)"),
+            "long-pressing chapter one after unticking five must untick one through five; got: \(count.label)"
+        )
+    }
+
     /// Polls for a label change. The selection count updates in place — there is no
     /// appearance or disappearance for `waitForExistence` to watch.
     private func waitForLabel(

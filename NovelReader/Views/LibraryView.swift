@@ -54,6 +54,8 @@ struct LibraryView: View {
     /// Held so the reading history's handoff can lay down a whole route — shelf,
     /// book screen, reader — replacing whatever was there. See `consumeHandoff`.
     @State private var path = NavigationPath()
+    /// Where each shelf was left — see `ShelfPositions`.
+    @State private var positions = ShelfPositions()
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -68,6 +70,11 @@ struct LibraryView: View {
                     filteredEmptyState
                 } else {
                     list(sections)
+                        // A list per shelf. One list that only swapped its rows kept the
+                        // offset the other shelf was left at, so the comics opened at
+                        // whatever depth the novels had been scrolled to. Each shelf's own
+                        // place is put back by `ShelfPositions` when its list comes up.
+                        .id(env.mediaMode)
                 }
             }
             .navigationTitle("tab.library")
@@ -637,6 +644,7 @@ struct LibraryView: View {
             )
         }
         .accessibilityIdentifier("library.book")
+        .background { EnclosingScrollView { positions.adopt($0, showing: book.kind) } }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 // A bookmark can be recreated and its chapters downloaded
@@ -769,7 +777,7 @@ private struct ShelfDownloadState: View {
                 // than this book held.
                 case nil where !downloader.isBusy:
                     Text("downloads.state.paused").foregroundStyle(.orange)
-                case nil where job.id == downloader.activeBookId:
+                case nil where downloader.isDownloading(job.id):
                     Label(
                         "book.download.progress \(job.completed) \(job.total)",
                         systemImage: "arrow.down.circle"
@@ -929,5 +937,104 @@ struct CoverImage: View {
             }
         }
         .clipShape(.rect(cornerRadius: 4))
+    }
+}
+
+/// Where each shelf was left this run, so a trip to the comics and back lands on the same
+/// novels.
+///
+/// Not persisted: a fresh launch opens every shelf at its top, which is what was asked
+/// for.
+///
+/// Kept as the list's own scroll offset, read off the scroll view under it, rather than
+/// as a book to `ScrollViewReader.scrollTo`. That was tried first and measured off by
+/// the height of the large title: `scrollTo` lines a row up against the inset the bar has
+/// with its title unfolded, whatever the bar is showing, and SwiftUI reports neither. An
+/// offset needs no geometry at all, and the bar folds or unfolds to match it.
+@MainActor
+final class ShelfPositions {
+    private var offsets: [MediaMode: CGFloat] = [:]
+    private weak var scrollView: UIScrollView?
+    private var watch: NSKeyValueObservation?
+    /// The offset just put back, held against the bar settling: a new list comes up with
+    /// its title unfolded, the offset folds it, and the bar moves the offset as it goes —
+    /// measured: 63 put, 69 kept, against an inset of 189 that became 116.
+    private var holding: CGFloat?
+    private var reputting = false
+
+    /// Called by every row as it comes on screen, so by the first row of a new list.
+    func adopt(_ scrollView: UIScrollView, showing mode: MediaMode) {
+        guard scrollView !== self.scrollView else { return }
+        self.scrollView = scrollView
+        holding = nil
+        watch = scrollView.observe(\.contentOffset) { [weak self] view, _ in
+            // Off screen the offset is the list being taken down, not the reader.
+            guard view.window != nil else { return }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let held = self.holding {
+                    // A finger on the list ends it: from there the place is the reader's.
+                    if view.isTracking {
+                        self.holding = nil
+                    } else if abs(view.contentOffset.y - held) > 0.5 {
+                        // On the next turn rather than here: whatever moved it is midway
+                        // through its own pass, and putting it back inside that pass only
+                        // has it moved again — measured at 192 rounds within a millisecond.
+                        if !self.reputting {
+                            self.reputting = true
+                            DispatchQueue.main.async { [weak self] in
+                                self?.reputting = false
+                                if let held = self?.holding { view.contentOffset.y = held }
+                            }
+                        }
+                        return
+                    }
+                }
+                self.offsets[mode] = view.contentOffset.y
+            }
+        }
+        // A shelf not visited this run stays where a new list starts, at its top.
+        guard let saved = offsets[mode] else { return }
+        // On the next turn, once the list has laid its rows out: an offset set on an empty
+        // list is clamped back to its top.
+        DispatchQueue.main.async { [weak self] in
+            scrollView.layoutIfNeeded()
+            self?.holding = saved
+            scrollView.contentOffset.y = saved
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if self?.scrollView === scrollView { self?.holding = nil }
+            }
+        }
+    }
+}
+
+/// Hands over the scroll view a view is drawn inside — here, the one under a `List`, which
+/// SwiftUI does not expose.
+private struct EnclosingScrollView: UIViewRepresentable {
+    let found: (UIScrollView) -> Void
+
+    func makeUIView(context: Context) -> Probe { Probe(found: found) }
+    func updateUIView(_ probe: Probe, context: Context) { probe.found = found }
+
+    final class Probe: UIView {
+        var found: (UIScrollView) -> Void
+
+        init(found: @escaping (UIScrollView) -> Void) {
+            self.found = found
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil else { return }
+            var view = superview
+            while let current = view {
+                if let scrollView = current as? UIScrollView { return found(scrollView) }
+                view = current.superview
+            }
+        }
     }
 }

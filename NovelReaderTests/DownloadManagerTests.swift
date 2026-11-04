@@ -52,9 +52,9 @@ final class DownloadManagerTests: XCTestCase {
         return nil
     }
 
-    private func makeRule() -> SiteRule {
+    private func makeRule(host: String = "demo.test") -> SiteRule {
         SiteRule(
-            id: "demo", name: "Demo", host: "demo.test",
+            id: "demo", name: "Demo", host: host,
             urls: .init(
                 book: "https://demo.test/book/{bookId}",
                 catalog: "https://demo.test/book/{bookId}/",
@@ -90,8 +90,8 @@ final class DownloadManagerTests: XCTestCase {
         )
     }
 
-    private func job(_ book: Book, _ ids: [String]) -> DownloadManager.Job {
-        DownloadManager.Job(book: book, rule: makeRule(), chapters: ids.map(makeChapter))
+    private func job(_ book: Book, _ ids: [String], host: String = "demo.test") -> DownloadManager.Job {
+        DownloadManager.Job(book: book, rule: makeRule(host: host), chapters: ids.map(makeChapter))
     }
 
     private func makeChapter(_ id: String) -> Chapter {
@@ -109,7 +109,7 @@ final class DownloadManagerTests: XCTestCase {
     func testCompletingAChapterAfterCancelIsNotFatal() throws {
         let manager = try makeManager()
         XCTAssertFalse(
-            manager.completeIfStillQueued(makeChapter("1")),
+            manager.completeIfStillQueued(makeChapter("1"), on: "demo.test"),
             "A chapter that is no longer queued must report that the run should stop"
         )
     }
@@ -138,7 +138,7 @@ final class DownloadManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.jobs.map(\.id), ["a", "b"], "Behind it, in the order asked")
         XCTAssertEqual(manager.job(for: "a")?.remaining.map(\.id), ["1", "2"])
-        XCTAssertEqual(manager.activeBookId, "a", "The book in front goes first")
+        XCTAssertEqual(manager.activeBookIds, ["a"], "The book in front goes first")
         XCTAssertEqual(manager.remainingCount, 3, "A background window counts every book")
         manager.cancel()
     }
@@ -182,7 +182,7 @@ final class DownloadManagerTests: XCTestCase {
         manager.resume()
 
         XCTAssertTrue(manager.isBusy)
-        XCTAssertEqual(manager.activeBookId, "b")
+        XCTAssertEqual(manager.activeBookIds, ["b"])
         XCTAssertEqual(manager.job(for: "a")?.hold, .paused)
         XCTAssertEqual(manager.jobs.map(\.id), ["a", "b"], "Held, not moved")
         manager.cancel()
@@ -213,9 +213,9 @@ final class DownloadManagerTests: XCTestCase {
         manager.start(book: feed, rule: makeRule(), chapters: [makeChapter("1")])
         manager.start(book: makeBook(id: "b"), rule: makeRule(), chapters: [makeChapter("2")])
 
-        waitUntil { manager.activeBookId == "b" }
+        waitUntil { manager.activeBookIds == ["b"] }
 
-        XCTAssertEqual(manager.activeBookId, "b", "The next book must start by itself")
+        XCTAssertEqual(manager.activeBookIds, ["b"], "The next book must start by itself")
         XCTAssertTrue(manager.isBusy, "…as part of the run, not left paused")
         XCTAssertNil(manager.job(for: "a"), "A finished book leaves the queue")
         manager.cancel()
@@ -232,13 +232,108 @@ final class DownloadManagerTests: XCTestCase {
         )
         manager.start(book: makeBook(id: "b"), rule: makeRule(), chapters: [makeChapter("4")])
 
-        waitUntil(seconds: 20) { manager.activeBookId == "b" }
+        waitUntil(seconds: 20) { manager.activeBookIds == ["b"] }
 
         let held = manager.job(for: "a")
         XCTAssertEqual(held?.hold, .paused)
         XCTAssertEqual(held?.remaining.map(\.id), ["3"], "The third failure keeps its place")
         XCTAssertNotNil(held?.note, "…and says why")
-        XCTAssertEqual(manager.activeBookId, "b")
+        XCTAssertEqual(manager.activeBookIds, ["b"])
+        manager.cancel()
+    }
+
+    // MARK: - A lane per site
+
+    /// The report this exists for: comics from one site sat waiting behind every novel
+    /// queued ahead of them from another. Two sites are two lanes, and both start at once;
+    /// a second book from a site already running waits its turn behind the first.
+    func testBooksFromDifferentSitesDownloadSideBySide() throws {
+        let manager = try makeManager()
+        manager.restore([
+            job(makeBook(id: "a"), ["1"], host: "novels.test"),
+            job(makeBook(id: "c"), ["3"], host: "novels.test"),
+            job(makeBook(id: "b", kind: .comic), ["2"], host: "comics.test"),
+        ])
+
+        manager.resume()
+
+        XCTAssertEqual(manager.activeBookIds, ["a", "b"], "one book per site, every site at once")
+        XCTAssertFalse(manager.isDownloading("c"), "a site still takes its books one at a time")
+        manager.cancel()
+    }
+
+    /// A book added while another site is downloading starts straight away rather than
+    /// joining the back of a queue it has nothing to do with.
+    func testABookFromAnotherSiteStartsWhileTheQueueIsRunning() throws {
+        let manager = try makeManager()
+        manager.start(book: makeBook(id: "a"), rule: makeRule(host: "novels.test"), chapters: [makeChapter("1")])
+        XCTAssertEqual(manager.activeBookIds, ["a"])
+
+        manager.start(
+            book: makeBook(id: "b", kind: .comic), rule: makeRule(host: "comics.test"),
+            chapters: [makeChapter("2")]
+        )
+
+        XCTAssertEqual(manager.activeBookIds, ["a", "b"])
+        manager.cancel()
+    }
+
+    /// Holding one site's book is not holding the other site's: its lane carries on.
+    func testPausingOneSitesBookLeavesTheOtherSiteRunning() throws {
+        let manager = try makeManager()
+        manager.restore([
+            job(makeBook(id: "a"), ["1"], host: "novels.test"),
+            job(makeBook(id: "b", kind: .comic), ["2"], host: "comics.test"),
+        ])
+        manager.resume()
+
+        manager.pause(bookId: "a")
+
+        XCTAssertTrue(manager.isBusy)
+        XCTAssertEqual(manager.activeBookIds, ["b"])
+        XCTAssertEqual(manager.job(for: "a")?.hold, .paused)
+        manager.cancel()
+    }
+
+    /// A site failing over and over says nothing about another one: the streak that holds
+    /// a book is its own site's, and the other lane's count is untouched by it.
+    func testAFailureStreakBelongsToItsOwnSite() throws {
+        let manager = try makeManager()
+        manager.restore([
+            job(makeBook(id: "a"), ["1"], host: "novels.test"),
+            job(makeBook(id: "b", kind: .comic), ["2"], host: "comics.test"),
+        ])
+        manager.resume()
+
+        XCTAssertFalse(manager.noteChapterFailed(on: "novels.test"))
+        XCTAssertFalse(manager.noteChapterFailed(on: "novels.test"))
+        XCTAssertFalse(manager.noteChapterFailed(on: "comics.test"), "the other site has failed once, not three times")
+        XCTAssertTrue(manager.noteChapterFailed(on: "novels.test"))
+        manager.cancel()
+    }
+
+    /// Backgrounding stops every lane after its chapter, and the caller's hold is let go
+    /// only when the last of them has stopped — not when the first does.
+    func testADrainReleasesTheCallerOnlyWhenEveryLaneHasStopped() throws {
+        let manager = try makeManager()
+        manager.restore([
+            job(makeBook(id: "a"), ["1"], host: "novels.test"),
+            job(makeBook(id: "b", kind: .comic), ["2"], host: "comics.test"),
+        ])
+        manager.resume()
+        var released = false
+        manager.stopAfterCurrentChapter(reason: "background") { released = true }
+
+        // One lane gone, by the reader's hand rather than the network's, so the order is
+        // the test's and not a fetch's.
+        manager.pause(bookId: "a")
+        XCTAssertFalse(released, "the other site's chapter is still on the wire")
+        XCTAssertTrue(manager.isBusy)
+        XCTAssertTrue(manager.isDraining)
+
+        manager.cancel(bookId: "b")
+        XCTAssertTrue(released, "the last lane stopping is the queue at rest")
+        XCTAssertFalse(manager.isBusy)
         manager.cancel()
     }
 
@@ -318,13 +413,13 @@ final class DownloadManagerTests: XCTestCase {
 
         // Two chapters that will not fetch, each dropped and walked past — the rule a
         // book with a couple of unreadable chapters depends on.
-        XCTAssertFalse(manager.noteChapterFailed())
-        XCTAssertTrue(manager.completeIfStillQueued(chapters[0]))
-        XCTAssertFalse(manager.noteChapterFailed())
-        XCTAssertTrue(manager.completeIfStillQueued(chapters[1]))
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
+        XCTAssertTrue(manager.completeIfStillQueued(chapters[0], on: "demo.test"))
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
+        XCTAssertTrue(manager.completeIfStillQueued(chapters[1], on: "demo.test"))
 
         XCTAssertTrue(
-            manager.noteChapterFailed(),
+            manager.noteChapterFailed(on: "demo.test"),
             "three in a row is no longer a claim about chapters"
         )
         XCTAssertEqual(
@@ -342,12 +437,12 @@ final class DownloadManagerTests: XCTestCase {
         let chapters = (1...4).map { makeChapter("\($0)") }
         manager.start(book: makeBook(), rule: makeRule(), chapters: chapters)
 
-        XCTAssertFalse(manager.noteChapterFailed())
-        XCTAssertFalse(manager.noteChapterFailed())
-        manager.noteChapterSucceeded()
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
+        manager.noteChapterSucceeded(on: "demo.test")
 
-        XCTAssertFalse(manager.noteChapterFailed())
-        XCTAssertFalse(manager.noteChapterFailed())
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
         manager.cancel()
     }
 
@@ -361,14 +456,14 @@ final class DownloadManagerTests: XCTestCase {
             book: makeBook(), rule: makeRule(),
             chapters: [makeChapter("1"), makeChapter("2"), makeChapter("3")]
         )
-        XCTAssertFalse(manager.noteChapterFailed())
-        XCTAssertFalse(manager.noteChapterFailed())
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
         manager.pause()
 
         manager.resume()
 
-        XCTAssertFalse(manager.noteChapterFailed(), "the previous run's failures are spent")
-        XCTAssertFalse(manager.noteChapterFailed())
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"), "the previous run's failures are spent")
+        XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
         manager.cancel()
     }
 
@@ -380,7 +475,7 @@ final class DownloadManagerTests: XCTestCase {
         let rule = makeRule()
         let book = makeBook()
         manager.start(book: book, rule: rule, chapters: [makeChapter("2"), makeChapter("3")])
-        XCTAssertFalse(manager.completeIfStillQueued(makeChapter("1")))
+        XCTAssertFalse(manager.completeIfStillQueued(makeChapter("1"), on: "demo.test"))
         XCTAssertEqual(manager.current?.completed, 0, "A rejected chapter must not count as progress")
         manager.cancel()
     }

@@ -3181,25 +3181,25 @@
       }
     },
     "downloads.rangeHint" : {
-      "comment" : "Footer under the chapter list on the download-management screen, explaining the long-press range selection.",
+      "comment" : "Footer under the chapter list on the download-management screen, explaining the long-press range selection, which ticks or unticks to match the last tap.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Long-press a chapter to select everything from the last ticked one through it."
+            "value" : "Long-press a chapter to carry your last tap through to it: everything in between is ticked if that tap ticked, unticked if it unticked."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "长按章节，可从上一个勾选处连选到该章。"
+            "value" : "长按章节，会从上一次点的章节连到该章：上一次是勾选就一起勾选，是取消就一起取消。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "長按章節，可從上一個勾選處連選到該章。"
+            "value" : "長按章節，會從上一次點的章節連到該章：上一次是勾選就一起勾選，是取消就一起取消。"
           }
         }
       }

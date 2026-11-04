@@ -125,7 +125,7 @@ enum ExtractorScript {
               // Swift is what pattern-matches it and rebuilds the address; here it is
               // only ever read and passed on.
               var link = c.linkAttribute ? a.getAttribute(c.linkAttribute) : a.href;
-              return { title: clean(a.textContent), url: link ? String(link).trim() : '' };
+              return { title: clean(visibleText(a)), url: link ? String(link).trim() : '' };
             }).filter(function (e) { return e.title && e.url; });
           }
           // Dedupe by URL: catalogs often repeat the newest chapters in a header.
@@ -885,6 +885,18 @@ enum ExtractorScript {
     static let helpers = """
         function clean(s) {
           return (s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
+        }
+        // The words a node shows. `textContent` also reads the source of any
+        // <script> or <style> inside it, and a site that writes its "new" badge
+        // from a script inside the chapter link hands that code back as part of
+        // the chapter's name.
+        function visibleText(el) {
+          if (!el) return '';
+          if (!el.querySelector('script, style')) return el.textContent || '';
+          var copy = el.cloneNode(true);
+          var junk = copy.querySelectorAll('script, style');
+          for (var i = 0; i < junk.length; i++) junk[i].remove();
+          return copy.textContent || '';
         }
         // Walks a dot path by property access, one segment at a time, starting from
         // `node`. A rule file travels between users and is read inside the web view

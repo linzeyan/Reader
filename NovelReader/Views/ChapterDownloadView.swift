@@ -17,12 +17,23 @@ struct ChapterDownloadView: View {
     @State private var selection: Set<String> = []
     @State private var query = ""
     @State private var confirmingDelete = false
-    /// Where a long-pressed range extends from: the chapter most recently ticked on
-    /// its own. An anchor rather than filling between any two taps, because scattered
-    /// picking — three arcs' worth of single ticks — is this screen's other job, and
-    /// taps that quietly select everything in between would take it away. A long
-    /// press is the reader saying "through to here"; a tap keeps meaning one row.
-    @State private var rangeAnchorId: String?
+    /// Where a long-pressed range extends from: the chapter most recently ticked or
+    /// unticked on its own. An anchor rather than filling between any two taps, because
+    /// scattered picking — three arcs' worth of single ticks — is this screen's other
+    /// job, and taps that quietly select everything in between would take it away. A
+    /// long press is the reader saying "through to here"; a tap keeps meaning one row.
+    @State private var rangeAnchor: RangeAnchor?
+
+    /// The chapter a range starts from, and whether that tap ticked it or unticked it.
+    ///
+    /// Both ways because clearing an arc is as much this screen's job as picking one,
+    /// and the system's drag across the ticks gives up once the list starts scrolling
+    /// under it — about a screenful in, measured on the bare `List` as much as on this
+    /// one. A long press reaches any distance.
+    private struct RangeAnchor: Equatable {
+        let id: String
+        let ticks: Bool
+    }
 
     private var rule: SiteRule? { env.sites.rule(id: book.siteId) }
 
@@ -103,14 +114,19 @@ struct ChapterDownloadView: View {
             }
         }
         .onChange(of: selection) { old, new in
-            // A single fresh tick moves the anchor; a range fill or "select all"
-            // adds many at once and deliberately does not — the anchor is about
-            // the reader's last single choice. An anchor that got unticked is
-            // gone: extending from a row that is no longer selected would select
-            // a stretch starting somewhere unmarked.
+            // A single tick or untick moves the anchor; a range fill or "select all"
+            // changes many at once and deliberately does not — the anchor is about
+            // the reader's last single choice. An anchor whose row has since been
+            // turned the other way is gone: a range would start from a row that no
+            // longer says what the range should do.
             let added = new.subtracting(old)
-            if added.count == 1 { rangeAnchorId = added.first }
-            if let anchor = rangeAnchorId, !new.contains(anchor) { rangeAnchorId = nil }
+            let removed = old.subtracting(new)
+            if added.count == 1, removed.isEmpty, let id = added.first {
+                rangeAnchor = RangeAnchor(id: id, ticks: true)
+            } else if removed.count == 1, added.isEmpty, let id = removed.first {
+                rangeAnchor = RangeAnchor(id: id, ticks: false)
+            }
+            if let anchor = rangeAnchor, new.contains(anchor.id) != anchor.ticks { rangeAnchor = nil }
         }
         .environment(\.editMode, .constant(.active))
         .searchable(text: $query, placement: .navigationBarDrawer, prompt: Text("book.catalog.search"))
@@ -203,7 +219,8 @@ struct ChapterDownloadView: View {
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    /// Ticks everything from the anchor through `chapter`, both ends included.
+    /// Ticks everything from the anchor through `chapter`, both ends included — or
+    /// unticks it, when the anchor was a row unticked.
     ///
     /// Over the *filtered* rows, not the whole catalog: with a search narrowing the
     /// list, the rows between two results are not on screen, and selecting what
@@ -212,16 +229,21 @@ struct ChapterDownloadView: View {
     /// the anchor — so press, then press, works the same as tap, then press.
     private func extendSelection(to chapter: Chapter) {
         let rows = filtered
-        guard let anchor = rangeAnchorId,
-              let from = rows.firstIndex(where: { $0.id == anchor }),
+        guard let anchor = rangeAnchor,
+              let from = rows.firstIndex(where: { $0.id == anchor.id }),
               let to = rows.firstIndex(where: { $0.id == chapter.id })
         else {
             selection.insert(chapter.id)
-            rangeAnchorId = chapter.id
+            rangeAnchor = RangeAnchor(id: chapter.id, ticks: true)
             return
         }
-        selection.formUnion(rows[min(from, to)...max(from, to)].map(\.id))
-        rangeAnchorId = chapter.id
+        let range = rows[min(from, to)...max(from, to)].map(\.id)
+        if anchor.ticks {
+            selection.formUnion(range)
+        } else {
+            selection.subtract(range)
+        }
+        rangeAnchor = RangeAnchor(id: chapter.id, ticks: anchor.ticks)
     }
 
     /// Through the environment rather than straight to the queue: on a metered

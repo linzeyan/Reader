@@ -34,7 +34,7 @@
       // Swift is what pattern-matches it and rebuilds the address; here it is
       // only ever read and passed on.
       var link = c.linkAttribute ? a.getAttribute(c.linkAttribute) : a.href;
-      return { title: clean(a.textContent), url: link ? String(link).trim() : '' };
+      return { title: clean(visibleText(a)), url: link ? String(link).trim() : '' };
     }).filter(function (e) { return e.title && e.url; });
   }
   // Dedupe by URL: catalogs often repeat the newest chapters in a header.

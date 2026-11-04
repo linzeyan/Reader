@@ -12,6 +12,34 @@ permissions:
   contents: read
 
 jobs:
+  # Whether Android has anything new since the previous tag. A release that only touched
+  # the iOS side ships no APK: rebuilding the same app under a new number would offer
+  # Android readers an update with nothing in it. The version bump itself is not a change —
+  # every release moves versionName and versionCode — so those two lines are left out.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.android.outputs.changed }}
+      since: ${{ steps.android.outputs.since }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: android
+        run: |
+          since=$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          if [ -z "$since" ]; then
+            changed=true
+          elif git diff "$since" HEAD -- android/ | grep -E '^[+-]' | grep -Ev '^(\+\+\+|---) ' \
+              | grep -Eqv '^[+-][[:space:]]*version(Code|Name)[[:space:]]*='; then
+            changed=true
+          else
+            changed=false
+          fi
+          echo "Android changed since ${since:-the first commit}: $changed"
+          echo "changed=$changed" >>"$GITHUB_OUTPUT"
+          echo "since=$since" >>"$GITHUB_OUTPUT"
+
   ios:
     # Xcode 27, the one the App Store build comes from. Still a preview label on GitHub.
     runs-on: xcode-27
@@ -34,6 +62,8 @@ jobs:
           path: build/*.ipa
 
   android:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,7 +88,12 @@ jobs:
           path: android/*.apk
 
   release:
-    needs: [ios, android]
+    needs: [changes, ios, android]
+    # A skipped Android build still releases the IPA; a failed one, or a failed check of
+    # whether to build it, releases nothing.
+    if: >-
+      !cancelled() && needs.changes.result == 'success' && needs.ios.result == 'success'
+      && (needs.android.result == 'success' || needs.android.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -66,6 +101,17 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
-      - run: gh release create "$GITHUB_REF_NAME" *.ipa *.apk --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+      # Said on the release when there is no APK, so an Android reader looking for one is
+      # pointed at the release that has the current build rather than left to wonder.
+      - run: |
+          shopt -s nullglob
+          notes=()
+          if [ "$ANDROID" != true ]; then
+            notes=(--notes "Android is unchanged since $SINCE; its APK is on that release.")
+          fi
+          gh release create "$GITHUB_REF_NAME" *.ipa *.apk --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" --generate-notes "${notes[@]}"
         env:
           GH_TOKEN: ${{ github.token }}
+          ANDROID: ${{ needs.changes.outputs.android }}
+          SINCE: ${{ needs.changes.outputs.since }}

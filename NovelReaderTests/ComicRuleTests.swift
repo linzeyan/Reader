@@ -171,6 +171,30 @@ final class ComicRuleTests: XCTestCase {
         ])
     }
 
+    /// The same site marks its newest chapter with a script inside the link that writes
+    /// a badge next to the name. The name is read off the link, and the script's own
+    /// source must not come with it: stored once, a longer name that starts with the
+    /// real one is kept over it by every later refresh (`Chapter.fullerTitle`).
+    @MainActor
+    func testAScriptInsideACatalogLinkIsNotPartOfTheChaptersName() async throws {
+        let rule = try rule(Self.comicJSON())
+        let page = ScriptedPage()
+        await page.load("""
+        <html><body><div id="chapters">
+          <a href='#' onclick="cview('103-1.html',6,0);return false;">第1話</a>
+          <a href='#' onclick="cview('103-2.html',6,0);return false;"><font color=red id=lch>第2話</font><script>document.getElementById('lch').innerHTML+=''</script></a>
+        </div></body></html>
+        """)
+
+        let payload = try await page.evaluate(
+            try ExtractorScript.catalog(rule), as: ExtractorScript.CatalogPayload.self
+        )
+        let entries = BookService.entries(from: payload, rule: rule, siteBookId: "103")
+
+        XCTAssertEqual(entries.map(\.title), ["第1話", "第2話"])
+        XCTAssertEqual(entries.map(\.siteChapterId), ["1", "2"])
+    }
+
     /// And the ordinary case is untouched: where the catalog does link somewhere,
     /// the site's own link is what gets stored, because several of these templates
     /// do not round-trip through `{bookId}/{chapterId}`.

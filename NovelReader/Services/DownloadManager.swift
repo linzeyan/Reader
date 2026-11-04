@@ -1,9 +1,11 @@
 import Foundation
 
-/// Downloads chapters in the background, one at a time, politely.
+/// Downloads chapters in the background, one at a time per site, politely.
 ///
 /// Four constraints shape this:
-/// 1. The fetcher owns a single WKWebView, so concurrency is impossible anyway.
+/// 1. The fetcher owns a single WKWebView, and takes its loads one at a time
+///    (`WebFetcher.serialised`). Two sites' downloads can still overlap, because a
+///    comic's pages come down over `ImageFetcher`, not the web view.
 /// 2. These hosts sit behind Cloudflare. Hammering a challenged host is exactly
 ///    what gets an IP blocked, so fetches go through the shared `RequestPacer`
 ///    and a challenged host is *stepped away from* rather than retried.
@@ -21,11 +23,16 @@ import Foundation
 /// per chapter would put a synchronous file write inside the fetch loop to record
 /// something the restore recomputes anyway.
 ///
-/// Several books queue in the order they were asked for, each with a state of its own,
-/// and the queue works on the first one that is free to go. A book the reader paused,
-/// or one stuck behind a wall, keeps its place and is stepped over: one book that
-/// cannot move must not hold up every book behind it. Still one book at a time, for
-/// constraint 1 — a second book does not make the single web view any faster.
+/// Several books queue in the order they were asked for, each with a state of its own.
+/// Each site has a lane, and a lane works on the first of its site's books that is free
+/// to go. A book the reader paused, or one stuck behind a wall, keeps its place and is
+/// stepped over: one book that cannot move must not hold up every book behind it.
+///
+/// A lane per site rather than one for the whole queue: a comic from one site used to
+/// wait out every novel queued ahead of it from another, though the two share nothing
+/// but the web view's turns. Within a site it is still one book at a time — a second
+/// lane on the same host would double the rate the host sees, which is what constraint
+/// 2 is about — and pacing, rests and the failure streak all belong to the lane.
 ///
 /// Walls follow from the same web view. The verification sheet hands it to the reader,
 /// so while the sheet is up nothing else can be fetched; it is therefore put up only
@@ -81,8 +88,8 @@ final class DownloadManager {
     private(set) var status: Status = .idle
     /// Every queued book, in the order they were asked for. A finished book leaves.
     private(set) var jobs: [Job] = []
-    /// The book the run is on.
-    private(set) var activeBookId: String?
+    /// Each site's lane, by host: the book it is on and the loop fetching it.
+    private var lanes: [String: Lane] = [:]
     /// Why the whole queue stopped, when something other than a book stopped it — the
     /// app leaving the screen, a metered connection. A book's own reasons are its `note`.
     private(set) var lastError: String?
@@ -116,28 +123,33 @@ final class DownloadManager {
     /// other way to answer whether a queue started, what stopped it, or how much of it
     /// was left.
     private let trace: TraceLog
-    private var task: Task<Void, Never>?
 
-    /// Chapters that have failed since the last one that landed.
-    ///
-    /// Reset by every success, every fresh `run` and every change of book, so it counts
-    /// a *streak* rather than a total: three bad chapters spread through an 800-chapter
-    /// book is a site with three bad chapters, and the queue is right to walk past them.
-    private var failureStreak = 0
-    /// Set while the queue is meant to stop after the chapter on the wire.
+    /// One site's share of the run.
+    private struct Lane {
+        var bookId: String
+        var task: Task<Void, Never>?
+        /// Which lane this is. A cancelled lane's loop still runs to its `defer`, and
+        /// without this it would wind up the lane that *replaced* it — or, being the
+        /// last, release a background hold taken out for a run that is still going.
+        let token: Int
+        /// Chapters that have failed since the last one that landed.
+        ///
+        /// Reset by every success, every fresh lane and every change of book, so it
+        /// counts a *streak* rather than a total: three bad chapters spread through an
+        /// 800-chapter book is a site with three bad chapters, and the queue is right to
+        /// walk past them. Per lane, because one site failing says nothing of another.
+        var failureStreak = 0
+        /// Chapters left before the lane takes a longer rest. See `restIsDue`.
+        var chaptersUntilRest = DownloadManager.sampleRestBlock()
+    }
+
+    /// Set while the queue is meant to stop after the chapters on the wire.
     private(set) var isDraining = false
     private var drainReason: String?
     /// The background assertion being held open until the queue comes to rest.
     private var onStopped: (() -> Void)?
-    /// Which run the queue is on.
-    ///
-    /// A cancelled run still executes: the task body is scheduled, runs once, and
-    /// reaches its `defer`. Without this it would release a hold taken out by the
-    /// run that *replaced* it — ending the background assertion of a drain asked of
-    /// the new run before that run had fetched anything.
-    private var runToken = 0
-    /// Chapters left before the run takes a longer rest. See `restIsDue`.
-    private var chaptersUntilRest = 0
+    /// The last lane's token. See `Lane.token`.
+    private var laneToken = 0
 
     init(
         service: BookService,
@@ -170,15 +182,24 @@ final class DownloadManager {
     /// How many chapters the queue still owes, every book's.
     var remainingCount: Int { jobs.reduce(0) { $0 + $1.remaining.count } }
 
-    /// The book at the front: the one being fetched, or the first in line.
-    var current: Job? { activeJob ?? jobs.first }
+    /// The book at the front: the first one being fetched, or the first in line.
+    var current: Job? { jobs.first { isDownloading($0.id) } ?? jobs.first }
 
     func job(for bookId: String) -> Job? {
         jobs.first { $0.id == bookId }
     }
 
-    private var activeIndex: Int? { activeBookId.flatMap(index(of:)) }
-    private var activeJob: Job? { activeIndex.map { jobs[$0] } }
+    /// Whether a lane is on this book — what a row draws as "downloading" rather than
+    /// "queued".
+    func isDownloading(_ bookId: String) -> Bool {
+        lanes.values.contains { $0.bookId == bookId }
+    }
+
+    /// The books the lanes are on.
+    var activeBookIds: Set<String> { Set(lanes.values.map(\.bookId)) }
+
+    private func laneIndex(_ host: String) -> Int? { lanes[host].flatMap { index(of: $0.bookId) } }
+    private func laneJob(_ host: String) -> Job? { laneIndex(host).map { jobs[$0] } }
 
     private func index(of bookId: String) -> Int? {
         jobs.firstIndex { $0.id == bookId }
@@ -199,7 +220,7 @@ final class DownloadManager {
         // was already on disk, and a tap that queued work which then stopped somewhere.
         trace.note("dl start n=\(pending.count) of=\(chapters.count) books=\(jobs.count)")
         if let i = index(of: book.id) {
-            if book.id == activeBookId, status == .running {
+            if isDownloading(book.id), status == .running {
                 // Appended only: the head is the chapter on the wire, and taking it
                 // out from under its fetch would end the run without a word.
                 let before = jobs[i].remaining.count
@@ -222,7 +243,8 @@ final class DownloadManager {
             jobs.append(Job(book: book, rule: rule, chapters: pending))
         }
         if status == .running {
-            persistQueue()
+            // A book from a site with no lane yet starts now, beside the others.
+            startLanes()
         } else {
             lastError = nil
             run()
@@ -260,9 +282,7 @@ final class DownloadManager {
         // than the user stopped this — backgrounding, a metered connection, a window
         // expiring — which is the case nobody can see happen.
         trace.note("dl pause left=\(remainingCount) auto=\(reason == nil ? 0 : 1)")
-        task?.cancel()
-        task = nil
-        activeBookId = nil
+        stopLanes()
         if !jobs.isEmpty { status = .paused }
         if let reason { lastError = reason }
         clearDrain()
@@ -275,9 +295,11 @@ final class DownloadManager {
         trace.note("dl pause book left=\(jobs[i].remaining.count)")
         jobs[i].hold = .paused
         jobs[i].note = nil
-        if bookId == activeBookId, status == .running {
-            stopRun()
-            run()
+        if let host = lane(on: bookId), status == .running {
+            // Only this book's lane: the other sites' downloads have nothing to do with it.
+            stopLane(host)
+            startLanes()
+            settleIfNoLanes()
         } else {
             persistQueue()
         }
@@ -292,14 +314,14 @@ final class DownloadManager {
         jobs[i].note = nil
         jobs[i].retryingWall = false
         if status == .running {
-            persistQueue()
+            startLanes()
         } else {
             lastError = nil
             run()
         }
     }
 
-    /// Stops the queue after the chapter already on the wire, rather than
+    /// Stops the queue after the chapters already on the wire, rather than
     /// abandoning it.
     ///
     /// This exists for backgrounding. iOS grants roughly thirty seconds after the
@@ -353,7 +375,7 @@ final class DownloadManager {
             jobs[i].retryingWall = true
         }
         if status == .running {
-            persistQueue()
+            startLanes()
         } else {
             lastError = nil
             run()
@@ -365,7 +387,7 @@ final class DownloadManager {
         // Only when there was something to lose. A line per call would put a "cancel"
         // in every test teardown and every launch with nothing queued.
         if remainingCount > 0 { trace.note("dl cancel left=\(remainingCount)") }
-        stopRun()
+        stopLanes()
         jobs = []
         pendingChallenge = nil
         wall = nil
@@ -380,13 +402,15 @@ final class DownloadManager {
     func cancel(bookId: String) {
         guard let i = index(of: bookId) else { return }
         trace.note("dl cancel book left=\(jobs[i].remaining.count)")
+        let host = lane(on: bookId)
         jobs.remove(at: i)
         if !jobs.contains(where: { $0.hold == .wall }) { wall = nil }
-        if bookId == activeBookId, status == .running {
-            stopRun()
-            run()
+        if let host, status == .running {
+            stopLane(host)
+            startLanes()
+            settleIfNoLanes()
         } else if jobs.isEmpty {
-            stopRun()
+            stopLanes()
             status = .idle
             persistQueue()
         } else {
@@ -394,10 +418,26 @@ final class DownloadManager {
         }
     }
 
-    private func stopRun() {
-        task?.cancel()
-        task = nil
-        activeBookId = nil
+    /// The host of the lane on `bookId`, if one is.
+    private func lane(on bookId: String) -> String? {
+        lanes.first { $0.value.bookId == bookId }?.key
+    }
+
+    private func stopLane(_ host: String) {
+        lanes[host]?.task?.cancel()
+        lanes[host] = nil
+    }
+
+    private func stopLanes() {
+        for host in lanes.keys { stopLane(host) }
+    }
+
+    /// A queue whose last lane was just taken away comes to rest — and a drain waiting
+    /// on it is over.
+    private func settleIfNoLanes() {
+        guard lanes.isEmpty, status == .running else { return }
+        settle(reason: isDraining ? drainReason : nil)
+        clearDrain()
     }
 
     /// `extra`'s chapters appended to `queued`, minus any already there.
@@ -408,145 +448,178 @@ final class DownloadManager {
 
     // MARK: - Queue
 
+    /// Sets a stopped queue going: a lane for every site with a book free to go.
     private func run() {
         // A drain request belongs to the run it was made for. Carried into the
         // next one it would stop that run after a single chapter, with nothing
         // on screen to explain why.
         clearDrain()
-        // So does a failure streak. Resuming is the user saying they have dealt with
-        // whatever stopped the queue — cleared a challenge, changed network — and the
-        // new run has to be allowed to find that out for itself.
-        failureStreak = 0
-        chaptersUntilRest = Self.sampleRestBlock()
+        startLanes()
+        if lanes.isEmpty { settle() }
+    }
+
+    /// Opens a lane for every site that has a book free to go and none running. A new
+    /// lane starts with a clean failure streak: resuming is the user saying they have
+    /// dealt with whatever stopped it — cleared a challenge, changed network — and the
+    /// lane has to be allowed to find that out for itself.
+    private func startLanes() {
         // Not while the sheet is up: it has the web view, and a fetch would navigate
-        // it out from under the reader. Closing the sheet runs the queue again.
-        guard pendingChallenge == nil, pickNext() else {
-            settle()
+        // it out from under the reader. Closing the sheet runs the queue again. Nor
+        // while draining: the app is leaving, and a new site is not a chapter on the
+        // wire.
+        guard pendingChallenge == nil, !isDraining else {
+            persistQueue()
             return
         }
-        status = .running
+        for job in jobs where job.hold == nil && lanes[job.rule.host] == nil {
+            let host = job.rule.host
+            laneToken += 1
+            let token = laneToken
+            lanes[host] = Lane(bookId: job.id, token: token)
+            // A kept-back wall's page will not survive another site's fetches.
+            wall?.reload = true
+            trace.note("dl next n=\(job.remaining.count) books=\(jobs.count) lanes=\(lanes.count)")
+            lanes[host]?.task = Task { [weak self] in await self?.runLane(host, token: token) }
+        }
+        if !lanes.isEmpty { status = .running }
         persistQueue()
-        runToken += 1
-        let token = runToken
-        task = Task { [weak self] in
-            guard let self else { return }
-            // Released on every exit — normal end, cancellation, every book held,
-            // drain. A background assertion held past the point where the queue
-            // stopped is time iOS took from the user for nothing. Only for this
-            // run, though: see `runToken`.
-            defer { if self.runToken == token { self.notifyStopped() } }
-            // The book read afresh each chapter: it changes under this loop when one
-            // finishes, is paused, or hits a wall.
-            while !Task.isCancelled, let job = self.activeJob, let chapter = job.remaining.first {
-                do {
-                    let missing = try await self.download(chapter, of: job.book, from: job.rule)
-                    self.noteChapterSucceeded()
-                    guard self.completeIfStillQueued(chapter) else { return }
-                    self.wallCleared(on: job.rule.host)
-                    // Said out loud, because this is the one thing a chapter on the
-                    // device can now be that it could not be before: there, readable,
-                    // and short a page. Silence would make the gap a surprise found
-                    // offline, which is the whole reason the all-or-nothing rule was
-                    // there in the first place.
-                    if missing > 0 {
-                        self.setNote(
-                            String(localized: "downloads.chapter.missingPages \(chapter.title) \(missing)"),
-                            on: job.id
-                        )
-                    }
-                    // After the removal, so the count is what is genuinely left. One line
-                    // per chapter is the rate of the queue itself — paced, seconds apart —
-                    // not a hot loop, and it is the only record of how far a window got.
-                    self.trace.note("dl ok left=\(self.remainingCount) missing=\(missing)")
-                } catch is CancellationError {
-                    return
-                } catch WebFetcher.FetchError.challengePresented(let url) {
-                    // The chapter stays at the head of its book, so the retry after
-                    // the sheet is the chapter that hit the wall.
-                    self.hitWall(
-                        ChallengeRequest(url: url, doing: .download(job.book.shownName)),
-                        because: WebFetcher.FetchError.challengePresented(url)
+    }
+
+    /// One site's loop: its books one chapter at a time, until none of them is free to
+    /// go.
+    private func runLane(_ host: String, token: Int) async {
+        // Wound up on every exit — normal end, cancellation, every book held, drain —
+        // but only by the lane it belongs to: see `Lane.token`.
+        defer { laneEnded(host, token: token) }
+        // The book read afresh each chapter: it changes under this loop when one
+        // finishes, is paused, or hits a wall.
+        while !Task.isCancelled, lanes[host]?.token == token,
+              let job = laneJob(host), let chapter = job.remaining.first {
+            do {
+                let missing = try await download(chapter, of: job.book, from: job.rule)
+                guard lanes[host]?.token == token else { return }
+                noteChapterSucceeded(on: host)
+                guard completeIfStillQueued(chapter, on: host) else { return }
+                wallCleared(on: host)
+                // Said out loud, because this is the one thing a chapter on the
+                // device can now be that it could not be before: there, readable,
+                // and short a page. Silence would make the gap a surprise found
+                // offline, which is the whole reason the all-or-nothing rule was
+                // there in the first place.
+                if missing > 0 {
+                    setNote(
+                        String(localized: "downloads.chapter.missingPages \(chapter.title) \(missing)"),
+                        on: job.id
                     )
-                } catch WebFetcher.FetchError.signInRequired(let url) {
-                    // The same hold for the same reason: nothing the queue can do by
-                    // itself will get this host's next chapter, and grinding through
-                    // the rest of the book collecting identical failures would only
-                    // bury the one message that matters.
-                    self.hitWall(
-                        ChallengeRequest(
-                            url: url, reason: .signIn, doing: .download(job.book.shownName)
-                        ),
-                        because: WebFetcher.FetchError.signInRequired(url)
-                    )
-                } catch {
-                    // A single unreadable chapter must not strand the rest of the
-                    // book, so it is dropped from the queue and reported.
-                    //
-                    // But dropping is only right while the failure is *about the
-                    // chapter*. When it is not — a Cloudflare clearance that did not
-                    // take, a host that has started refusing us, a web view that has
-                    // stopped navigating — every chapter fails, and dropping each one
-                    // in turn walks the queue to nothing and reports it as a finished
-                    // download. That is what "I cleared the verification, pressed
-                    // resume, and my download queue vanished" is: the queue was not
-                    // lost, it was eaten, one failing chapter at a time.
-                    //
-                    // So a streak holds the book instead, with its chapters intact and
-                    // the reason on its row, and the books behind it carry on. The
-                    // chapter that hit the limit keeps its place at the head — it was
-                    // never given a fair attempt.
-                    if self.noteChapterFailed() {
-                        self.trace.note("dl streak left=\(job.remaining.count)")
-                        self.holdActive(
-                            note: String(
-                                localized: "downloads.paused.repeatedFailures \(error.localizedDescription)"
-                            )
-                        )
-                    } else {
-                        guard self.completeIfStillQueued(chapter) else { return }
-                        self.setNote(error.localizedDescription, on: job.id)
-                        self.trace.note("dl fail left=\(self.remainingCount)")
-                    }
                 }
-                // Checked after every outcome: a chapter that failed is still a
-                // chapter this run is done with.
-                if self.haltIfDraining() { return }
-                // The next book in the same loop rather than through `run()`, which
-                // would clear the run's drain and failure state at every hand-over.
-                guard self.pickNext() else { break }
-                await self.pacer.pace(host: self.activeJob?.rule.host ?? job.rule.host)
-                if self.restIsDue() {
-                    try? await Task.sleep(for: .seconds(Double.random(in: 15...45)))
-                    // A drain asked for during the rest must not wait through one
-                    // more fetch: backgrounding grants seconds, and the rest may
-                    // already have spent most of them.
-                    if self.haltIfDraining() { return }
+                // After the removal, so the count is what is genuinely left. One line
+                // per chapter is the rate of the queue itself — paced, seconds apart —
+                // not a hot loop, and it is the only record of how far a window got.
+                trace.note("dl ok left=\(remainingCount) missing=\(missing)")
+            } catch is CancellationError {
+                return
+            } catch WebFetcher.FetchError.challengePresented(let url) {
+                guard lanes[host]?.token == token else { return }
+                // The chapter stays at the head of its book, so the retry after
+                // the sheet is the chapter that hit the wall.
+                hitWall(
+                    ChallengeRequest(url: url, doing: .download(job.book.shownName)),
+                    because: WebFetcher.FetchError.challengePresented(url), on: host
+                )
+            } catch WebFetcher.FetchError.signInRequired(let url) {
+                guard lanes[host]?.token == token else { return }
+                // The same hold for the same reason: nothing the queue can do by
+                // itself will get this host's next chapter, and grinding through
+                // the rest of the book collecting identical failures would only
+                // bury the one message that matters.
+                hitWall(
+                    ChallengeRequest(
+                        url: url, reason: .signIn, doing: .download(job.book.shownName)
+                    ),
+                    because: WebFetcher.FetchError.signInRequired(url), on: host
+                )
+            } catch {
+                guard lanes[host]?.token == token else { return }
+                // A single unreadable chapter must not strand the rest of the
+                // book, so it is dropped from the queue and reported.
+                //
+                // But dropping is only right while the failure is *about the
+                // chapter*. When it is not — a Cloudflare clearance that did not
+                // take, a host that has started refusing us, a web view that has
+                // stopped navigating — every chapter fails, and dropping each one
+                // in turn walks the queue to nothing and reports it as a finished
+                // download. That is what "I cleared the verification, pressed
+                // resume, and my download queue vanished" is: the queue was not
+                // lost, it was eaten, one failing chapter at a time.
+                //
+                // So a streak holds the book instead, with its chapters intact and
+                // the reason on its row, and the books behind it carry on. The
+                // chapter that hit the limit keeps its place at the head — it was
+                // never given a fair attempt.
+                if noteChapterFailed(on: host) {
+                    trace.note("dl streak left=\(job.remaining.count)")
+                    holdActive(
+                        note: String(
+                            localized: "downloads.paused.repeatedFailures \(error.localizedDescription)"
+                        ),
+                        on: host
+                    )
+                } else {
+                    guard completeIfStillQueued(chapter, on: host) else { return }
+                    setNote(error.localizedDescription, on: job.id)
+                    trace.note("dl fail left=\(remainingCount)")
                 }
             }
-            if !Task.isCancelled { self.settle() }
+            // Checked after every outcome: a chapter that failed is still a
+            // chapter this lane is done with.
+            if isDraining { return }
+            // The site's next book in the same loop, which keeps the lane's rest
+            // countdown going across the hand-over.
+            guard pickNext(on: host) else { break }
+            await pacer.pace(host: host)
+            if restIsDue(on: host) {
+                try? await Task.sleep(for: .seconds(Double.random(in: 15...45)))
+                // A drain asked for during the rest must not wait through one
+                // more fetch: backgrounding grants seconds, and the rest may
+                // already have spent most of them.
+                if isDraining { return }
+            }
         }
     }
 
-    /// Settles which book the run is on: the current one while it has work and
-    /// nothing holds it, otherwise the first book free to go. Returns false when no
-    /// book is.
-    private func pickNext() -> Bool {
-        if let i = activeIndex, jobs[i].remaining.isEmpty {
-            jobs.remove(at: i)
-            activeBookId = nil
+    /// Takes a lane down once its loop is over, and brings the queue to rest when it was
+    /// the last one. Nothing when the lane was already taken down or replaced from
+    /// outside — that caller has done the bookkeeping.
+    private func laneEnded(_ host: String, token: Int) {
+        guard lanes[host]?.token == token else { return }
+        if let i = laneIndex(host), jobs[i].remaining.isEmpty { jobs.remove(at: i) }
+        lanes[host] = nil
+        guard lanes.isEmpty else {
+            persistQueue()
+            return
         }
-        if let job = activeJob, job.hold == nil { return true }
-        guard let next = jobs.first(where: { $0.hold == nil }) else {
-            activeBookId = nil
+        // The count here is the queue the app will come back to.
+        if isDraining { trace.note("dl drained left=\(remainingCount)") }
+        settleIfNoLanes()
+    }
+
+    /// Settles which book a lane is on: the current one while it has work and nothing
+    /// holds it, otherwise its site's first book free to go. Returns false when none is.
+    private func pickNext(on host: String) -> Bool {
+        if let i = laneIndex(host), jobs[i].remaining.isEmpty {
+            jobs.remove(at: i)
+        }
+        if let job = laneJob(host), job.hold == nil { return true }
+        guard let next = jobs.first(where: { $0.hold == nil && $0.rule.host == host }) else {
             return false
         }
-        activeBookId = next.id
+        lanes[host]?.bookId = next.id
         // A streak of the last book's failures says nothing about this one.
-        failureStreak = 0
+        lanes[host]?.failureStreak = 0
         // Another book means another page in the web view, so the one that put up the
         // wall will not be there by the time the sheet is.
         wall?.reload = true
-        trace.note("dl next n=\(next.remaining.count) books=\(jobs.count)")
+        trace.note("dl next n=\(next.remaining.count) books=\(jobs.count) lanes=\(lanes.count)")
         persistQueue()
         return true
     }
@@ -561,9 +634,10 @@ final class DownloadManager {
     /// sheet straight back would make the reader fight the same wall again before any
     /// other book could move, so the host's books are paused with the reason instead,
     /// and a tap on resume tries them again.
-    private func hitWall(_ request: ChallengeRequest, because error: WebFetcher.FetchError) {
-        guard let job = activeJob else { return }
-        let host = job.rule.host
+    private func hitWall(
+        _ request: ChallengeRequest, because error: WebFetcher.FetchError, on host: String
+    ) {
+        guard let job = laneJob(host) else { return }
         let gaveUp = job.retryingWall
         // The wall's kind, not its address: a queue parked on a sign-in and one parked on
         // a verification look the same from outside and need opposite things from the user.
@@ -581,7 +655,12 @@ final class DownloadManager {
                 jobs[i].note = error.localizedDescription
             }
         }
-        if !gaveUp { wall = request }
+        if !gaveUp {
+            wall = request
+            // Kept back while other sites' lanes go on, and their pages take the web view
+            // from the one that put the wall up — see `ChallengeRequest.reload`.
+            if lanes.count > 1 { wall?.reload = true }
+        }
         persistQueue()
     }
 
@@ -593,8 +672,8 @@ final class DownloadManager {
         }
     }
 
-    private func holdActive(note: String) {
-        guard let i = activeIndex else { return }
+    private func holdActive(note: String, on host: String) {
+        guard let i = laneIndex(host) else { return }
         jobs[i].hold = .paused
         jobs[i].note = note
         persistQueue()
@@ -608,11 +687,10 @@ final class DownloadManager {
     /// Brings the queue to rest: finished when no book is left, paused otherwise.
     ///
     /// This is also where a kept-back wall is finally put to the reader — once no
-    /// book is free to go, the sheet can have the web view without taking it from
+    /// lane is left running, the sheet can have the web view without taking it from
     /// anything.
     private func settle(reason: String? = nil) {
-        task = nil
-        activeBookId = nil
+        stopLanes()
         pacer.reset()
         guard !jobs.isEmpty else {
             finish()
@@ -691,25 +769,9 @@ final class DownloadManager {
     private func finish() {
         trace.note("dl done")
         status = .finished
-        activeBookId = nil
         wall = nil
         pacer.reset()
         persistQueue()
-    }
-
-    /// Brings a draining queue to rest. Returns true when the caller must stop.
-    ///
-    /// A drain that happens to empty the queue is a finished download, not a
-    /// paused one — there is nothing left to resume, and leaving a paused row on
-    /// the book screen would offer to continue a download that is over.
-    private func haltIfDraining() -> Bool {
-        guard isDraining else { return false }
-        // The count here is the queue the app will come back to.
-        trace.note("dl drained left=\(remainingCount)")
-        if let i = activeIndex, jobs[i].remaining.isEmpty { jobs.remove(at: i) }
-        settle(reason: drainReason)
-        clearDrain()
-        return true
     }
 
     /// Mirrors the queue to disk, or removes the file when there is no queue left
@@ -748,25 +810,26 @@ final class DownloadManager {
     ///
     /// Not private, like `noteChapterFailed` and for the same reason: the two together
     /// are the rule, and half a rule is not something a test can pin.
-    func noteChapterSucceeded() {
-        failureStreak = 0
+    func noteChapterSucceeded(on host: String) {
+        lanes[host]?.failureStreak = 0
     }
 
-    /// Records a chapter this run could not fetch.
+    /// Records a chapter `host`'s lane could not fetch.
     ///
-    /// - Returns: true when the caller must stop the run and leave the queue alone,
+    /// - Returns: true when the caller must hold the book and leave its chapters alone,
     ///   because the failures have stopped being about individual chapters.
     ///
     /// Not private: what matters is what this answers on the *third* call in a row, and
     /// there is no way to reach that through the public surface without three real
     /// fetches against a real host — which is to say, no way to pin the behaviour that
     /// keeps a download queue from eating itself.
-    func noteChapterFailed() -> Bool {
-        failureStreak += 1
-        return failureStreak >= Self.failureLimit
+    func noteChapterFailed(on host: String) -> Bool {
+        guard lanes[host] != nil else { return false }
+        lanes[host]?.failureStreak += 1
+        return (lanes[host]?.failureStreak ?? 0) >= Self.failureLimit
     }
 
-    /// Whether the run has earned its longer pause, counting down the block and
+    /// Whether `host`'s lane has earned its longer pause, counting down the block and
     /// sampling the next one when it has.
     ///
     /// The pacer's one-to-three-second gaps keep requests from *bursting*, but a
@@ -778,27 +841,29 @@ final class DownloadManager {
     /// fingerprint. The threshold sits under the cadence the wall was observed
     /// at; whether that is enough slack is empirical, and this is the first lever
     /// to adjust if the wall still comes.
-    private func restIsDue() -> Bool {
-        chaptersUntilRest -= 1
-        guard chaptersUntilRest <= 0 else { return false }
-        chaptersUntilRest = Self.sampleRestBlock()
-        return true
+    private func restIsDue(on host: String) -> Bool {
+        guard var lane = lanes[host] else { return false }
+        lane.chaptersUntilRest -= 1
+        let due = lane.chaptersUntilRest <= 0
+        if due { lane.chaptersUntilRest = Self.sampleRestBlock() }
+        lanes[host] = lane
+        return due
     }
 
-    private static func sampleRestBlock() -> Int {
+    nonisolated private static func sampleRestBlock() -> Int {
         Int.random(in: 10...15)
     }
 
-    /// Takes `chapter` off the head of the book being fetched. Returns false when it
-    /// is no longer there, and the caller must then stop.
+    /// Takes `chapter` off the head of the book `host`'s lane is fetching. Returns false
+    /// when it is no longer there, and the caller must then stop.
     ///
     /// A fetch takes seconds, and `cancel()` empties the queue the moment the
     /// user taps — so by the time a fetch returns, the chapter it was for may be
     /// gone. The unguarded `removeFirst()` this replaces trapped on the empty
     /// array and took the whole app down, which is what "download all, then
     /// cancel" did every time.
-    func completeIfStillQueued(_ chapter: Chapter) -> Bool {
-        guard let i = activeIndex, jobs[i].remaining.first?.id == chapter.id else { return false }
+    func completeIfStillQueued(_ chapter: Chapter, on host: String) -> Bool {
+        guard let i = laneIndex(host), jobs[i].remaining.first?.id == chapter.id else { return false }
         jobs[i].remaining.removeFirst()
         jobs[i].completed += 1
         landed += 1

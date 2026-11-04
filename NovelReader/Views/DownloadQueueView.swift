@@ -262,7 +262,7 @@ extension DownloadManager {
             return job.note ?? String(localized: "downloads.state.paused")
         case .wall:
             return String(localized: "downloads.state.wall")
-        case nil where job.id == activeBookId && isBusy:
+        case nil where isDownloading(job.id):
             return job.note
         case nil where isBusy:
             return String(localized: "downloads.state.queued")
