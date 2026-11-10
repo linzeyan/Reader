@@ -129,10 +129,8 @@ struct ReaderView: View {
         // `EdgeSwipeToGoBack`.
         .edgeSwipeGoesBack(settings.swipeToGoBack)
         .toolbar(.hidden, for: .tabBar)
-        // Always hidden, for the same reason, rather than following the controls: on a
-        // phone with no sensor housing the status bar's height *is* safe area, so
-        // toggling it shifts the text by exactly that much.
-        .statusBarHidden(true)
+        // With the controls, and only where that moves nothing — see `readerStatusBar`.
+        .readerStatusBar(showingControls: showControls)
         .preferredColorScheme(settings.forcedColorScheme(for: theme))
         .overlay(alignment: .top) {
             if showControls, let model {

@@ -63,6 +63,12 @@ final class DownloadManager {
         var rule: SiteRule
         /// Not yet fetched, in order.
         var remaining: [Chapter]
+        /// Chapters this run tried and could not fetch, set aside so the rest of the
+        /// book goes on. They return to the head of `remaining`, with the book held,
+        /// once the rest has been tried or a streak stops it: a chapter that failed is
+        /// still one the reader asked for, and dropping it left the queue looking
+        /// finished with chapters missing. Resume is how the reader tries them again.
+        var failed: [Chapter] = []
         var completed = 0
         var total: Int
         var hold: Hold?
@@ -180,7 +186,7 @@ final class DownloadManager {
     /// Whether the queue is stopped with a book free to go — what a resume would start.
     var canResume: Bool { status == .paused && jobs.contains { $0.hold == nil } }
     /// How many chapters the queue still owes, every book's.
-    var remainingCount: Int { jobs.reduce(0) { $0 + $1.remaining.count } }
+    var remainingCount: Int { jobs.reduce(0) { $0 + $1.remaining.count + $1.failed.count } }
 
     /// The book at the front: the first one being fetched, or the first in line.
     var current: Job? { jobs.first { isDownloading($0.id) } ?? jobs.first }
@@ -223,16 +229,23 @@ final class DownloadManager {
             if isDownloading(book.id), status == .running {
                 // Appended only: the head is the chapter on the wire, and taking it
                 // out from under its fetch would end the run without a word.
+                // Not the ones set aside: they are still this book's, and come back
+                // when the rest is done.
                 let before = jobs[i].remaining.count
-                jobs[i].remaining = Self.merge(pending, into: jobs[i].remaining)
+                let failedIds = Set(jobs[i].failed.map(\.id))
+                jobs[i].remaining = Self.merge(
+                    pending.filter { !failedIds.contains($0.id) }, into: jobs[i].remaining
+                )
                 jobs[i].total += jobs[i].remaining.count - before
             } else {
                 // Against the catalog it was tapped with, so chapters that have landed
                 // since drop out, and a book with nothing left leaves the queue.
                 let landedIds = Set(chapters.filter(\.isDownloaded).map(\.id))
                 jobs[i].remaining = Self.merge(
-                    pending, into: jobs[i].remaining.filter { !landedIds.contains($0.id) }
+                    pending,
+                    into: (jobs[i].failed + jobs[i].remaining).filter { !landedIds.contains($0.id) }
                 )
+                jobs[i].failed = []
                 jobs[i].total = jobs[i].completed + jobs[i].remaining.count
                 jobs[i].hold = nil
                 jobs[i].note = nil
@@ -541,23 +554,23 @@ final class DownloadManager {
             } catch {
                 guard lanes[host]?.token == token else { return }
                 // A single unreadable chapter must not strand the rest of the
-                // book, so it is dropped from the queue and reported.
+                // book, so it is set aside and reported, and the queue walks on.
                 //
-                // But dropping is only right while the failure is *about the
+                // But walking on is only right while the failure is *about the
                 // chapter*. When it is not — a Cloudflare clearance that did not
                 // take, a host that has started refusing us, a web view that has
-                // stopped navigating — every chapter fails, and dropping each one
-                // in turn walks the queue to nothing and reports it as a finished
-                // download. That is what "I cleared the verification, pressed
-                // resume, and my download queue vanished" is: the queue was not
-                // lost, it was eaten, one failing chapter at a time.
+                // stopped navigating — every chapter fails, and walking past each
+                // one in turn reaches the end of the book having fetched nothing.
                 //
-                // So a streak holds the book instead, with its chapters intact and
-                // the reason on its row, and the books behind it carry on. The
-                // chapter that hit the limit keeps its place at the head — it was
-                // never given a fair attempt.
+                // So a streak holds the book instead, with the reason on its row,
+                // and the books behind it carry on. The chapters the streak set
+                // aside go back in front of the one that hit the limit: none of
+                // them was given a fair attempt.
                 if noteChapterFailed(on: host) {
-                    trace.note("dl streak left=\(job.remaining.count)")
+                    trace.note(
+                        "dl streak left=\(job.remaining.count + job.failed.count) "
+                            + "err=\(WebFetcher.traceName(of: error))"
+                    )
                     holdActive(
                         note: String(
                             localized: "downloads.paused.repeatedFailures \(error.localizedDescription)"
@@ -565,9 +578,12 @@ final class DownloadManager {
                         on: host
                     )
                 } else {
-                    guard completeIfStillQueued(chapter, on: host) else { return }
+                    guard setAsideIfStillQueued(chapter, on: host) else { return }
                     setNote(error.localizedDescription, on: job.id)
-                    trace.note("dl fail left=\(remainingCount)")
+                    // The kind, because "the chapter page timed out" and "every image
+                    // was refused" are different reports and nothing else here tells them
+                    // apart.
+                    trace.note("dl fail left=\(remainingCount) err=\(WebFetcher.traceName(of: error))")
                 }
             }
             // Checked after every outcome: a chapter that failed is still a
@@ -592,7 +608,7 @@ final class DownloadManager {
     /// outside — that caller has done the bookkeeping.
     private func laneEnded(_ host: String, token: Int) {
         guard lanes[host]?.token == token else { return }
-        if let i = laneIndex(host), jobs[i].remaining.isEmpty { jobs.remove(at: i) }
+        if let i = laneIndex(host) { retireIfTried(i) }
         lanes[host] = nil
         guard lanes.isEmpty else {
             persistQueue()
@@ -606,9 +622,7 @@ final class DownloadManager {
     /// Settles which book a lane is on: the current one while it has work and nothing
     /// holds it, otherwise its site's first book free to go. Returns false when none is.
     private func pickNext(on host: String) -> Bool {
-        if let i = laneIndex(host), jobs[i].remaining.isEmpty {
-            jobs.remove(at: i)
-        }
+        if let i = laneIndex(host) { retireIfTried(i) }
         if let job = laneJob(host), job.hold == nil { return true }
         guard let next = jobs.first(where: { $0.hold == nil && $0.rule.host == host }) else {
             return false
@@ -674,9 +688,34 @@ final class DownloadManager {
 
     private func holdActive(note: String, on host: String) {
         guard let i = laneIndex(host) else { return }
+        restoreFailed(i)
         jobs[i].hold = .paused
         jobs[i].note = note
         persistQueue()
+    }
+
+    /// The chapters set aside, back in front of what is left — they came first in the
+    /// book, and a resume should try them first.
+    private func restoreFailed(_ i: Int) {
+        jobs[i].remaining = jobs[i].failed + jobs[i].remaining
+        jobs[i].failed = []
+    }
+
+    /// A book every chapter of which has been tried leaves the queue — unless some
+    /// failed. Then it stays, held, holding those chapters and saying how many: the
+    /// queue coming to rest with them silently gone is what made a download look
+    /// complete with chapters missing.
+    private func retireIfTried(_ i: Int) {
+        guard jobs[i].remaining.isEmpty else { return }
+        guard !jobs[i].failed.isEmpty else {
+            jobs.remove(at: i)
+            return
+        }
+        let count = jobs[i].failed.count
+        trace.note("dl kept failed=\(count)")
+        restoreFailed(i)
+        jobs[i].hold = .paused
+        jobs[i].note = String(localized: "downloads.paused.failedChapters \(count)")
     }
 
     private func setNote(_ note: String, on bookId: String) {
@@ -785,9 +824,9 @@ final class DownloadManager {
     /// Only the reader's own pause is written down. A wall or a failure streak is a
     /// judgement about this moment, and the next launch deserves a fresh attempt.
     private func persistQueue() {
-        let books = jobs.filter { !$0.remaining.isEmpty }.map {
+        let books = jobs.filter { !$0.remaining.isEmpty || !$0.failed.isEmpty }.map {
             PersistedDownloadQueue.Entry(
-                bookId: $0.id, siteChapterIds: $0.remaining.map(\.siteChapterId),
+                bookId: $0.id, siteChapterIds: ($0.failed + $0.remaining).map(\.siteChapterId),
                 paused: $0.hold == .paused && $0.note == nil
             )
         }
@@ -867,6 +906,18 @@ final class DownloadManager {
         jobs[i].remaining.removeFirst()
         jobs[i].completed += 1
         landed += 1
+        return true
+    }
+
+    /// Moves a chapter that failed off the head of its book into `failed`, under the
+    /// same guard as `completeIfStillQueued` and for the same reason. Not progress:
+    /// nothing landed.
+    ///
+    /// Not private, for the reason `noteChapterFailed` is not: the streak's whole
+    /// sequence can only be pinned by calling these in the order the loop does.
+    func setAsideIfStillQueued(_ chapter: Chapter, on host: String) -> Bool {
+        guard let i = laneIndex(host), jobs[i].remaining.first?.id == chapter.id else { return false }
+        jobs[i].failed.append(jobs[i].remaining.removeFirst())
         return true
     }
 }

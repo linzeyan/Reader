@@ -77,7 +77,7 @@ struct ComicReaderView: View {
         .toolbar(.hidden, for: .navigationBar)
         .edgeSwipeGoesBack(settings.swipeToGoBack)
         .toolbar(.hidden, for: .tabBar)
-        .statusBarHidden(true)
+        .readerStatusBar(showingControls: showControls)
         .preferredColorScheme(.dark)
         .overlay(alignment: .top) {
             if showControls, let model {

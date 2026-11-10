@@ -206,7 +206,8 @@ final class DownloadManagerTests: XCTestCase {
 
     /// The point of the queue: one book running out hands straight on to the next,
     /// inside the same run. A feed throws on download without touching the network,
-    /// so its only chapter is dropped and the book empties — the hand-over moment.
+    /// so its only chapter fails and the book has nothing left to try — the hand-over
+    /// moment.
     func testABookRunningOutHandsOnToTheNext() throws {
         let manager = try makeManager()
         let feed = makeBook(id: "a", kind: .feed)
@@ -217,7 +218,34 @@ final class DownloadManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.activeBookIds, ["b"], "The next book must start by itself")
         XCTAssertTrue(manager.isBusy, "…as part of the run, not left paused")
-        XCTAssertNil(manager.job(for: "a"), "A finished book leaves the queue")
+        manager.cancel()
+    }
+
+    /// A book is done when every chapter has been tried, not when every chapter has
+    /// landed. The chapters that failed used to leave the queue as they failed, so a
+    /// download that lost two chapters on a bad connection came to rest looking
+    /// finished, and the gap was found later, offline. They stay, the book is held
+    /// saying how many, and resume tries them again.
+    func testChaptersThatFailedStayQueuedWhenTheRestOfTheBookIsDone() throws {
+        let manager = try makeManager()
+        // Two failures: under the streak, so each is walked past rather than holding
+        // the book — the case that used to lose them.
+        manager.start(
+            book: makeBook(id: "a", kind: .feed), rule: makeRule(),
+            chapters: [makeChapter("1"), makeChapter("2")]
+        )
+
+        waitUntil(seconds: 20) { manager.job(for: "a")?.hold == .paused }
+
+        let held = manager.job(for: "a")
+        XCTAssertEqual(held?.hold, .paused, "a book with failed chapters is held, not finished")
+        XCTAssertEqual(held?.remaining.map(\.id), ["1", "2"], "…holding them, in book order")
+        XCTAssertNotNil(held?.note, "…and says why it is not done")
+        XCTAssertEqual(manager.remainingCount, 2)
+        XCTAssertNotEqual(manager.status, .finished)
+
+        manager.resume(bookId: "a")
+        XCTAssertTrue(manager.isDownloading("a"), "resume is how they are tried again")
         manager.cancel()
     }
 
@@ -236,7 +264,10 @@ final class DownloadManagerTests: XCTestCase {
 
         let held = manager.job(for: "a")
         XCTAssertEqual(held?.hold, .paused)
-        XCTAssertEqual(held?.remaining.map(\.id), ["3"], "The third failure keeps its place")
+        XCTAssertEqual(
+            held?.remaining.map(\.id), ["1", "2", "3"],
+            "Every chapter the streak passed over is kept, not just the third"
+        )
         XCTAssertNotNil(held?.note, "…and says why")
         XCTAssertEqual(manager.activeBookIds, ["b"])
         manager.cancel()
@@ -400,31 +431,30 @@ final class DownloadManagerTests: XCTestCase {
 
     /// The download queue that vanished after a Cloudflare check.
     ///
-    /// Dropping a chapter that will not fetch is deliberate — one bad chapter must not
-    /// strand the eight hundred behind it. But when the failure is not about the
-    /// chapter at all, every chapter fails, and dropping each one in turn walks the
-    /// whole queue to nothing and calls it a finished download. Resuming after a
-    /// challenge is exactly when that happens: the clearance may not have taken, and
-    /// the queue quietly ate itself while the reader watched the progress bar run.
+    /// Walking past a chapter that will not fetch is deliberate — one bad chapter must
+    /// not strand the eight hundred behind it. But when the failure is not about the
+    /// chapter at all, every chapter fails, and walking past each one in turn reaches
+    /// the end of the book having fetched nothing. Resuming after a challenge is
+    /// exactly when that happens: the clearance may not have taken, and the queue
+    /// quietly ate itself while the reader watched the progress bar run.
     func testAStreakOfFailuresStopsTheQueueInsteadOfEatingIt() throws {
         let manager = try makeManager()
         let chapters = (1...5).map { makeChapter("\($0)") }
         manager.start(book: makeBook(), rule: makeRule(), chapters: chapters)
 
-        // Two chapters that will not fetch, each dropped and walked past — the rule a
+        // Two chapters that will not fetch, each set aside and walked past — the rule a
         // book with a couple of unreadable chapters depends on.
         XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
-        XCTAssertTrue(manager.completeIfStillQueued(chapters[0], on: "demo.test"))
+        XCTAssertTrue(manager.setAsideIfStillQueued(chapters[0], on: "demo.test"))
         XCTAssertFalse(manager.noteChapterFailed(on: "demo.test"))
-        XCTAssertTrue(manager.completeIfStillQueued(chapters[1], on: "demo.test"))
+        XCTAssertTrue(manager.setAsideIfStillQueued(chapters[1], on: "demo.test"))
+        XCTAssertEqual(manager.current?.remaining.map(\.id), ["3", "4", "5"], "walked past")
+        XCTAssertEqual(manager.remainingCount, 5, "…but still owed")
+        XCTAssertEqual(manager.current?.completed, 0, "a chapter set aside is not progress")
 
         XCTAssertTrue(
             manager.noteChapterFailed(on: "demo.test"),
             "three in a row is no longer a claim about chapters"
-        )
-        XCTAssertEqual(
-            manager.current?.remaining.map(\.id), ["3", "4", "5"],
-            "and the chapter that hit the limit keeps its place, never having had a fair go"
         )
         manager.cancel()
     }

@@ -3060,6 +3060,30 @@
         }
       }
     },
+    "downloads.paused.failedChapters %lld" : {
+      "comment" : "Shown on a book's download row when the rest of the book is done but some chapters could not be fetched; they stay queued and resume tries them again.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld chapters could not be downloaded. Resume to try them again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有 %lld 章下载失败，按继续再试一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有 %lld 章下載失敗，按繼續再試一次。"
+          }
+        }
+      }
+    },
     "downloads.paused.repeatedFailures %@" : {
       "comment" : "Shown when several chapters in a row failed and the queue stopped rather than dropping the rest.",
       "extractionState" : "manual",

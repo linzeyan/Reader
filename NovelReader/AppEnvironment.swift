@@ -140,6 +140,9 @@ final class AppEnvironment {
     /// something to pull. At most one: both toolbar buttons are disabled while an
     /// import runs, and the file picker cannot be reopened.
     private var importTask: Task<Book, any Error>?
+    /// Books gone from the screen whose files and rows are still being deleted. See
+    /// `removeBookmark`.
+    private var removals: [String: Task<Void, Never>] = [:]
 
     /// - Parameter trace: the shared one in the app. Tests that record hand in their own,
     ///   for the reason every other store here is handed in: the shared one writes into
@@ -165,7 +168,7 @@ final class AppEnvironment {
         let repo = LibraryRepo(database: database)
         self.repo = repo
         self.downloads = DownloadStore(database: database, files: files)
-        let fetcher = WebFetcher()
+        let fetcher = WebFetcher(trace: trace)
         self.fetcher = fetcher
         // Watched for the whole life of the app, unlike the reader's own sources: the
         // engine is built here, at launch, and outlives every screen — which is the
@@ -294,15 +297,19 @@ final class AppEnvironment {
     // MARK: - Library
 
     func reloadLibrary() {
-        books = (try? repo.allBooks()) ?? []
+        // A book being removed is still in the database until its files are gone, and
+        // must not come back on screen meanwhile — iCloud and a finishing download both
+        // reload while a removal runs.
+        let removing = Set(removals.keys)
+        books = ((try? repo.allBooks()) ?? []).filter { !removing.contains($0.id) }
         // Loaded together with the books: the two are read as one list, and a
         // separately refreshed count would show a badge next to a book that has
         // already been removed.
         newChapterCounts = (try? repo.newChapterCounts()) ?? [:]
         lastReadChapterIndexes = (try? repo.lastReadChapterIndexes()) ?? [:]
-        recentReads = (try? repo.recentlyRead(
+        recentReads = ((try? repo.recentlyRead(
             limit: LibrarySettings.recentReadingRange.upperBound
-        )) ?? []
+        )) ?? []).filter { !removing.contains($0.book.id) }
     }
 
     /// The reading history as the first screen draws it.
@@ -969,15 +976,48 @@ final class AppEnvironment {
     /// Files first — a cascade-deleted chapter row can no longer tell us which
     /// files belonged to the book.
     ///
+    /// The book leaves the screen at once and the reclaiming happens off the main
+    /// thread. Done inline, a book with a thousand chapters on disk held the swipe for
+    /// seconds: the search text, the files and the chapter rows all went before the row
+    /// was allowed to disappear. The book's own row is deleted *last*, so a removal the
+    /// system cuts short leaves the book on the shelf at the next launch — with fewer
+    /// chapters on disk, and removable again — rather than gone with its files still
+    /// taking up space where no screen can reach them.
+    ///
     /// - Parameter publish: whether iCloud hears about it. Off for a removal another
     ///   device made, which is already in the store with the time it happened; writing
     ///   it again would move that time forward, past reads it should have lost to.
-    func removeBookmark(_ book: Book, publish: Bool = true) {
-        try? downloads.delete(.book(book))
+    /// - Returns: the reclaiming, for a test to wait on. Nothing on screen needs to.
+    @discardableResult
+    func removeBookmark(_ book: Book, publish: Bool = true) -> Task<Void, Never> {
+        // A second swipe, or iCloud reporting this device's own removal back, while the
+        // first is still deleting.
+        if let running = removals[book.id] { return running }
+        // Before anything is deleted: a lane still on this book would write its next
+        // chapter into the directory being taken away.
+        downloader.cancel(bookId: book.id)
+        let downloads = self.downloads
+        let repo = self.repo
+        let task = Task { [weak self] in
+            await Task.detached(priority: .userInitiated) {
+                try? downloads.delete(.book(book))
+                try? repo.removeBookmark(bookId: book.id)
+            }.value
+            self?.forgetRemoved(book, publish: publish)
+        }
+        removals[book.id] = task
+        // `reloadLibrary` rather than dropping the one entry by hand, because it is what
+        // already knows every list a book appears in; it leaves out `removals`.
+        reloadLibrary()
+        return task
+    }
+
+    /// What is kept about a book outside its own database rows, dropped once the rows
+    /// are gone.
+    private func forgetRemoved(_ book: Book, publish: Bool) {
         // And what reading it online left behind. Nothing else would ever come back for
         // it: the cache is found by book, and this is the moment the book stops existing.
         cache.clear(book)
-        try? repo.removeBookmark(bookId: book.id)
         if publish { cloud.removed(book) }
         // The one place a book stops existing, and the only chance to drop what is
         // kept about it outside the database.
@@ -987,7 +1027,7 @@ final class AppEnvironment {
         // page's settings are a singleton the whole app reads, and what a deleted book was
         // read with is the only thing in them that belongs to one book.
         ReaderSettings.shared.forgetOverrides(forBook: book.id)
-        downloader.cancel(bookId: book.id)
+        removals[book.id] = nil
         reloadLibrary()
     }
 
@@ -1177,6 +1217,9 @@ final class AppEnvironment {
     /// and it is the one this call can settle. The policy check that follows only
     /// ever *stops* a queue, so it cannot be starved by going second.
     private func networkChanged() {
+        // What every `web load` after it went out over. The first report after launch
+        // arrives here too, so a trace always says which network it started on.
+        trace.note("net \(monitor.connection.rawValue)")
         queueRestorer.connectionChanged()
         enforceNetworkPolicy()
     }

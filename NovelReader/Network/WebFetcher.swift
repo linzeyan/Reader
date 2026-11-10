@@ -131,7 +131,27 @@ final class WebFetcher: NSObject {
     /// the fact that `extract` throws when the rule list is missing.
     private(set) var importView: WKWebView?
 
-    override init() {
+    /// The diagnostics trace, for `LoadMark`.
+    private let trace: TraceLog
+
+    /// When the load a fetch is about reached each stage, for one `web load` trace line.
+    ///
+    /// Added for "times out on cellular, fine on Wi-Fi": a timeout alone cannot say
+    /// whether the site never answered (no commit), answered but never got as far as
+    /// any text (commit, no readable — a script in the head stuck on something), or had
+    /// text and was waiting on something else. Those point at three different fixes.
+    private struct LoadMark {
+        let start = ContinuousClock.now
+        var commit: Duration?
+        var readable: Duration?
+        /// Whether `settleWhenReadable` ended it rather than WebKit's load event.
+        var settledEarly = false
+    }
+
+    private var load: LoadMark?
+
+    init(trace: TraceLog = .makeShared()) {
+        self.trace = trace
         let config = WKWebViewConfiguration()
         // Persistent store: cf_clearance and the site's own cookies must survive
         // relaunch, otherwise every cold start re-triggers a challenge.
@@ -727,6 +747,47 @@ final class WebFetcher: NSObject {
         settlingWhenReadable: Bool = false,
         trigger: @escaping () -> Void
     ) async throws {
+        // Only the load a fetch is about, which is what `settlingWhenReadable` marks; the
+        // parking and gate-watching navigations would bury it.
+        guard settlingWhenReadable else {
+            return try await navigateUnmarked(timeout: timeout, in: view, trigger: trigger)
+        }
+        load = LoadMark()
+        do {
+            try await navigateUnmarked(
+                timeout: timeout, in: view, settlingWhenReadable: true, trigger: trigger
+            )
+            noteLoad(how: load?.settledEarly == true ? "readable" : "finish")
+        } catch {
+            noteLoad(how: Self.traceName(of: error))
+            throw error
+        }
+    }
+
+    /// One line per load: how it ended, and when each stage was reached. A stage that
+    /// is missing was never reached. No address — see `TraceLog`.
+    private func noteLoad(how: String) {
+        guard let mark = load else { return }
+        load = nil
+        func seconds(_ d: Duration?) -> String? {
+            guard let c = d?.components else { return nil }
+            return String(format: "%.1f", Double(c.seconds) + Double(c.attoseconds) / 1e18)
+        }
+        let fields = [
+            "how=\(how)",
+            seconds(mark.commit).map { "commit=\($0)" },
+            seconds(mark.readable).map { "readable=\($0)" },
+            seconds(ContinuousClock.now - mark.start).map { "end=\($0)" },
+        ]
+        trace.note("web load " + fields.compactMap { $0 }.joined(separator: " "))
+    }
+
+    private func navigateUnmarked(
+        timeout: Duration,
+        in view: WKWebView,
+        settlingWhenReadable: Bool = false,
+        trigger: @escaping () -> Void
+    ) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { @MainActor in
                 try await withCheckedThrowingContinuation { continuation in
@@ -803,9 +864,13 @@ final class WebFetcher: NSObject {
             }
             guard let since = readableSince else {
                 readableSince = .now
+                if let start = load?.start, load?.readable == nil {
+                    load?.readable = .now - start
+                }
                 continue
             }
             guard ContinuousClock.now - since >= Self.graceAfterReadable else { continue }
+            load?.settledEarly = true
             settleAsFinished()
             return
         }
@@ -928,6 +993,9 @@ extension WebFetcher: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard webView === navigatingView else { return }
         navigationHasCommitted = true
+        // The first commit: a site that bounces the first request commits twice, and
+        // the question is when the site first answered at all.
+        if let start = load?.start, load?.commit == nil { load?.commit = .now - start }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
