@@ -77,6 +77,10 @@ struct LibraryView: View {
                         .id(env.mediaMode)
                 }
             }
+            // From the screen's edge, so it cannot be mistaken for a row's own swipe — see
+            // `ShelfEdgeSwipe`. On the empty states too: a swipe that worked on a full
+            // shelf and did nothing on an empty one would read as broken.
+            .background { ShelfEdgeSwipe(onSwipe: stepShelf) }
             .navigationTitle("tab.library")
             // At the stack's root rather than on the shelf list, for the same reason
             // the history used to declare them at its root: the handoff lays the
@@ -208,6 +212,21 @@ struct LibraryView: View {
             }
         }
         .environment(\.openReading, OpenReadingAction { path.append($0) })
+    }
+
+    /// The next shelf in the order the switch in the toolbar draws them, or the one before.
+    ///
+    /// No wrap at either end: the switch is a row, not a ring, and a swipe past the feeds
+    /// landing on the novels would move the highlight the opposite way to the finger.
+    private func stepShelf(forward: Bool) {
+        let modes = MediaMode.allCases
+        guard let at = modes.firstIndex(of: env.mediaMode) else { return }
+        let next = at + (forward ? 1 : -1)
+        guard modes.indices.contains(next) else { return }
+        env.mediaMode = modes[next]
+        // The only signal while the finger is still down: the list is replaced, not slid,
+        // so a tick is what says the swipe was taken.
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     private var importButton: some View {
@@ -1004,6 +1023,112 @@ final class ShelfPositions {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if self?.scrollView === scrollView { self?.holding = nil }
             }
+        }
+    }
+}
+
+/// Switches shelves on a swipe that starts at the left or right edge of the screen.
+///
+/// The edge is what keeps it apart from the rows: every book on the shelf already answers a
+/// sideways swipe — copy the address to the right, rename and delete to the left, and a
+/// full swipe left deletes outright. A swipe anywhere on the list switching shelves would
+/// have to guess which one was meant, and guessing wrong next to a delete is not a guess to
+/// make. From the edge is the system's own place for "go somewhere else" — it is where the
+/// back swipe lives — and a row's swipe never needs to start there.
+///
+/// UIKit's edge recogniser rather than a SwiftUI drag: a drag laid over the list would run
+/// alongside the row's swipe, so one gesture would both open a row and switch the shelf.
+/// Here the list's own recognisers wait for the edge to give up, which it does at once for
+/// any touch that did not start at the edge.
+///
+/// Taken once the finger has travelled a short way in, not on release, so the shelf changes
+/// while the finger is still moving — there is nothing being dragged to follow it.
+private struct ShelfEdgeSwipe: UIViewRepresentable {
+    let onSwipe: (_ forward: Bool) -> Void
+
+    func makeUIView(context: Context) -> Probe { Probe(onSwipe: onSwipe) }
+    func updateUIView(_ probe: Probe, context: Context) { probe.onSwipe = onSwipe }
+
+    final class Probe: UIView, UIGestureRecognizerDelegate {
+        var onSwipe: (Bool) -> Void
+        private var recognizers: [UIScreenEdgePanGestureRecognizer] = []
+        /// The view the recognisers are on: the shelf's whole screen, not this probe, which
+        /// sits behind the list and is never what a touch lands on.
+        private weak var host: UIView?
+        /// Whether the swipe under way has already switched, so one swipe moves one shelf.
+        private var taken = false
+
+        /// How far in the finger goes before the swipe counts. Past what a tap drifts, and
+        /// well short of the width of a row's buttons.
+        private static let distance: CGFloat = 40
+
+        init(onSwipe: @escaping (Bool) -> Void) {
+            self.onSwipe = onSwipe
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+            recognizers = [UIRectEdge.left, .right].map { edge in
+                let recognizer = UIScreenEdgePanGestureRecognizer(
+                    target: self, action: #selector(panned(_:))
+                )
+                recognizer.edges = edge
+                recognizer.delegate = self
+                return recognizer
+            }
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let host { recognizers.forEach(host.removeGestureRecognizer) }
+            host = nil
+            guard window != nil, let screen = screenView() else { return }
+            recognizers.forEach(screen.addGestureRecognizer)
+            host = screen
+        }
+
+        /// The root view of the controller this probe is drawn in — the shelf's screen, under
+        /// its navigation bar. A pushed book or a sheet is another controller's view, so
+        /// neither of them picks up the swipe.
+        private func screenView() -> UIView? {
+            var view = superview
+            while let current = view {
+                if current.next is UIViewController { return current }
+                view = current.superview
+            }
+            return nil
+        }
+
+        @objc private func panned(_ recognizer: UIScreenEdgePanGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                taken = false
+            case .changed:
+                guard !taken else { return }
+                let dx = recognizer.translation(in: recognizer.view).x
+                // In from the right edge is the finger moving left, which is the way the
+                // switch in the toolbar runs: novels, comics, feeds.
+                let forward = recognizer.edges == .right
+                guard forward ? dx <= -Self.distance : dx >= Self.distance else { return }
+                taken = true
+                onSwipe(forward)
+            default:
+                break
+            }
+        }
+
+        /// Everything on the shelf's screen — the list's scroll and pull-to-refresh, every
+        /// row's swipe and tap — waits for the edge to give up first. Otherwise a swipe in
+        /// from the right edge is a race between switching shelves and opening that row's
+        /// delete. By containment rather than by type, because which view UIKit hangs a
+        /// row's swipe recogniser on is not something it promises.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy other: UIGestureRecognizer
+        ) -> Bool {
+            guard let host, let view = other.view, !recognizers.contains(where: { $0 === other })
+            else { return false }
+            return view.isDescendant(of: host)
         }
     }
 }

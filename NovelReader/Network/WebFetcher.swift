@@ -146,6 +146,8 @@ final class WebFetcher: NSObject {
         var readable: Duration?
         /// Whether `settleWhenReadable` ended it rather than WebKit's load event.
         var settledEarly = false
+        /// Whether that was on the fetch's `readyWhen` rather than the grace running out.
+        var settledOnReady = false
     }
 
     private var load: LoadMark?
@@ -270,6 +272,10 @@ final class WebFetcher: NSObject {
     /// Loads `url`, then evaluates `script` (a JS expression returning a
     /// JSON-serialisable value) and decodes the result.
     ///
+    /// - Parameter ready: a JavaScript expression that, once the document has parsed, is
+    ///   true when the part of the page `script` reads is there — see
+    ///   `settleWhenReadable`, and `ExtractorScript.matches` / `comicImagesReady` for the
+    ///   two in use. Nil keeps the load event as the only early signal.
     /// - Throws: `.challengePresented` if the loaded page is a challenge — the
     ///   caller is expected to pause any batch work and ask the user to help.
     func fetch<T: Decodable>(
@@ -278,10 +284,13 @@ final class WebFetcher: NSObject {
         as type: T.Type,
         signIn: SiteRule.SignIn? = nil,
         waitingFor selector: String? = nil,
+        readyWhen ready: String? = nil,
         timeout: Duration = .seconds(30)
     ) async throws -> T {
         try await serialised {
-            try await self.navigate(timeout: timeout, in: self.webView, settlingWhenReadable: true) {
+            try await self.navigate(
+                timeout: timeout, in: self.webView, settlingWhenReadable: true, readyWhen: ready
+            ) {
                 self.webView.load(self.request(for: url))
             }
             try await self.failIfChallenged()
@@ -557,7 +566,7 @@ final class WebFetcher: NSObject {
     /// seconds away from running its JS and navigating on to the page we asked for.
     /// Reporting it here, which is what this used to do, put a sheet in front of the
     /// reader asking them to prove they are human for a check that was going to pass
-    /// without them. `documentIsReadable` already refuses to settle early on a challenge
+    /// without them. `documentState` already refuses to settle early on a challenge
     /// for exactly this reason; the `didFinish` path had no such guard.
     ///
     /// So the page is watched instead of reported. Polled rather than waited on as a
@@ -745,6 +754,7 @@ final class WebFetcher: NSObject {
         timeout: Duration,
         in view: WKWebView,
         settlingWhenReadable: Bool = false,
+        readyWhen ready: String? = nil,
         trigger: @escaping () -> Void
     ) async throws {
         // Only the load a fetch is about, which is what `settlingWhenReadable` marks; the
@@ -755,9 +765,12 @@ final class WebFetcher: NSObject {
         load = LoadMark()
         do {
             try await navigateUnmarked(
-                timeout: timeout, in: view, settlingWhenReadable: true, trigger: trigger
+                timeout: timeout, in: view, settlingWhenReadable: true, readyWhen: ready,
+                trigger: trigger
             )
-            noteLoad(how: load?.settledEarly == true ? "readable" : "finish")
+            let how = load?.settledOnReady == true
+                ? "ready" : load?.settledEarly == true ? "readable" : "finish"
+            noteLoad(how: how)
         } catch {
             noteLoad(how: Self.traceName(of: error))
             throw error
@@ -786,6 +799,7 @@ final class WebFetcher: NSObject {
         timeout: Duration,
         in view: WKWebView,
         settlingWhenReadable: Bool = false,
+        readyWhen ready: String? = nil,
         trigger: @escaping () -> Void
     ) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -798,7 +812,9 @@ final class WebFetcher: NSObject {
                 }
             }
             if settlingWhenReadable {
-                group.addTask { @MainActor in try await self.settleWhenReadable(in: view) }
+                group.addTask { @MainActor in
+                    try await self.settleWhenReadable(in: view, readyWhen: ready)
+                }
             }
             group.addTask {
                 try await Task.sleep(for: timeout)
@@ -852,15 +868,38 @@ final class WebFetcher: NSObject {
     /// empty body, and settling on that husk would hand the extractor a document
     /// that is on its way out — the exact failure `failIfTurnedAway` exists to
     /// catch, arrived at from the other direction.
-    private func settleWhenReadable(in view: WKWebView) async throws {
+    ///
+    /// `ready` is the other way out, and the one that does not wait: a fetch that knows
+    /// what it is going to read can say so, and once the document has parsed and that
+    /// is in it, nothing still loading can be anything the fetch wants. Measured on the
+    /// comic shelf, where the load event never came in time and every catalog and chapter
+    /// paid the whole grace: `docs/TRACE.md` had them all at `how=readable end≈6–7`. Parsed is
+    /// what makes this safe — a list read while the parser is still inside it is a list
+    /// cut short — and a page that fills its list in afterwards is `waitFor`'s, which
+    /// still runs after this.
+    private func settleWhenReadable(in view: WKWebView, readyWhen ready: String?) async throws {
         var readableSince: ContinuousClock.Instant?
         while true {
             try await Task.sleep(for: Self.readabilityPollInterval)
             // Until the navigation commits, the document being inspected is the one
             // the *last* fetch left behind.
-            guard navigationHasCommitted, await documentIsReadable(in: view) else {
+            guard navigationHasCommitted else {
                 readableSince = nil
                 continue
+            }
+            let state = await documentState(in: view, readyWhen: ready)
+            guard state.readable else {
+                readableSince = nil
+                continue
+            }
+            if state.ready {
+                if let start = load?.start, load?.readable == nil {
+                    load?.readable = .now - start
+                }
+                load?.settledEarly = true
+                load?.settledOnReady = true
+                settleAsFinished()
+                return
             }
             guard let since = readableSince else {
                 readableSince = .now
@@ -890,19 +929,29 @@ final class WebFetcher: NSObject {
     /// the load event is what that arrives as. Settling early on it would trade a
     /// site that works after a short pause for one that asks the reader to prove
     /// they are human every time.
-    private func documentIsReadable(in view: WKWebView) async -> Bool {
-        struct Probe: Decodable { let readable: Bool }
+    ///
+    /// `ready` is only ever evaluated on a readable page, so a challenge can never be
+    /// taken for one that has what the fetch wanted. One that throws is not ready: unlike
+    /// `waitFor`, the cost of a broken rule here is the wait there always was.
+    private func documentState(
+        in view: WKWebView, readyWhen ready: String?
+    ) async -> (readable: Bool, ready: Bool) {
+        struct Probe: Decodable { let readable: Bool; let ready: Bool }
         let script = """
         (function () {
-          return {
-            readable: document.readyState !== 'loading'
-              && !!document.body
-              && (document.body.textContent || '').trim().length > 0
-              && !(\(Self.challengeMarkers))
-          };
+          var readable = document.readyState !== 'loading'
+            && !!document.body
+            && (document.body.textContent || '').trim().length > 0
+            && !(\(Self.challengeMarkers));
+          var ready = false;
+          if (readable) {
+            try { ready = !!(\(ready ?? "false")); } catch (e) {}
+          }
+          return { readable: readable, ready: ready };
         })()
         """
-        return (try? await evaluate(script, as: Probe.self, in: view))?.readable ?? false
+        let probe = try? await evaluate(script, as: Probe.self, in: view)
+        return (probe?.readable ?? false, probe?.ready ?? false)
     }
 
     private func evaluate<T: Decodable>(

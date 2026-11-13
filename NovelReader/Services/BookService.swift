@@ -69,7 +69,8 @@ final class BookService {
         let script = try ExtractorScript.catalog(rule)
         let payload = try await fetcher.fetch(
             url, extracting: script, as: ExtractorScript.CatalogPayload.self, signIn: rule.signIn,
-            waitingFor: rule.catalog.waitFor
+            waitingFor: rule.catalog.waitFor,
+            readyWhen: try rule.catalog.readySelector.map(ExtractorScript.matches)
         )
 
         // Off the main actor. A long serial's catalog is rewritten row by row — on an XR
@@ -194,9 +195,12 @@ final class BookService {
     func chapterImageURLs(rule: SiteRule, chapter: Chapter) async throws -> [URL] {
         guard let url = URL(string: chapter.url) else { throw ServiceError.badURL }
         let script = try ExtractorScript.comicImages(rule)
+        // Ready the moment the page list can be read: a chapter page is mostly ad images,
+        // and on the slowest site its load event never came, so every chapter waited out
+        // the whole readable grace for a list it had had since the first second.
         let payload = try await fetcher.fetch(
             url, extracting: script, as: ExtractorScript.ComicImagesPayload.self,
-            signIn: rule.signIn
+            signIn: rule.signIn, readyWhen: try ExtractorScript.comicImagesReady(rule)
         )
         let urls = payload.imageURLs.compactMap { URL(string: $0) }
         guard !urls.isEmpty else { throw ServiceError.emptyChapter }

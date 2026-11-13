@@ -270,6 +270,22 @@ struct SiteRule: Codable, Identifiable, Hashable {
         /// Whether the extractor hands back chapter ids rather than link text to
         /// recover them from — true for the two catalogs that have no links.
         var carriesChapterIds: Bool { lines == true || json != nil }
+
+        /// What a parsed catalog page has to match for its chapter list to be there —
+        /// the fetch's `readyWhen`, by way of `ExtractorScript.matches`.
+        ///
+        /// `waitFor` where the rule has one: it is the site saying when its list has
+        /// arrived. Otherwise the links the extractor reads, as one descendant selector.
+        /// Nil — wait the way every fetch did before — where that cannot be said as
+        /// one: a list of selectors would match on any one of them anywhere on the page,
+        /// and a catalog read from lines or JSON has no link to look for.
+        var readySelector: String? {
+            if let waitFor, !waitFor.isEmpty { return waitFor }
+            guard !carriesChapterIds, !linkSelector.isEmpty,
+                  !container.contains(","), !linkSelector.contains(",")
+            else { return nil }
+            return "\(container) \(linkSelector)"
+        }
     }
 
     /// How to read one comic chapter's page images.

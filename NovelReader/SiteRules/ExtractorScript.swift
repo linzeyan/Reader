@@ -739,6 +739,27 @@ enum ExtractorScript {
         """
     }
 
+    /// A `readyWhen` for a chapter's pages: true once `comicImages` would find any.
+    ///
+    /// The extractor itself rather than a selector, because only one of the three strategy
+    /// types reads the DOM — a page list on a global, or inside the packed script, has no
+    /// element to wait for. Asking the extractor is also what "ready" means: the fetch
+    /// stops waiting at the moment reading the page would succeed.
+    static func comicImagesReady(_ rule: SiteRule) throws -> String {
+        let extract = try comicImages(rule)
+        return """
+        (function () {
+          var r = \(extract);
+          return !!(r && r.imageURLs && r.imageURLs.length > 0);
+        })()
+        """
+    }
+
+    /// A `readyWhen` for a selector: true once the page matches it.
+    static func matches(_ selector: String) throws -> String {
+        "!!document.querySelector(\(try json(selector)))"
+    }
+
     struct SearchPayload: Decodable {
         struct Row: Decodable {
             let title: String
