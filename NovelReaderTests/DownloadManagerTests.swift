@@ -368,6 +368,38 @@ final class DownloadManagerTests: XCTestCase {
         manager.cancel()
     }
 
+    // fb20261113a: back in the app a second after leaving it, the queue still stopped by
+    // itself minutes later — "paused in the background" on screen, focus mode switched
+    // off — and sat idle until the reader noticed and tapped resume (once for 18 minutes,
+    // 2026-11-04 device trace). Coming back has to call the wind-down off: every lane
+    // going again, the one that had already stopped included, and the background time
+    // handed back.
+    func test_regression_fb20261113a_resumingWhileDrainingCallsTheDrainOff() throws {
+        let manager = try makeManager()
+        // A feed's chapter fails without touching the network, so its lane reaches the
+        // drain check and winds down at once, while the other site's is still on the wire.
+        manager.restore([
+            DownloadManager.Job(
+                book: makeBook(id: "a", kind: .feed), rule: makeRule(host: "feeds.test"),
+                chapters: [makeChapter("1"), makeChapter("2")]
+            ),
+            job(makeBook(id: "b"), ["3"], host: "novels.test"),
+        ])
+        manager.resume()
+        var released = false
+        manager.stopAfterCurrentChapter(reason: "background") { released = true }
+        waitUntil { manager.activeBookIds == ["b"] }
+        XCTAssertEqual(manager.activeBookIds, ["b"], "precondition: one lane already wound down")
+
+        manager.resume()
+
+        XCTAssertFalse(manager.isDraining, "back in the app, the queue must not stop by itself")
+        XCTAssertTrue(released, "the background time is handed back once nothing needs it")
+        XCTAssertEqual(manager.activeBookIds, ["a", "b"], "the lane that wound down goes again")
+        XCTAssertTrue(manager.isBusy)
+        manager.cancel()
+    }
+
     /// Spins the run loop, which is what lets the run task make progress.
     private func waitUntil(seconds: Double = 8, _ condition: () -> Bool) {
         let deadline = Date().addingTimeInterval(seconds)

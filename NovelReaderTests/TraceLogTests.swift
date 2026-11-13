@@ -65,6 +65,23 @@ final class TraceLogTests: XCTestCase {
         XCTAssertTrue(lines[2].hasSuffix("second"))
     }
 
+    /// Turned on in an app that has been running a while, the trace still starts at the
+    /// header's `0.0`. Times used to count from launch while the header said 0.0: the
+    /// 2026-11-13 device trace went from `0.0 boot` straight to `136369.7 sample`, and
+    /// placing any line against the header's wall clock gave an answer 38 hours off.
+    func testSwitchedOnMidRunTheClockStartsAtTheHeader() throws {
+        let log = makeLog()
+        // Long enough to show in a one-decimal column.
+        Thread.sleep(forTimeInterval: 0.6)
+        log.isOn = true
+        log.note("first")
+
+        let text = try XCTUnwrap(String(data: log.contents(), encoding: .utf8))
+        let first = try XCTUnwrap(text.split(separator: "\n").last)
+        let seconds = try XCTUnwrap(Double(first.split(separator: " ").first ?? ""))
+        XCTAssertLessThan(seconds, 0.3, "counted from the header, not from launch: \(first)")
+    }
+
     /// Recording outlives a launch, because the session worth recording is a whole
     /// evening and the app is relaunched several times inside one.
     func testARelaunchPicksTheSameTraceBackUp() throws {

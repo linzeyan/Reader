@@ -248,6 +248,10 @@ final class TraceLog {
     // MARK: - Lifetime
 
     private func begin() {
+        // The header says 0.0, so the clock starts here. Switched on in an app that had
+        // been running for 38 hours, counting from launch put `136369.7` on the line after
+        // `0.0 boot`, and the header's wall clock no longer placed anything.
+        startedAt = CACurrentMediaTime()
         let started = Date.now.formatted(.iso8601)
         queue.async { [writer] in
             writer.open()
@@ -366,10 +370,10 @@ final class TraceLog {
     /// Whether this trace has recorded a foreground before. What tells a launch's first
     /// activation apart from a return that never reached the background — see `notePhase`.
     @ObservationIgnored private var hasBeenForeground = false
-    /// Times are seconds since this launch, not wall clock: a `DateFormatter` per line is
-    /// real work on a path that runs several times a second, and the `boot` line carries
+    /// Times are seconds since the `boot` line, not wall clock: a `DateFormatter` per line
+    /// is real work on a path that runs several times a second, and the `boot` line carries
     /// the one absolute time needed to place the rest.
-    private let startedAt = CACurrentMediaTime()
+    @ObservationIgnored private var startedAt = CACurrentMediaTime()
     /// `.utility` rather than the main queue's priority: nothing waits on a trace line,
     /// and a diagnostics file that competes with the voice would change the thing it was
     /// brought in to measure.

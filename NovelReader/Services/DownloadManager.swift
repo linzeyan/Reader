@@ -366,6 +366,17 @@ final class DownloadManager {
         // Before the guard: a resume that refuses is exactly the shape of "I pressed it
         // and nothing happened", and after the guard it would leave no line at all.
         trace.note("dl resume can=\(canResume ? 1 : 0) left=\(remainingCount)")
+        // Back before the wind-down finished: the queue is still running, so there is
+        // nothing to start — but left alone the drain would stop it after the chapters on
+        // the wire, with the app on screen and "paused in the background" under it.
+        // Calling it off hands the background time back, and the lanes that already wound
+        // down open again.
+        if isDraining {
+            trace.note("dl drain off left=\(remainingCount)")
+            clearDrain()
+            startLanes()
+            return
+        }
         guard canResume else { return }
         lastError = nil
         run()
@@ -509,7 +520,8 @@ final class DownloadManager {
         while !Task.isCancelled, lanes[host]?.token == token,
               let job = laneJob(host), let chapter = job.remaining.first {
             do {
-                let missing = try await download(chapter, of: job.book, from: job.rule)
+                let started = ContinuousClock.now
+                let (pages, missing) = try await download(chapter, of: job.book, from: job.rule)
                 guard lanes[host]?.token == token else { return }
                 noteChapterSucceeded(on: host)
                 guard completeIfStillQueued(chapter, on: host) else { return }
@@ -528,7 +540,18 @@ final class DownloadManager {
                 // After the removal, so the count is what is genuinely left. One line
                 // per chapter is the rate of the queue itself — paced, seconds apart —
                 // not a hot loop, and it is the only record of how far a window got.
-                trace.note("dl ok left=\(remainingCount) missing=\(missing)")
+                //
+                // `after` and a comic's `pages` because the page load has its own `web load`
+                // line and the images have none: the 2026-11-13 trace had a comic at one
+                // chapter every two to four minutes with the web view parked the whole
+                // time, and nothing to say whether that was 160 pages or a stalled CDN.
+                let seconds = (ContinuousClock.now - started).components
+                let after = Double(seconds.seconds) + Double(seconds.attoseconds) / 1e18
+                trace.note(
+                    "dl ok left=\(remainingCount) missing=\(missing)"
+                        + String(format: " after=%.1f", after)
+                        + (pages.map { " pages=\($0)" } ?? "")
+                )
             } catch is CancellationError {
                 return
             } catch WebFetcher.FetchError.challengePresented(let url) {
@@ -756,16 +779,18 @@ final class DownloadManager {
     /// Both paths end in a store call that writes the files first and sets
     /// `downloadedAt` second, so the flag never claims a chapter that is not there.
     ///
-    /// - Returns: how many of the chapter's pages the site would not give up. Always
-    ///   zero for a novel, which has no unit smaller than the chapter to lose.
-    private func download(_ chapter: Chapter, of book: Book, from rule: SiteRule) async throws -> Int {
+    /// - Returns: how many pages the chapter has — nil for a novel, which has no unit
+    ///   smaller than the chapter — and how many of them the site would not give up.
+    private func download(
+        _ chapter: Chapter, of book: Book, from rule: SiteRule
+    ) async throws -> (pages: Int?, missing: Int) {
         switch book.kind {
         case .novel:
             let paragraphs = try await service.chapterParagraphs(rule: rule, chapter: chapter)
             try downloads.save(
                 paragraphs: paragraphs, book: book, siteChapterId: chapter.siteChapterId
             )
-            return 0
+            return (nil, 0)
         case .comic:
             guard let page = URL(string: chapter.url) else { throw BookService.ServiceError.badURL }
             // The addresses first, through the web view, because only a real engine
@@ -777,7 +802,7 @@ final class DownloadManager {
                 at: urls, chapterPage: page, cookies: await ImageFetcher.siteCookies()
             )
             try downloads.save(pages: bytes, book: book, siteChapterId: chapter.siteChapterId)
-            return bytes.lazy.filter { $0 == nil }.count
+            return (bytes.count, bytes.lazy.filter { $0 == nil }.count)
         case .feed:
             // A subscription has nothing to download: an article is written to the device
             // by the refresh that discovered it, so every one of them is already here.
