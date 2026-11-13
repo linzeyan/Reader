@@ -344,34 +344,6 @@ final class PaginationTests: XCTestCase {
 
     // MARK: - Reading with no hand on the page
 
-    /// What a page that turns itself is timed against. Every page but the last is full by
-    /// construction — the break was made by the first line that did not fit — and a page
-    /// measured short in the middle of a chapter would be one the reader is hurried off.
-    func testEveryPageButTheLastIsMeasuredAsFull() {
-        let paginator = paginator(paragraphs: longChapter())
-        XCTAssertGreaterThan(paginator.pages.count, 2)
-        for index in paginator.pages.indices.dropLast() {
-            XCTAssertEqual(
-                paginator.filledHeight(ofPage: index), pageSize.height,
-                "page \(index + 1) of \(paginator.pages.count) holds a full page of lines"
-            )
-        }
-    }
-
-    /// The end of a chapter, which is the case the measurement exists for: given a whole
-    /// page's reading time, two lines of text are most of a minute of watching nothing
-    /// happen before the chapter turns.
-    func testAChapterEndingPartWayDownAPageIsMeasuredShort() {
-        let paginator = paginator(paragraphs: ["他推開門。", "雪落在渡口的燈上。"])
-        XCTAssertEqual(paginator.pages.count, 1)
-
-        let filled = paginator.filledHeight(ofPage: 0)
-        XCTAssertGreaterThan(filled, 0, "there is text on it")
-        XCTAssertLessThan(
-            filled, pageSize.height / 2, "two short paragraphs are not a page of reading"
-        )
-    }
-
     /// The band the page paints under a book being read aloud.
     ///
     /// Stated as an anchor and a length rather than searched for on the page, which only

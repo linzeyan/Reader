@@ -67,6 +67,20 @@ final class ReaderSettings {
         }
     }
 
+    /// How the scrolling reader moves when it moves on its own — see `autoAdvance`.
+    enum AutoAdvance: String, CaseIterable, Identifiable {
+        case scroll, pages
+
+        var id: String { rawValue }
+
+        var nameKey: LocalizedStringResource {
+            switch self {
+            case .scroll: return "reader.settings.autoAdvance.scroll"
+            case .pages: return "reader.settings.autoAdvance.pages"
+            }
+        }
+    }
+
     /// How the text moves under the reader.
     ///
     /// Two renderers rather than one engine with a flag: a continuous column across
@@ -207,6 +221,26 @@ final class ReaderSettings {
     var autoScrollPace: ReadingPace {
         didSet { defaults.set(autoScrollPace.linesPerMinute, forKey: Keys.autoScrollPace) }
     }
+    /// How long a page that turns itself is held — see `PageInterval`. The paginated
+    /// reader's only answer, and the scrolling one's when `autoAdvance` says pages.
+    var autoTurnInterval: PageInterval {
+        didSet { defaults.set(autoTurnInterval.seconds, forKey: Keys.autoTurnInterval) }
+    }
+    /// How the scrolling reader moves on its own: gliding at a reading pace, or a page at a
+    /// time. The paginated reader has only the second, so this is a question about scrolling.
+    var autoAdvance: AutoAdvance {
+        didSet { defaults.set(autoAdvance.rawValue, forKey: Keys.autoAdvance) }
+    }
+    /// Bringing the controls up pauses whatever is moving the page or reading it aloud,
+    /// and putting them away carries on.
+    ///
+    /// Off to start with, because it costs something: with it off, the controls are how a
+    /// reader reaches the speed slider while the page is still moving, which is the only
+    /// way to set a speed by feel. A reader who opens the controls to look at something
+    /// else and loses their line is the one who turns this on.
+    var controlsPause: Bool {
+        didSet { defaults.set(controlsPause, forKey: Keys.controlsPause) }
+    }
     /// How fast a comic moves when the reader has stopped scrolling it themselves — see
     /// `ComicPace`, and its own slider rather than the one above: the two are stated in
     /// units that do not convert (lines against screens), and a page of artwork is not
@@ -340,6 +374,9 @@ final class ReaderSettings {
         static let swipeToGoBack = "reader.swipeToGoBack"
         static let toolbar = "reader.toolbar"
         static let autoScrollPace = "reader.autoScrollPace"
+        static let autoTurnInterval = "reader.autoTurnInterval"
+        static let autoAdvance = "reader.autoAdvance"
+        static let controlsPause = "reader.controlsPause"
         static let comicScrollPace = "reader.comicScrollPace"
         static let speechPace = "reader.speechPace"
         static let speechVoices = "reader.speechVoices"
@@ -426,6 +463,17 @@ final class ReaderSettings {
             linesPerMinute: defaults.object(forKey: Keys.autoScrollPace) as? Double
                 ?? ReadingPace.standard.linesPerMinute
         )
+        // `double(forKey:)`, unlike the paces above: it also parses the string a launch
+        // argument arrives as, which is how a walk asks for a short interval without
+        // persisting it. Its zero for a missing key is outside the range, so it can only
+        // mean "never set" — and taken literally it would be a page turning on every check.
+        let interval = defaults.double(forKey: Keys.autoTurnInterval)
+        autoTurnInterval = interval > 0 ? PageInterval(seconds: interval) : .standard
+        autoAdvance = defaults.string(forKey: Keys.autoAdvance)
+            .flatMap(AutoAdvance.init(rawValue:)) ?? .scroll
+        // `bool(forKey:)` for `swipeToGoBack`'s reason: off is the default, and a walk can
+        // turn it on from a launch argument without persisting it.
+        controlsPause = defaults.bool(forKey: Keys.controlsPause)
         comicScrollPace = ComicPace(
             screensPerMinute: defaults.object(forKey: Keys.comicScrollPace) as? Double
                 ?? ComicPace.standard.screensPerMinute

@@ -142,14 +142,9 @@ struct PaginatedChapterView: View {
     /// is the one renderer where all three answers are real: it is the only one whose
     /// swiping *is* the page turn rather than the scrolling underneath it.
     let pageTurn: ReaderSettings.PageTurn
-    /// How fast the reader reads, when they have asked the page to turn itself. Nil when
-    /// nobody has.
-    ///
-    /// A pace rather than a number of seconds, and the scrolling renderer's own — see
-    /// `ReadingPace.seconds(forTextHeight:lineHeight:)`. What a page waits for is how long
-    /// the text on it takes to read, which is the same question the other renderer answers
-    /// by moving.
-    let autoTurn: ReadingPace?
+    /// How long a page is held before it turns itself — see `PageInterval`. Nil when
+    /// nobody has asked, or while the controls are holding it.
+    let autoTurn: PageInterval?
     /// The sentence being read out loud, when the voice is in *this* chapter.
     ///
     /// The whole of what listening asks of a renderer with no scrolling to do: the page
@@ -202,12 +197,12 @@ struct PaginatedChapterView: View {
     /// True while the finger is still down, which is what tells the difference between
     /// a selection being dragged and one waiting for an answer.
     @State private var isDragging = false
-    /// When the page in front of the reader arrived.
+    /// When the page in front of the reader arrived, or when the page last started turning
+    /// itself — whichever was later.
     ///
-    /// What makes a pace changed mid-page count the time already spent on it. The wait is
-    /// restarted whenever the speed changes — the new duration is not knowable from the
-    /// old one — and without this a reader nudging the slider would push the turn a whole
-    /// page's reading away each time they touched it.
+    /// What makes an interval changed mid-page count the time already spent on it: the
+    /// wait is restarted whenever it changes, and without this a reader nudging the slider
+    /// would push the turn a whole page away each time they touched it.
     @State private var pageShownAt = Date.now
     /// The highlight a tap landed on, waiting to be removed or dismissed.
     @State private var picked: TextHighlight?
@@ -272,10 +267,16 @@ struct PaginatedChapterView: View {
             pageLabel
         }
         // The page that turns itself. One wait per page rather than a clock ticking
-        // through the chapter: what a page is worth depends on how much text is on it,
-        // and the reader can turn one themselves at any point — which restarts this,
-        // because the page they turned to is a page they have not read yet.
+        // through the chapter: the reader can turn one themselves at any point — which
+        // restarts this, because the page they turned to is a page they have not read yet.
         .task(id: autoTurnStep) { await waitAndTurn() }
+        // Switched on, or let go by the controls: the page in front of the reader gets the
+        // whole interval. It may have been up for minutes, or the reader's eyes were on
+        // the controls rather than the text — either way, turning it at once is a page
+        // they never got to finish. Synchronous, so it lands before the task above runs.
+        .onChange(of: autoTurn == nil) { _, off in
+            if !off { pageShownAt = .now }
+        }
         // The page that follows a voice. Nothing to catch up with mid-page: a sentence is
         // either on the page or it is not, which is the same band the scrolling renderer
         // keeps the voice inside by scrolling.
@@ -674,32 +675,22 @@ struct PaginatedChapterView: View {
     private static let systemEdge: CGFloat = 28
 
     /// What restarts the wait before a page turns itself: a new page, a new chapter, a
-    /// changed speed, or the switch going off. Nil pace is off, and off keeps no timer.
+    /// changed interval, or the switch going off. Nil is off, and off keeps no timer.
     private struct AutoTurnStep: Equatable {
-        let pace: Double?
+        let seconds: Double?
         let chapterKey: String
         let page: Int
     }
 
     private var autoTurnStep: AutoTurnStep {
-        AutoTurnStep(pace: autoTurn?.linesPerMinute, chapterKey: chapterKey, page: pageIndex)
+        AutoTurnStep(seconds: autoTurn?.seconds, chapterKey: chapterKey, page: pageIndex)
     }
 
-    /// Gives the reader the page for as long as the text on it takes to read, then turns
-    /// it — which at the foot of a chapter is `turn(_:)`'s business and becomes the next
-    /// chapter.
-    ///
-    /// Measured one page ahead first, for `turnPastEdge`'s reason and one more: the page
-    /// in front of the reader only counts as short once there is nothing left to fill it,
-    /// and the frontier of a chapter still being laid out looks exactly like that.
+    /// Gives the reader the page for the interval they set, then turns it — which at the
+    /// foot of a chapter is `turn(_:)`'s business and becomes the next chapter.
     private func waitAndTurn() async {
-        guard let pace = autoTurn, let paginator else { return }
-        paginator.paginate(through: pageIndex + 1)
-        let due = pace.seconds(
-            forTextHeight: paginator.filledHeight(ofPage: pageIndex),
-            lineHeight: metrics.lineHeight
-        )
-        let wait = due - Date.now.timeIntervalSince(pageShownAt)
+        guard let interval = autoTurn else { return }
+        let wait = interval.seconds - Date.now.timeIntervalSince(pageShownAt)
         if wait > 0 {
             do { try await Task.sleep(for: .seconds(wait)) } catch { return }
         }

@@ -62,6 +62,11 @@ struct ReaderView: View {
     /// `task(id:)` keyed on it restarts the wait every time it is restated, which is what
     /// makes a second touch of the slider buy another few seconds.
     @State private var paceAskedAt: Date?
+    /// The voice was paused by the controls coming up, not by the reader — see
+    /// `ReaderSettings.controlsPause`. Only a pause the controls made is one putting them
+    /// away may undo, for `SpeechReader`'s phone-call reason: a reader who paused the voice
+    /// themselves while the controls were up must not have it start again under them.
+    @State private var speechHeld = false
 
     /// How long the speed strip stays after the last thing that asked for it.
     ///
@@ -95,6 +100,18 @@ struct ReaderView: View {
 
     private var pageTurn: ReaderSettings.PageTurn {
         settings.resolvedPageTurn(forBook: book.id, kind: book.kind)
+    }
+
+    /// Whether moving on its own here means a page at a time rather than a glide.
+    private var turnsPages: Bool {
+        mode == .paginated || settings.autoAdvance == .pages
+    }
+
+    /// Whether the page is actually moving on its own: switched on, and not held by the
+    /// controls. `autoScrolling` stays the reader's answer throughout, so the control and
+    /// the speed strip go on saying it is on while the controls hold it.
+    private var advancing: Bool {
+        autoScrolling && !(settings.controlsPause && showControls)
     }
 
     var body: some View {
@@ -144,13 +161,18 @@ struct ReaderView: View {
                     // Nil where the edge swipe does this instead: two ways out is a
                     // sixth of the bar spent saying the same thing twice.
                     onBack: settings.swipeToGoBack ? nil : { dismiss() },
-                    // In both renderers, and the pace behind it means the same thing in
-                    // both: one moves the page at a reading speed, the other holds a page
-                    // for as long as the text on it takes to read.
+                    // In both renderers: a glide at a reading speed, or a page held for the
+                    // interval the reader set — see `turnsPages`.
                     autoScrolling: $autoScrolling,
+                    turnsPages: turnsPages,
+                    // A voice the controls are holding is still on as far as the reader is
+                    // concerned, the way a held page still is — and tapping it is them
+                    // turning it off, which leaves it paused when the controls go.
                     speech: SpeechSwitch(
-                        isSpeaking: env.speech.isSpeaking,
-                        toggle: { toggleSpeech(model) }
+                        isSpeaking: env.speech.isSpeaking || speechHeld,
+                        toggle: {
+                            if speechHeld { speechHeld = false } else { toggleSpeech(model) }
+                        }
                     ),
                     showCatalog: $showCatalog, showSettings: $showSettings,
                     arrangement: settings.resolvedToolbar(forBook: book.id, kind: book.kind)
@@ -171,7 +193,7 @@ struct ReaderView: View {
         // would be the chrome finally covering the book.
         .overlay(alignment: .bottom) {
             if showControls, paceAskedAt != nil {
-                if voiceIsReadingThisBook, let model {
+                if voiceIsReadingThisBook || speechHeld, let model {
                     SpeechBar(
                         settings: settings,
                         sleepsAt: Binding(
@@ -183,7 +205,10 @@ struct ReaderView: View {
                         onTouched: { paceAskedAt = .now }
                     )
                 } else if autoScrolling {
-                    AutoScrollBar(settings: settings, onTouched: { paceAskedAt = .now })
+                    AutoScrollBar(
+                        settings: settings, turnsPages: turnsPages,
+                        onTouched: { paceAskedAt = .now }
+                    )
                 }
             }
         }
@@ -283,8 +308,12 @@ struct ReaderView: View {
                 keepOn: settings.keepScreenOn, autoScrolling: moving, trace: env.trace
             )
             // Two things moving one page is a page nobody is steering. The reader asked
-            // for this one, so the voice is the one that gives way.
-            if moving { env.speech.pause() }
+            // for this one, so the voice is the one that gives way — for good, not until
+            // the controls go.
+            if moving {
+                speechHeld = false
+                env.speech.pause()
+            }
             // A speed is worth offering the moment there is something moving at it, and
             // worth taking away the moment there is not.
             paceAskedAt = moving ? .now : nil
@@ -292,14 +321,20 @@ struct ReaderView: View {
         // The same two moments for the voice, and it is watched rather than set where the
         // control is tapped because listening starts and stops in more places than that
         // one: a remote button, a phone call, the sleep timer, the end of the book.
+        //
+        // A voice the controls paused keeps its strip: the controls are up, and the speed
+        // is one of the things a reader brings them up to change. A voice that starts
+        // reading again by any other road — the lock screen, a tap — is no longer held.
         .onChange(of: voiceIsReadingThisBook) { _, reading in
-            paceAskedAt = reading ? .now : nil
+            if reading { speechHeld = false }
+            paceAskedAt = reading || speechHeld ? .now : nil
         }
         // Bringing the chrome up over a page that is already moving is how a reader asks
         // for the slider back, and the only way back to it that does not go through
         // stopping the thing they want to adjust.
         .onChange(of: showControls) { _, shown in
-            guard shown, autoScrolling || voiceIsReadingThisBook else { return }
+            holdSpeechForControls(shown)
+            guard shown, autoScrolling || voiceIsReadingThisBook || speechHeld else { return }
             paceAskedAt = .now
         }
         .onAppear {
@@ -349,10 +384,9 @@ struct ReaderView: View {
         // paginated one is about to ask its own, over text it has laid out itself.
         markChoice = nil
         // The voice and the self-moving page are carried across rather than switched off.
-        // Both renderers answer them now, both write the same position, and the pace is
-        // stated in the reader's own terms — so a book being read aloud goes on being read
-        // aloud from the same sentence, and a page moving on its own arrives as one that
-        // turns itself at the speed it was scrolling at.
+        // Both renderers answer them now and both write the same position — so a book
+        // being read aloud goes on being read aloud from the same sentence, and a page
+        // moving on its own goes on moving in whichever way the new renderer moves.
         guard mode == .scroll else { return }
         model?.retarget()
     }
@@ -404,6 +438,21 @@ struct ReaderView: View {
         case .speaking: env.speech.pause()
         case .paused where isListening: env.speech.resume()
         case .paused, .idle: startListening(model)
+        }
+    }
+
+    /// Pauses the voice while the controls are up and resumes it when they go — see
+    /// `ReaderSettings.controlsPause`. The page moving on its own needs nothing like this:
+    /// `advancing` is read straight off the two values.
+    private func holdSpeechForControls(_ shown: Bool) {
+        if shown {
+            guard settings.controlsPause, voiceIsReadingThisBook else { return }
+            // Before the pause, so the strip's handler sees a held voice and keeps it.
+            speechHeld = true
+            env.speech.pause()
+        } else if speechHeld {
+            speechHeld = false
+            if isListening, env.speech.state == .paused { env.speech.resume() }
         }
     }
 
@@ -522,9 +571,10 @@ struct ReaderView: View {
                     outlineJump = nil
                     model.clearScrollTarget()
                 },
-                autoScroll: autoScrolling
+                autoScroll: advancing && !turnsPages
                     ? settings.autoScrollPace.pointsPerSecond(lineHeight: metrics.lineHeight)
                     : 0,
+                autoTurn: advancing && turnsPages ? settings.autoTurnInterval : nil,
                 onAutoScrollEnded: { autoScrolling = false },
                 // Only what is being said *in this book*. The voice outlives this screen
                 // — see `SpeechReader` — so a reader who left one book listening and
@@ -636,7 +686,7 @@ struct ReaderView: View {
                 highlights: model.highlights(inChapter: current.chapter.siteChapterId),
                 edgeGoesBack: settings.swipeToGoBack,
                 pageTurn: pageTurn,
-                autoTurn: autoScrolling ? settings.autoScrollPace : nil,
+                autoTurn: advancing ? settings.autoTurnInterval : nil,
                 // Only what is being said *in this chapter*: the page draws one chapter at
                 // a time, and a voice that has read on into the next one moves this
                 // renderer by changing which chapter that is — see `ReaderModel.noteSpoken`.
@@ -1000,6 +1050,8 @@ private struct ReaderControlBar: View {
     /// Whether the page is moving on its own. Both renderers answer it — see the bar's
     /// caller — so it is not optional the way it was before they both did.
     let autoScrolling: Binding<Bool>
+    /// Whether that movement is a page at a time, which is what the control says it does.
+    let turnsPages: Bool
     /// Reading the book out loud, which both renderers also answer.
     let speech: SpeechSwitch
     @Binding var showCatalog: Bool
@@ -1150,9 +1202,15 @@ private struct ReaderControlBar: View {
             // A state rather than an action, so it says which one it is in: a play glyph
             // on a page already moving would be a button promising what it has just done.
             let moving = autoScrolling.wrappedValue
+            let label: LocalizedStringKey = switch (moving, turnsPages) {
+            case (true, true): "reader.autoTurn.stop"
+            case (false, true): "reader.autoTurn.start"
+            case (true, false): "reader.autoScroll.stop"
+            case (false, false): "reader.autoScroll.start"
+            }
             return Control(
                 icon: moving ? "pause.circle" : "play.circle",
-                label: moving ? "reader.autoScroll.stop" : "reader.autoScroll.start",
+                label: label,
                 identifier: "reader.autoScroll"
             ) { autoScrolling.wrappedValue.toggle() }
         case .speech:
@@ -1314,6 +1372,9 @@ private struct SpeechBar: View {
 /// and a speed set over a page that has stopped to show you a sheet is set blind.
 private struct AutoScrollBar: View {
     @Bindable var settings: ReaderSettings
+    /// Whether the page is turned rather than glided, which is a different quantity to set
+    /// — see `PageInterval`.
+    let turnsPages: Bool
     /// The reader is still setting this, so the strip has not outstayed its welcome — see
     /// `ReaderView.paceAskedAt`.
     let onTouched: () -> Void
@@ -1321,15 +1382,27 @@ private struct AutoScrollBar: View {
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: "tortoise")
-            Slider(
-                value: $settings.autoScrollPace.linesPerMinute,
-                in: ReadingPace.range
-            ) { _ in
-                onTouched()
+            if turnsPages {
+                Slider(value: fasterIsRight, in: PageInterval.range) { _ in onTouched() }
+                    .accessibilityLabel(Text("reader.autoTurn.interval"))
+                    .accessibilityValue(Text(secondsLabel))
+                    .accessibilityIdentifier("reader.autoTurn.interval")
+            } else {
+                Slider(
+                    value: $settings.autoScrollPace.linesPerMinute,
+                    in: ReadingPace.range
+                ) { _ in
+                    onTouched()
+                }
+                .accessibilityLabel(Text("reader.autoScroll.speed"))
+                .accessibilityIdentifier("reader.autoScroll.speed")
             }
-            .accessibilityLabel(Text("reader.autoScroll.speed"))
-            .accessibilityIdentifier("reader.autoScroll.speed")
             Image(systemName: "hare")
+            // A number only here: "a page every 45 seconds" is something a reader can
+            // check against their own reading, which a glide's position is not.
+            if turnsPages {
+                Text(secondsLabel).monospacedDigit()
+            }
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
@@ -1341,6 +1414,24 @@ private struct AutoScrollBar: View {
         // each other — the same clearance the mark bar and the end-of-book notice keep.
         .padding(.bottom, 72)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private var secondsLabel: LocalizedStringKey {
+        "reader.autoTurn.seconds \(Int(settings.autoTurnInterval.seconds))"
+    }
+
+    /// The interval mirrored, so the strip reads like its twin: tortoise on the left, hare
+    /// on the right. Fewer seconds a page is faster, and a slider that got faster towards
+    /// the tortoise would be the one control on this screen that runs backwards.
+    private var fasterIsRight: Binding<Double> {
+        let range = PageInterval.range
+        return Binding(
+            get: { range.upperBound + range.lowerBound - settings.autoTurnInterval.seconds },
+            set: {
+                settings.autoTurnInterval.seconds = (range.upperBound + range.lowerBound - $0)
+                    .rounded()
+            }
+        )
     }
 }
 

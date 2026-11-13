@@ -10,18 +10,65 @@ final class ReaderAutoScrollGestureTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        // The renderer comes from the launch arguments, never from tapping the setting —
-        // tapping would persist the choice into this simulator for every later test. The
-        // pace comes the same way, and is the fastest the panel itself offers: a walk that
-        // waited out the default speed would be waiting for a paragraph boundary that is
-        // half a minute of reading away.
-        app.launchArguments = [
-            "-NovelReaderDemoSeed", "-reader.mode", "scroll", "-reader.autoScrollPace", "60"
-        ]
+    }
+
+    /// The renderer comes from the launch arguments, never from tapping the setting —
+    /// tapping would persist the choice into this simulator for every later test. The pace
+    /// comes the same way, and is the fastest the panel itself offers: a walk that waited
+    /// out the default speed would be waiting for a paragraph boundary that is half a
+    /// minute of reading away. Each walk names its own way of moving.
+    private func launch(_ moving: [String]) {
+        app.launchArguments = ["-NovelReaderDemoSeed", "-reader.mode", "scroll"] + moving
         app.launch()
     }
 
     func testTheControlBarStartsAndStopsThePageMovingOnItsOwn() throws {
+        launch(["-reader.autoScrollPace", "60"])
+        let control = openTheDemoBookAndFindTheControl()
+
+        let start = app.topParagraphLabel()
+        control.tap()
+        XCTAssertTrue(
+            movedAway(from: start, within: 20),
+            "the page was told to move and the same paragraph is still at the top"
+        )
+
+        control.tap()
+        let stopped = app.topParagraphLabel()
+        // Long enough that the pace under test would have carried the reader past a
+        // paragraph several times over.
+        Thread.sleep(forTimeInterval: 3)
+        XCTAssertEqual(
+            app.topParagraphLabel(), stopped,
+            "a page switched off has to stay where the reader stopped it"
+        )
+    }
+
+    /// The same control, asked for pages: nothing moves until the interval is up, and then
+    /// a whole page goes at once — the turn a tap on the next-page zone makes.
+    func testThePageTurnsAPageAtATimeWhenAskedTo() throws {
+        launch(["-reader.autoAdvance", "pages", "-reader.autoTurnInterval", "5"])
+        let control = openTheDemoBookAndFindTheControl()
+
+        let start = app.topParagraphLabel()
+        control.tap()
+        XCTAssertTrue(
+            movedAway(from: start, within: 20),
+            "the page was told to turn itself and the same paragraph is still at the top"
+        )
+
+        control.tap()
+        let stopped = app.topParagraphLabel()
+        // Longer than the interval, so a switch that did not really go off would have
+        // turned a page by now.
+        Thread.sleep(forTimeInterval: 8)
+        XCTAssertEqual(
+            app.topParagraphLabel(), stopped,
+            "pages switched off have to stay where the reader stopped them"
+        )
+    }
+
+    private func openTheDemoBookAndFindTheControl() -> XCUIElement {
         app.openLibraryTab()
         let book = app.demoNovelRow()
         XCTAssertTrue(book.waitForExistence(timeout: 20), "the demo library should be seeded")
@@ -43,23 +90,7 @@ final class ReaderAutoScrollGestureTests: XCTestCase {
             control.waitForExistence(timeout: 5),
             "the scrolling renderer's control bar should offer to move the page"
         )
-
-        let start = app.topParagraphLabel()
-        control.tap()
-        XCTAssertTrue(
-            movedAway(from: start, within: 20),
-            "the page was told to move and the same paragraph is still at the top"
-        )
-
-        control.tap()
-        let stopped = app.topParagraphLabel()
-        // Long enough that the pace under test would have carried the reader past a
-        // paragraph several times over.
-        Thread.sleep(forTimeInterval: 3)
-        XCTAssertEqual(
-            app.topParagraphLabel(), stopped,
-            "a page switched off has to stay where the reader stopped it"
-        )
+        return control
     }
 
     /// Brings the chrome up by tapping text in the band that asks for it.

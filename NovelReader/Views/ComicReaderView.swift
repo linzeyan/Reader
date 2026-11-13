@@ -174,7 +174,10 @@ struct ComicReaderView: View {
                 target: model.scrollTarget,
                 footer: model.footerState,
                 fetcher: env.images,
-                autoScroll: autoScrolling ? settings.comicScrollPace : nil,
+                // Held while the controls are up, for a reader who asked for that — see
+                // `ReaderSettings.controlsPause`. The switch itself stays on.
+                autoScroll: autoScrolling && !(settings.controlsPause && showControls)
+                    ? settings.comicScrollPace : nil,
                 onPlaceChange: { model.record($0) },
                 onNeedsNext: { Task { await model.loadNext() } },
                 onNeedsPrevious: { Task { await model.loadPrevious() } },

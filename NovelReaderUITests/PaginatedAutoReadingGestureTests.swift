@@ -27,10 +27,10 @@ final class PaginatedAutoReadingGestureTests: XCTestCase {
         app.launch()
     }
 
-    /// The pace is the fastest the strip itself offers: at the default, one page of prose
-    /// is well over a minute of a walk waiting to be allowed to look.
+    /// The interval is the shortest the strip itself offers: at the default, one page is a
+    /// minute of a walk waiting to be allowed to look.
     func testThePagesTurnThemselvesAtTheReadersPace() throws {
-        launch(["-reader.autoScrollPace", "60"])
+        launch(["-reader.autoTurnInterval", "5"])
         openTheDemoBook()
         showControls()
 
@@ -56,6 +56,34 @@ final class PaginatedAutoReadingGestureTests: XCTestCase {
         XCTAssertEqual(
             progress(), stopped,
             "pages switched off have to stay where the reader stopped them"
+        )
+    }
+
+    /// For a reader who asked the controls to hold the book: the pages stop turning while
+    /// the controls are up, and start again once they are put away — the switch was never
+    /// turned off, so going on is what the reader is owed.
+    func testTheControlsHoldThePagesAndLetThemGo() throws {
+        launch(["-reader.autoTurnInterval", "5", "-reader.controlsPause", "YES"])
+        openTheDemoBook()
+        showControls()
+
+        let control = app.descendants(matching: .any)
+            .matching(identifier: "reader.autoScroll").firstMatch
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+
+        let opened = progress()
+        control.tap()
+        // Well past the interval, with the controls still up.
+        Thread.sleep(forTimeInterval: 12)
+        XCTAssertEqual(
+            progress(), opened,
+            "a page turned under the controls the reader asked to hold it"
+        )
+
+        showControls()
+        XCTAssertTrue(
+            movedOn(from: opened, within: 30),
+            "the controls went away and the pages never started turning again"
         )
     }
 

@@ -22,22 +22,23 @@ struct ReadingPace: Equatable {
     func pointsPerSecond(lineHeight: CGFloat) -> CGFloat {
         CGFloat(max(0, linesPerMinute)) * max(0, lineHeight) / 60
     }
+}
 
-    /// How long a page holding this much text is worth — for a surface that waits and
-    /// then turns rather than travelling.
-    ///
-    /// The same speed answered in the other renderer's terms, so one slider means one
-    /// thing in both: a reader who set a pace while scrolling and then switched to pages
-    /// gets pages at the speed they were reading at, not a number that has to be found
-    /// again. Measured from the text on the page rather than from the page, because the
-    /// last page of a chapter is usually a few lines and a reader given a full page's
-    /// reading time for them is watching nothing happen.
-    ///
-    /// Zero for a page with nothing on it, which is a page to turn now.
-    func seconds(forTextHeight height: CGFloat, lineHeight: CGFloat) -> TimeInterval {
-        guard linesPerMinute > 0, lineHeight > 0, height > 0 else { return 0 }
-        return Double(height / lineHeight) / linesPerMinute * 60
-    }
+/// How long a page is held before it turns itself.
+///
+/// A fixed number of seconds rather than a reading speed measured against the text on the
+/// page: the reader asked for a page every so often, and a turn whose timing depends on
+/// how full the page happens to be is one they cannot predict. The cost is the short last
+/// page of a chapter, which waits as long as a full one — accepted on purpose.
+struct PageInterval: Equatable {
+    var seconds: Double
+
+    /// A glance at a page of dialogue to a slow read of dense prose at a large type size.
+    static let range: ClosedRange<Double> = 5...120
+
+    /// About what a phone page of Chinese prose takes at the 300–500 characters a minute
+    /// it is read at.
+    static let standard = PageInterval(seconds: 60)
 }
 
 /// How fast a comic moves when nobody is touching it.
@@ -253,6 +254,127 @@ final class AutoScrollDriver {
         lastTick = nil
         stalledSince = nil
         carry = 0
+    }
+}
+
+/// Turns a scrolling page every so often, the way a tap on the next-page zone would.
+///
+/// The scrolling renderer's version of the paginated one's self-turning page: the same
+/// `PageInterval`, and the same turn a reader's tap makes, so where it lands is the rule
+/// `ReaderTapZone` already states rather than a second one.
+///
+/// Driven by `fire(at:)` taking the time rather than reading a clock — `AutoScrollDriver`'s
+/// reason: the arithmetic can be asserted without waiting through it.
+@MainActor
+final class PageTurnClock {
+    /// Asked to turn a page, and answers whether there was anywhere to turn to.
+    private let turn: () -> Bool
+    private let now: () -> CFTimeInterval
+
+    /// The page has had nowhere to go for `stallLimit` — the end of the book, or a chapter
+    /// that will not load — so this has switched itself off.
+    var onRanAground: (() -> Void)?
+
+    /// Nil is off, and off keeps no timer.
+    private(set) var interval: TimeInterval?
+    var isRunning: Bool { interval != nil }
+
+    /// The driver's patience, for the driver's reason: the foot of the loaded text is
+    /// passed through on the way into a chapter still being fetched.
+    private static let stallLimit: CFTimeInterval = 5
+    /// How soon a turn that found nowhere to go is tried again.
+    private static let retry: CFTimeInterval = 1
+
+    /// When the page in front of the reader arrived. What lets a changed interval count
+    /// the time already spent on the page rather than starting it over.
+    private var shownAt: CFTimeInterval = 0
+    /// Set while a turn that found nowhere is waiting to be tried again.
+    private var retryAt: CFTimeInterval?
+    private var stalledSince: CFTimeInterval?
+    private var isHeld = false
+    private var pending: Task<Void, Never>?
+
+    init(now: @escaping () -> CFTimeInterval = CACurrentMediaTime, turn: @escaping () -> Bool) {
+        self.now = now
+        self.turn = turn
+    }
+
+    deinit { pending?.cancel() }
+
+    func setInterval(_ seconds: TimeInterval?) {
+        guard seconds != interval else { return }
+        let starting = interval == nil
+        interval = seconds
+        guard seconds != nil else {
+            pending?.cancel()
+            pending = nil
+            return
+        }
+        // Switched on, the page in front of the reader gets the whole interval: it may
+        // have been on screen for minutes, and turning it the moment the switch is touched
+        // is a page the reader never got to finish.
+        if starting { pageArrived() } else { schedule() }
+    }
+
+    /// A finger on the glass, or the coast after it lifts. Letting go starts the page
+    /// over: wherever the reader scrolled to is a page they have not read yet.
+    func hold(_ down: Bool) {
+        guard isHeld != down else { return }
+        isHeld = down
+        if down {
+            pending?.cancel()
+            pending = nil
+        } else {
+            pageArrived()
+        }
+    }
+
+    /// The reader turned a page themselves, which is a new page to give the full time to.
+    func pageArrived() {
+        shownAt = now()
+        retryAt = nil
+        stalledSince = nil
+        schedule()
+    }
+
+    /// When the next turn is due, or nil while nothing is.
+    func due() -> CFTimeInterval? {
+        guard let interval, !isHeld else { return nil }
+        return retryAt ?? shownAt + interval
+    }
+
+    /// Turns the page if it is due by `time`.
+    ///
+    /// Internal rather than private for `AutoScrollDriver.tick(at:)`'s reason.
+    func fire(at time: CFTimeInterval) {
+        guard let due = due(), time >= due else { return }
+        if turn() {
+            shownAt = time
+            retryAt = nil
+            stalledSince = nil
+            return
+        }
+        let since = stalledSince ?? time
+        stalledSince = since
+        guard time - since < Self.stallLimit else {
+            setInterval(nil)
+            onRanAground?()
+            return
+        }
+        retryAt = time + Self.retry
+    }
+
+    private func schedule() {
+        pending?.cancel()
+        pending = nil
+        guard let due = due() else { return }
+        let wait = max(0, due - now())
+        pending = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(wait)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            fire(at: now())
+            schedule()
+        }
     }
 }
 

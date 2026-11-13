@@ -951,19 +951,6 @@ final class ChapterPaginator {
         }
     }
 
-    /// How much of a page the text actually fills.
-    ///
-    /// Full by construction for every page but the last — a break is made by the first
-    /// line that did not fit — so only the tail of a chapter is ever short. What asks is
-    /// the page that turns itself: given a whole page's worth of reading time, a last
-    /// page of two lines is a reader watching nothing happen for most of a minute.
-    func filledHeight(ofPage index: Int) -> CGFloat {
-        guard pages.indices.contains(index) else { return 0 }
-        let page = pages[index]
-        guard index == pages.count - 1 else { return page.height }
-        return max(0, min(page.height, (lines.last?.bottom ?? page.top) - page.top))
-    }
-
     /// The anchor for a page: its first character.
     ///
     /// This is where paginated reading can be honest about `characterOffset` in a way

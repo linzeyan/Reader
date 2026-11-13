@@ -54,40 +54,6 @@ final class AutoScrollTests: XCTestCase {
         XCTAssertEqual(fast * 60 / large.lineHeight, 20, accuracy: 0.001)
     }
 
-    /// One slider, one meaning, in a renderer that has nothing to scroll.
-    ///
-    /// A page does not travel: it is held and then turned. So the same pace has to be
-    /// answerable in seconds as well as in points a second, and the two answers have to be
-    /// the same reading speed — otherwise a reader who set a comfortable pace while
-    /// scrolling and then switched to pages would have to find it again, with the slider
-    /// showing the number they already chose.
-    func testAPageIsHeldForAsLongAsScrollingPastItWouldTake() {
-        let pace = ReadingPace(linesPerMinute: 24)
-        let lineHeight = metrics(fontSize: 19).lineHeight
-        let page: CGFloat = 600
-
-        XCTAssertEqual(
-            pace.seconds(forTextHeight: page, lineHeight: lineHeight),
-            Double(page / pace.pointsPerSecond(lineHeight: lineHeight)),
-            accuracy: 0.001
-        )
-    }
-
-    /// The last page of a chapter is a few lines. Timed as a whole page it would leave the
-    /// reader watching nothing happen for most of a minute before the chapter turned.
-    func testAPageWithLessTextOnItIsHeldForLess() {
-        let pace = ReadingPace.standard
-        let lineHeight = metrics(fontSize: 19).lineHeight
-
-        let full = pace.seconds(forTextHeight: 600, lineHeight: lineHeight)
-        let short = pace.seconds(forTextHeight: 120, lineHeight: lineHeight)
-        XCTAssertEqual(full / short, 5, accuracy: 0.001)
-        XCTAssertEqual(
-            pace.seconds(forTextHeight: 0, lineHeight: lineHeight), 0,
-            "a page with nothing on it is a page to turn now"
-        )
-    }
-
     /// A `Slider` clamps a value outside its range and writes the clamp back, so a default
     /// outside the range the panel offers would be silently re-set the first time a reader
     /// opened it — changing a speed they never touched.
@@ -267,6 +233,145 @@ final class AutoScrollTests: XCTestCase {
 
         driver.tick(at: 12)
         XCTAssertEqual(ended, 1)
+    }
+
+    // MARK: - A page at a time
+
+    /// The clock's own idea of now, moved by hand.
+    private var clockNow: CFTimeInterval = 0
+    /// How many turns the clock asked for.
+    private var turns = 0
+    /// Whether the page had anywhere to turn to. The default is a book with room.
+    private var pageHasRoom = true
+
+    private func makeClock() -> PageTurnClock {
+        PageTurnClock(now: { [weak self] in self?.clockNow ?? 0 }) { [weak self] in
+            guard let self else { return false }
+            turns += 1
+            return pageHasRoom
+        }
+    }
+
+    /// `testTheDefaultPaceIsInsideTheRangeTheSliderOffers`'s trap, for the interval.
+    func testTheDefaultIntervalIsInsideTheRangeTheSliderOffers() {
+        XCTAssertTrue(PageInterval.range.contains(PageInterval.standard.seconds))
+    }
+
+    /// The whole promise: the page the reader is on stays for the interval they set, and
+    /// then turns — once, not on every check after it is due.
+    func testAPageIsHeldForTheIntervalAndThenTurned() {
+        let clock = makeClock()
+        clockNow = 100
+        clock.setInterval(30)
+
+        clock.fire(at: 129)
+        XCTAssertEqual(turns, 0, "the page has a second left")
+
+        clock.fire(at: 130)
+        XCTAssertEqual(turns, 1)
+        clock.fire(at: 131)
+        XCTAssertEqual(turns, 1, "the page just turned to gets a whole interval of its own")
+        XCTAssertEqual(clock.due(), 160)
+    }
+
+    /// Switched on over a page the reader has been looking at for minutes, the page is not
+    /// thrown away at once — they get the whole interval from the moment they asked.
+    func testSwitchingOnGivesThePageOnScreenTheWholeInterval() {
+        let clock = makeClock()
+        clockNow = 500
+        clock.setInterval(20)
+        XCTAssertEqual(clock.due(), 520)
+    }
+
+    /// A reader nudging the slider mid-page has not asked for the page to start over —
+    /// otherwise every touch would push the turn a whole interval away.
+    func testChangingTheIntervalCountsTheTimeAlreadySpentOnThePage() {
+        let clock = makeClock()
+        clockNow = 0
+        clock.setInterval(60)
+        clockNow = 40
+        clock.setInterval(50)
+        XCTAssertEqual(clock.due(), 50)
+    }
+
+    /// A finger on the page is the reader taking it back. Nothing turns under it, and the
+    /// place they let go is a page they have not read, so it gets the whole interval.
+    func testAFingerHoldsThePageAndLettingGoStartsItOver() {
+        let clock = makeClock()
+        clockNow = 0
+        clock.setInterval(10)
+
+        clock.hold(true)
+        XCTAssertNil(clock.due())
+        clock.fire(at: 50)
+        XCTAssertEqual(turns, 0)
+
+        clockNow = 50
+        clock.hold(false)
+        XCTAssertEqual(clock.due(), 60)
+    }
+
+    /// A page the reader turned by tapping is likewise a page to give the full time to.
+    func testAPageTurnedByHandStartsTheIntervalOver() {
+        let clock = makeClock()
+        clockNow = 0
+        clock.setInterval(10)
+        clockNow = 8
+        clock.pageArrived()
+        XCTAssertEqual(clock.due(), 18)
+    }
+
+    /// The end of the book, or a chapter that will not load — the driver's rule, a page at
+    /// a time: tried again every second, and given up on after the same patience.
+    func testAPageWithNowhereToTurnSwitchesItselfOff() {
+        let clock = makeClock()
+        var ended = 0
+        clock.onRanAground = { ended += 1 }
+        pageHasRoom = false
+        clockNow = 0
+        clock.setInterval(10)
+
+        clock.fire(at: 10)
+        XCTAssertEqual(clock.due(), 11, "a chapter still being fetched is tried again soon")
+        clock.fire(at: 11)
+        clock.fire(at: 13)
+        XCTAssertEqual(ended, 0, "a chapter still being fetched is not the end of the book")
+
+        clock.fire(at: 15)
+        XCTAssertEqual(ended, 1)
+        XCTAssertFalse(clock.isRunning)
+    }
+
+    /// The chapter arriving puts the page back to a full interval and forgives the stall,
+    /// rather than carrying it into the next time the network is slow.
+    func testTextArrivingForgivesTheStall() {
+        let clock = makeClock()
+        var ended = 0
+        clock.onRanAground = { ended += 1 }
+        pageHasRoom = false
+        clockNow = 0
+        clock.setInterval(10)
+        clock.fire(at: 10)
+        clock.fire(at: 13)
+
+        pageHasRoom = true
+        clock.fire(at: 14)
+        XCTAssertEqual(clock.due(), 24, "the turn landed, so the next page gets its interval")
+
+        pageHasRoom = false
+        clock.fire(at: 24)
+        clock.fire(at: 27)
+        XCTAssertEqual(ended, 0, "the patience starts over, it is not carried forward")
+        XCTAssertTrue(clock.isRunning)
+    }
+
+    func testNoIntervalIsOff() {
+        let clock = makeClock()
+        clock.setInterval(nil)
+        XCTAssertFalse(clock.isRunning)
+        XCTAssertNil(clock.due())
+        clock.fire(at: 1_000)
+        XCTAssertEqual(turns, 0)
     }
 
     // MARK: - What the trace is told about it

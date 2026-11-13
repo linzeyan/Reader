@@ -146,6 +146,10 @@ struct ReaderScrollingText: UIViewRepresentable {
     /// — see `ReadingPace`. The conversion needs the type size, and the owner is where
     /// that is resolved for the book on screen, the same way `metrics` and `palette` are.
     let autoScroll: CGFloat
+    /// How long a page is held before it turns itself, when the reader asked for pages
+    /// rather than a glide — see `ReaderSettings.autoAdvance`. Nil is off. Never set
+    /// together with `autoScroll`: one page, one thing moving it.
+    let autoTurn: PageInterval?
     /// The page has had nowhere to go for several seconds, so whatever was moving it has
     /// stopped: the end of the book, or a chapter that will not load. The owner holds the
     /// switch, so the owner is who has to be told it went off.
@@ -317,6 +321,18 @@ final class ReaderScrollCoordinator {
         return driver
     }()
 
+    /// Turns the page every so often — see `PageTurnClock`. The same turn a tap makes, so
+    /// the trace's `turn` lines cover it too.
+    private lazy var pageClock: PageTurnClock = {
+        let clock = PageTurnClock { [weak self] in
+            guard let self, pageTurnDestination(.next) != nil else { return false }
+            turnPage(.next)
+            return true
+        }
+        clock.onRanAground = { [weak self] in self?.config?.onAutoScrollEnded() }
+        return clock
+    }()
+
     init(trace: TraceLog) {
         self.trace = trace
         // Installed here rather than by the reader screen, because what is sampled belongs
@@ -358,6 +374,7 @@ final class ReaderScrollCoordinator {
         // driver reads nothing about the columns — it moves an offset and asks what
         // happened, which a stack still being laid out answers by not moving.
         autoScroll.setSpeed(config.autoScroll)
+        pageClock.setInterval(config.autoTurn?.seconds)
         // A jump replaced the window while a rebuild was in flight, so there is no longer
         // a chapter to put the reader back into. Dropped rather than left to miss for
         // ever, because a restore that can never land silences every place report.
@@ -972,6 +989,8 @@ final class ReaderScrollCoordinator {
         )
         guard config.onTap(tap) else { return }
         turnPage(tap.zone)
+        // A page the reader turned to is a page they have not read yet.
+        if pageClock.isRunning { pageClock.pageArrived() }
     }
 
     /// A long press picks out the word under the finger — see `ChapterText.word(at:)`.
@@ -1006,6 +1025,7 @@ final class ReaderScrollCoordinator {
         // else also moves it is a page nobody is steering. Held rather than switched off,
         // so letting go carries on from where they left it.
         autoScroll.hold(down)
+        pageClock.hold(down)
         config?.onTouch(down)
         // A press that turned into a drag was a scroll, not a question. The press fires on
         // time whatever the finger does next, so this is the only thing that can tell the

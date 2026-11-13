@@ -5992,6 +5992,102 @@
         }
       }
     },
+    "reader.autoTurn.interval" : {
+      "comment" : "Accessibility label of the slider that sets how long a page stays before it turns itself.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page interval"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "翻页间隔"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "翻頁間隔"
+          }
+        }
+      }
+    },
+    "reader.autoTurn.seconds %lld" : {
+      "comment" : "How long a page stays before it turns itself, in seconds.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld s"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 秒"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 秒"
+          }
+        }
+      }
+    },
+    "reader.autoTurn.start" : {
+      "comment" : "Reader control: starts turning pages on their own, one every few seconds.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start turning pages"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始自动翻页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始自動翻頁"
+          }
+        }
+      }
+    },
+    "reader.autoTurn.stop" : {
+      "comment" : "Reader control: stops turning pages on their own.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop turning pages"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止自动翻页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止自動翻頁"
+          }
+        }
+      }
+    },
     "reader.bookmark.add" : {
       "comment" : "Reader control: saves the position on screen.",
       "extractionState" : "manual",
@@ -6424,6 +6520,102 @@
         }
       }
     },
+    "reader.settings.autoAdvance" : {
+      "comment" : "Reader settings: section about the page moving on its own.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-advance"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动前进"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動前進"
+          }
+        }
+      }
+    },
+    "reader.settings.autoAdvance.footer" : {
+      "comment" : "Help for auto-advance: what the play control does in each reading mode.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The play control on the reader's bar moves the page on its own. While scrolling it can glide or turn a page at a time; pages always turn a page at a time. Set the speed on the strip that appears above the bar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具栏的播放键会让页面自己走。滚动模式可以连续滚动，也可以每隔一段时间翻一页；分页模式一律整页翻页。速度在工具栏上方出现的那条调整。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具列的播放鍵會讓頁面自己走。捲動模式可以連續捲動，也可以每隔一段時間翻一頁；分頁模式一律整頁翻頁。速度在工具列上方出現的那條調整。"
+          }
+        }
+      }
+    },
+    "reader.settings.autoAdvance.pages" : {
+      "comment" : "Auto-advance in the scrolling reader: a page at a time, every few seconds.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page by page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整页翻页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整頁翻頁"
+          }
+        }
+      }
+    },
+    "reader.settings.autoAdvance.scroll" : {
+      "comment" : "Auto-advance in the scrolling reader: the page glides continuously.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glide"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连续滚动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連續捲動"
+          }
+        }
+      }
+    },
     "reader.settings.chinese" : {
       "comment" : "Chinese script conversion, section header and depth picker.",
       "extractionState" : "manual",
@@ -6612,6 +6804,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正體"
+          }
+        }
+      }
+    },
+    "reader.settings.controlsPause" : {
+      "comment" : "Reader settings toggle: bringing up the controls pauses auto-scroll, auto page turning and reading aloud.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pause while the controls are up"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调出工具栏时暂停"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "叫出工具列時暫停"
+          }
+        }
+      }
+    },
+    "reader.settings.controlsPause.footer" : {
+      "comment" : "Help for the pause-with-controls toggle, including what it costs.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-scroll, auto page turning and reading aloud pause while the controls are up, and carry on when they are put away. Something you paused yourself stays paused. With this off, you can change the speed while the page is still moving."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具栏出现时，自动滚动、自动翻页与朗读会暂停，收起后继续。你自己按的暂停不会被继续。关闭时，可以边看页面移动边调速度。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具列出現時，自動捲動、自動翻頁與朗讀會暫停，收起後繼續。你自己按的暫停不會被繼續。關閉時，可以邊看頁面移動邊調速度。"
           }
         }
       }

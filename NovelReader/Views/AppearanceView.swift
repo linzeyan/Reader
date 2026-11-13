@@ -242,6 +242,31 @@ struct ReadingAppearanceSections: View {
         }
 
         Section {
+            // Text only: a comic glides, and the paginated reader has nothing but pages.
+            if subject != .comic {
+                Picker("reader.settings.autoAdvance", selection: $settings.autoAdvance) {
+                    ForEach(ReaderSettings.AutoAdvance.allCases) { advance in
+                        Text(advance.nameKey).tag(advance)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("reader.settings.autoAdvance")
+            }
+            // What it costs is in the help: with it on, the speed is set over a page that
+            // has stopped — see `ReaderSettings.controlsPause`.
+            Toggle(isOn: $settings.controlsPause) {
+                HelpLabel(
+                    "reader.settings.controlsPause", help: "reader.settings.controlsPause.footer"
+                )
+            }
+            .accessibilityIdentifier("reader.settings.controlsPause")
+        } header: {
+            // Named, for the reason the mode picker's section is: a segmented picker
+            // swallows its own label.
+            HelpLabel("reader.settings.autoAdvance", help: "reader.settings.autoAdvance.footer")
+        }
+
+        Section {
             // The toggle only records the answer; the screens that read do the holding, in
             // `ScreenWake`. Applying it here as well left the flag set from Settings with
             // no reader open — the shelf, the search tab and this panel itself then stayed
